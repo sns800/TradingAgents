@@ -1,13 +1,23 @@
-"""Polymarket prediction-market vendor.
+# ============================================================================
+# [모듈 개요 - 초보자용]
+# 이 파일은 폴리마켓(Polymarket, 예측 시장 플랫폼)에서 미래 이벤트에 대한
+# 시장 내재 확률(market-implied probability)을 가져오는 모듈입니다.
+# 예측 시장이란 "연준이 금리를 내릴까?" 같은 사건에 사람들이 돈을 걸어
+# 형성된 가격이 곧 그 사건의 발생 확률이 되는 시장입니다.
+# TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)에서 뉴스 분석가
+# 에이전트가 거시 이벤트 전망을 참고하는 데이터 소스로 사용합니다.
+# ============================================================================
 
-Surfaces live, market-implied probabilities for forward-looking events (Fed
-decisions, recession, elections, geopolitics, crypto) to the news analyst, as a
-complement to news (what happened) and FRED macro data (where things stand):
-what the crowd actually prices to happen next.
+"""Polymarket 예측 시장(prediction-market) 벤더.
 
-Uses Polymarket's public Gamma API (https://gamma-api.polymarket.com) — no key,
-no auth. Each market's ``outcomePrices`` are the implied probabilities of its
-outcomes (a "Yes" at 0.76 means the market prices a 76% chance).
+미래 지향 이벤트(연준(Fed) 결정, 경기 침체, 선거, 지정학, 암호화폐)에 대한
+실시간 시장 내재 확률을 뉴스 분석가에게 제공합니다. 뉴스(무슨 일이
+일어났는가), FRED 거시 데이터(현재 상황이 어떤가)를 보완하여,
+군중이 실제로 다음에 일어난다고 가격에 반영한 것을 보여줍니다.
+
+Polymarket의 공개 Gamma API(https://gamma-api.polymarket.com)를 사용합니다 —
+키도 인증도 필요 없습니다. 각 시장의 ``outcomePrices``는 결과(outcome)별
+내재 확률입니다("Yes"가 0.76이면 시장이 76% 확률로 가격을 매겼다는 뜻).
 """
 import json
 import logging
@@ -19,10 +29,10 @@ logger = logging.getLogger(__name__)
 
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 
-# Network timeout (seconds), consistent with the other vendors.
+# 네트워크 타임아웃(초). 다른 벤더들과 일관되게 맞춘 값.
 REQUEST_TIMEOUT = 30
 
-# Default number of markets to return, ranked by traded volume.
+# 반환할 기본 시장 개수. 거래량(traded volume) 순으로 순위를 매긴다.
 DEFAULT_LIMIT = 6
 
 
@@ -35,7 +45,7 @@ def _request(path: str, params: dict) -> dict:
 
 
 def _parse_json_list(value) -> list:
-    """Gamma encodes ``outcomes``/``outcomePrices`` as JSON-string arrays."""
+    """Gamma는 ``outcomes``/``outcomePrices``를 JSON 문자열 배열로 인코딩한다."""
     if isinstance(value, list):
         return value
     try:
@@ -45,11 +55,11 @@ def _parse_json_list(value) -> list:
 
 
 def _is_forward_looking(market: dict, now: datetime) -> bool:
-    """Keep only open markets that resolve in the future.
+    """미래에 결판나는(resolve) 열린 시장만 남긴다.
 
-    ``closed`` is the reliable resolved flag (``active`` stays True even for
-    settled markets), and a past ``endDate`` means the event already resolved —
-    either way it is not a forward-looking signal.
+    ``closed``가 신뢰할 수 있는 '결판남' 플래그입니다(``active``는 이미
+    정산된 시장에서도 True로 남음). 그리고 ``endDate``가 과거라면 이벤트가
+    이미 결판난 것입니다 — 어느 쪽이든 미래 지향 신호가 아닙니다.
     """
     if market.get("closed"):
         return False
@@ -66,18 +76,17 @@ def _is_forward_looking(market: dict, now: datetime) -> bool:
 
 
 def get_prediction_markets(topic: str, limit: int | None = None) -> str:
-    """Return live prediction-market probabilities for an event topic.
+    """이벤트 주제에 대한 실시간 예측 시장 확률을 반환한다.
 
     Args:
-        topic: Event keyword(s), e.g. "Fed rate cut", "recession 2026",
-            "US election", or a sector/company event.
-        limit: Max markets to return (ranked by traded volume); ``None`` uses
-            DEFAULT_LIMIT.
+        topic: 이벤트 키워드. 예: "Fed rate cut", "recession 2026",
+            "US election", 또는 섹터/기업 이벤트.
+        limit: 반환할 최대 시장 수(거래량 순 정렬); ``None``이면
+            DEFAULT_LIMIT을 사용.
 
     Returns:
-        A markdown report of the most-traded open markets matching the topic,
-        each with its implied probability, traded volume, resolution date, and
-        recent (1-week) move.
+        주제와 일치하는, 거래량이 가장 많은 열린 시장들의 마크다운 보고서.
+        각 시장에 내재 확률, 거래량, 결판 날짜, 최근(1주) 변동폭이 담긴다.
     """
     if limit is None:
         limit = DEFAULT_LIMIT
@@ -126,6 +135,7 @@ def get_prediction_markets(topic: str, limit: int | None = None) -> str:
         volume = m.get("volumeNum") or 0
         end_date = (m.get("endDate") or "")[:10]
         wk = m.get("oneWeekPriceChange")
+        # 1주간 확률 변동을 퍼센트포인트(pp)로 표기한다.
         wk_str = (
             f", 1-week {wk * 100:+.1f}pp"
             if isinstance(wk, (int, float)) and wk

@@ -1,4 +1,7 @@
-"""Test checkpoint resume: crash mid-analysis, re-run resumes from last node."""
+# 이 파일은 체크포인트(checkpoint) 저장·재개 기능을 검증하는 테스트 모음입니다.
+# 분석 도중 프로그램이 중단(crash)되어도, 다시 실행하면 마지막으로 완료된
+# 노드부터 이어서 진행되는지 확인합니다.
+"""체크포인트 재개(resume) 테스트: 분석 도중 중단 후 재실행 시 마지막 노드부터 이어서 실행."""
 
 import tempfile
 import unittest
@@ -14,7 +17,7 @@ from tradingagents.graph.checkpointer import (
     thread_id,
 )
 
-# Mutable flag to simulate crash on first run
+# 첫 실행에서 중단(crash)을 흉내 내기 위한 가변 플래그
 _should_crash = False
 
 
@@ -49,41 +52,41 @@ class TestCheckpointResume(unittest.TestCase):
         self.date = "2026-04-20"
 
     def test_crash_and_resume(self):
-        """Crash at 'trader' node, then resume from checkpoint."""
+        """'trader' 노드에서 중단된 뒤 체크포인트에서 이어서 실행되는지 검증하는 테스트."""
         global _should_crash
         builder = _build_graph()
         tid = thread_id(self.ticker, self.date)
         cfg = {"configurable": {"thread_id": tid}}
 
-        # Run 1: crash at trader node
+        # 1차 실행: trader 노드에서 중단 발생
         _should_crash = True
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
             graph = builder.compile(checkpointer=saver)
             with self.assertRaises(RuntimeError):
                 graph.invoke({"count": 0}, config=cfg)
 
-        # Checkpoint should exist at step 1 (analyst completed)
+        # 스텝 1(analyst 완료 시점)의 체크포인트가 존재해야 함
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
         step = checkpoint_step(self.tmpdir, self.ticker, self.date)
         self.assertEqual(step, 1)
 
-        # Run 2: resume — trader succeeds this time
+        # 2차 실행: 재개 — 이번에는 trader가 성공
         _should_crash = False
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
             graph = builder.compile(checkpointer=saver)
             result = graph.invoke(None, config=cfg)
 
-        # analyst added 1, trader added 10 → 11
+        # analyst가 1을 더하고 trader가 10을 더함 → 11
         self.assertEqual(result["count"], 11)
 
     def test_clear_checkpoint_allows_fresh_start(self):
-        """After clearing, the graph starts from scratch."""
+        """체크포인트를 삭제하면 그래프가 처음부터 새로 시작하는지 검증하는 테스트."""
         global _should_crash
         builder = _build_graph()
         tid = thread_id(self.ticker, self.date)
         cfg = {"configurable": {"thread_id": tid}}
 
-        # Create a checkpoint by crashing
+        # 중단을 일으켜 체크포인트를 생성
         _should_crash = True
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
             graph = builder.compile(checkpointer=saver)
@@ -92,11 +95,11 @@ class TestCheckpointResume(unittest.TestCase):
 
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
 
-        # Clear it
+        # 체크포인트 삭제
         clear_checkpoint(self.tmpdir, self.ticker, self.date)
         self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date))
 
-        # Fresh run succeeds from scratch
+        # 처음부터 새로 실행하면 성공함
         _should_crash = False
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
             graph = builder.compile(checkpointer=saver)
@@ -106,12 +109,12 @@ class TestCheckpointResume(unittest.TestCase):
 
 
     def test_different_date_starts_fresh(self):
-        """A different date must NOT resume from an existing checkpoint."""
+        """다른 날짜로 실행하면 기존 체크포인트에서 재개하지 않고 새로 시작하는지 검증하는 테스트."""
         global _should_crash
         builder = _build_graph()
         date2 = "2026-04-21"
 
-        # Run with date1 — crash to leave a checkpoint
+        # date1로 실행 — 중단을 일으켜 체크포인트를 남김
         _should_crash = True
         tid1 = thread_id(self.ticker, self.date)
         with get_checkpointer(self.tmpdir, self.ticker) as saver:
@@ -121,10 +124,10 @@ class TestCheckpointResume(unittest.TestCase):
 
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
 
-        # date2 should have no checkpoint
+        # date2에는 체크포인트가 없어야 함
         self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, date2))
 
-        # Run with date2 — should start fresh and succeed
+        # date2로 실행 — 처음부터 시작해 성공해야 함
         _should_crash = False
         tid2 = thread_id(self.ticker, date2)
         self.assertNotEqual(tid1, tid2)
@@ -133,16 +136,16 @@ class TestCheckpointResume(unittest.TestCase):
             graph = builder.compile(checkpointer=saver)
             result = graph.invoke({"count": 0}, config={"configurable": {"thread_id": tid2}})
 
-        # Fresh run: analyst +1, trader +10 = 11
+        # 새 실행: analyst +1, trader +10 = 11
         self.assertEqual(result["count"], 11)
 
-        # Original date checkpoint still exists (untouched)
+        # 원래 날짜의 체크포인트는 손대지 않은 채 그대로 존재함
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date))
 
 
 class TestCheckpointSignature(unittest.TestCase):
-    """A different graph shape (analyst selection / depth / asset mode) must not
-    resume the previous run's checkpoint (#1089)."""
+    """그래프 형태(애널리스트 선택 / 토론 깊이 / 자산 모드)가 달라지면 이전 실행의
+    체크포인트에서 재개하면 안 됨을 검증하는 테스트 묶음 (#1089)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -150,26 +153,29 @@ class TestCheckpointSignature(unittest.TestCase):
         self.date = "2026-04-20"
 
     def test_empty_signature_is_legacy_id(self):
+        """빈 시그니처(signature)는 기존(legacy) 스레드 ID와 동일함을 검증하는 테스트."""
         self.assertEqual(
             thread_id(self.ticker, self.date),
             thread_id(self.ticker, self.date, ""),
         )
 
     def test_signature_changes_thread_id(self):
+        """시그니처가 다르면 스레드 ID도 달라짐을 검증하는 테스트."""
         legacy = thread_id(self.ticker, self.date)
         sig_a = thread_id(self.ticker, self.date, "analysts=market,news|asset=stock")
         sig_b = thread_id(self.ticker, self.date, "analysts=market|asset=stock")
-        self.assertNotEqual(sig_a, sig_b)          # different graph shapes differ
-        self.assertNotEqual(legacy, sig_a)         # signature-keyed differs from legacy
-        self.assertEqual(                          # same inputs are stable
+        self.assertNotEqual(sig_a, sig_b)          # 그래프 형태가 다르면 ID도 다름
+        self.assertNotEqual(legacy, sig_a)         # 시그니처 기반 ID는 기존 ID와 다름
+        self.assertEqual(                          # 동일한 입력이면 항상 같은 값
             sig_a, thread_id(self.ticker, self.date, "analysts=market,news|asset=stock")
         )
 
     def test_different_signature_starts_fresh(self):
+        """시그니처가 달라지면 기존 체크포인트를 무시하고 새로 시작하는지 검증하는 테스트."""
         global _should_crash
         builder = _build_graph()
         sig1 = "analysts=market,news,fundamentals|asset=stock"
-        sig2 = "analysts=market|asset=stock"       # dropped analysts -> different graph
+        sig2 = "analysts=market|asset=stock"       # 애널리스트를 줄임 -> 다른 그래프 형태
 
         _should_crash = True
         tid1 = thread_id(self.ticker, self.date, sig1)
@@ -179,7 +185,7 @@ class TestCheckpointSignature(unittest.TestCase):
                 graph.invoke({"count": 0}, config={"configurable": {"thread_id": tid1}})
 
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, sig1))
-        # A different graph shape has no checkpoint to resume from.
+        # 다른 그래프 형태에는 재개할 체크포인트가 없어야 함.
         self.assertFalse(has_checkpoint(self.tmpdir, self.ticker, self.date, sig2))
 
         _should_crash = False
@@ -189,27 +195,28 @@ class TestCheckpointSignature(unittest.TestCase):
             graph = builder.compile(checkpointer=saver)
             result = graph.invoke({"count": 0}, config={"configurable": {"thread_id": tid2}})
         self.assertEqual(result["count"], 11)
-        # sig1's checkpoint remains untouched.
+        # sig1의 체크포인트는 손대지 않은 채 그대로 남아 있음.
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.date, sig1))
 
     def test_run_signature_captures_graph_shape(self):
+        """실행 시그니처가 그래프 형태(자산 모드·애널리스트·토론 깊이)를 모두 반영하는지 검증하는 테스트."""
         from tradingagents.graph.trading_graph import TradingAgentsGraph
 
-        # Build a bare instance to exercise the pure helper without heavy __init__.
+        # 무거운 __init__ 없이 순수 헬퍼만 실행하기 위해 빈 인스턴스를 직접 생성합니다.
         g = object.__new__(TradingAgentsGraph)
         g.selected_analysts = ("market", "news")
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         base = g._run_signature("stock")
 
-        self.assertNotEqual(base, g._run_signature("crypto"))     # asset mode
+        self.assertNotEqual(base, g._run_signature("crypto"))     # 자산 모드(asset mode)
         g.selected_analysts = ("market",)
-        self.assertNotEqual(base, g._run_signature("stock"))      # analyst selection
+        self.assertNotEqual(base, g._run_signature("stock"))      # 애널리스트 선택
         g.selected_analysts = ("market", "news")
         g.config = {"max_debate_rounds": 3, "max_risk_discuss_rounds": 1}
-        self.assertNotEqual(base, g._run_signature("stock"))      # debate depth
+        self.assertNotEqual(base, g._run_signature("stock"))      # 토론(debate) 깊이
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 5}
-        self.assertNotEqual(base, g._run_signature("stock"))      # risk depth
-        # Stable for identical inputs.
+        self.assertNotEqual(base, g._run_signature("stock"))      # 리스크 논의 깊이
+        # 동일한 입력에는 항상 같은 값이 나와야 함.
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         self.assertEqual(base, g._run_signature("stock"))
 

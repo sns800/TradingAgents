@@ -1,4 +1,7 @@
-"""Tests for the canonical provider->env-var mapping and the CLI key-prompt helper."""
+# 이 파일은 LLM 제공자(provider) 이름을 API 키 환경 변수 이름으로 매핑하는
+# 표준 테이블과, 키가 없을 때 CLI에서 사용자에게 키 입력을 요청하는
+# ensure_api_key 헬퍼의 동작을 검증하는 테스트 모음입니다.
+"""제공자(provider)->환경 변수 표준 매핑과 CLI 키 입력 프롬프트 헬퍼 테스트."""
 
 from __future__ import annotations
 
@@ -9,14 +12,17 @@ import pytest
 
 from tradingagents.llm_clients.api_key_env import PROVIDER_API_KEY_ENV, get_api_key_env
 
-# ---- Mapping coverage -----------------------------------------------------
+# ---- 매핑 커버리지 검증 -----------------------------------------------------
 
 
 def test_every_select_llm_provider_choice_has_an_entry():
-    """select_llm_provider() must not present a provider the mapping doesn't know about."""
-    # Mirrors the dropdown order in cli/utils.select_llm_provider so the two
-    # stay in lockstep. Region-specific keys (qwen-cn / minimax-cn / glm-cn)
-    # are reached via the secondary region prompt, so they must also be present.
+    """CLI 선택지에 나오는 모든 제공자가 매핑 테이블에 존재하는지 검증하는 테스트.
+
+    select_llm_provider()가 매핑이 모르는 제공자를 화면에 보여 주면 안 됩니다.
+    """
+    # cli/utils.select_llm_provider의 드롭다운 순서를 그대로 반영하여 두 목록이
+    # 항상 일치(lockstep)하도록 합니다. 지역별 키(qwen-cn / minimax-cn / glm-cn)는
+    # 2차 지역 선택 프롬프트를 통해 도달하므로 이들도 반드시 포함되어야 합니다.
     expected = {
         "openai", "google", "anthropic", "xai", "deepseek",
         "qwen", "qwen-cn",
@@ -46,28 +52,32 @@ def test_every_select_llm_provider_choice_has_an_entry():
     ],
 )
 def test_known_providers_resolve(provider, env_var):
+    """알려진 각 제공자 이름이 올바른 환경 변수 이름으로 변환되는지 검증하는 테스트."""
     assert get_api_key_env(provider) == env_var
 
 
 def test_ollama_has_no_key():
+    """로컬 실행형인 ollama는 API 키가 필요 없음을 검증하는 테스트."""
     assert get_api_key_env("ollama") is None
 
 
 def test_unknown_provider_returns_none():
+    """알 수 없는 제공자 이름에는 None을 반환하는지 검증하는 테스트."""
     assert get_api_key_env("not-a-real-provider") is None
 
 
 def test_case_insensitive_lookup():
+    """제공자 이름 조회가 대소문자를 구분하지 않는지 검증하는 테스트."""
     assert get_api_key_env("OpenAI") == "OPENAI_API_KEY"
     assert get_api_key_env("QWEN-CN") == "DASHSCOPE_CN_API_KEY"
 
 
-# ---- ensure_api_key behavior ---------------------------------------------
+# ---- ensure_api_key 동작 검증 ---------------------------------------------
 
 
 @pytest.fixture
 def cli_utils(monkeypatch):
-    """Import cli.utils with a fresh environment so module-level state is consistent."""
+    """모듈 수준 상태가 일관되도록 cli.utils를 새로 다시 임포트(reload)하는 픽스처."""
     import importlib
 
     import cli.utils as cli_utils_module
@@ -75,13 +85,15 @@ def cli_utils(monkeypatch):
 
 
 def test_ensure_api_key_returns_existing(monkeypatch, cli_utils):
+    """환경 변수에 키가 이미 있으면 프롬프트 없이 그 값을 반환하는지 검증하는 테스트."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-already-set")
     result = cli_utils.ensure_api_key("openai")
     assert result == "sk-already-set"
 
 
 def test_ensure_api_key_no_op_for_ollama(monkeypatch, cli_utils):
-    # Even with no env var set, ollama should not prompt and should return None.
+    """ollama는 키 입력을 요구하지 않고 None을 반환하는지 검증하는 테스트."""
+    # 환경 변수가 전혀 없어도 ollama는 프롬프트를 띄우지 않고 None을 반환해야 합니다.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with patch.object(cli_utils, "questionary") as mock_q:
         result = cli_utils.ensure_api_key("ollama")
@@ -90,6 +102,7 @@ def test_ensure_api_key_no_op_for_ollama(monkeypatch, cli_utils):
 
 
 def test_ensure_api_key_unknown_provider_no_prompt(monkeypatch, cli_utils):
+    """알 수 없는 제공자에는 프롬프트를 띄우지 않고 None을 반환하는지 검증하는 테스트."""
     with patch.object(cli_utils, "questionary") as mock_q:
         result = cli_utils.ensure_api_key("totally-fake-provider")
     assert result is None
@@ -97,7 +110,7 @@ def test_ensure_api_key_unknown_provider_no_prompt(monkeypatch, cli_utils):
 
 
 def test_ensure_api_key_prompts_and_writes_to_env(monkeypatch, tmp_path, cli_utils):
-    """When key is missing, user-pasted value must be written to .env AND os.environ."""
+    """키가 없을 때 사용자가 입력한 값이 .env 파일과 os.environ 양쪽에 기록되는지 검증하는 테스트."""
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -114,7 +127,7 @@ def test_ensure_api_key_prompts_and_writes_to_env(monkeypatch, tmp_path, cli_uti
 
 
 def test_ensure_api_key_user_cancels_returns_none(monkeypatch, tmp_path, cli_utils):
-    """Empty prompt response (user cancelled) must not write to .env."""
+    """사용자가 입력을 취소하면(빈 응답) .env에 아무것도 쓰지 않는지 검증하는 테스트."""
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
 
@@ -124,15 +137,15 @@ def test_ensure_api_key_user_cancels_returns_none(monkeypatch, tmp_path, cli_uti
 
     assert result is None
     assert "XAI_API_KEY" not in os.environ
-    # .env may or may not exist depending on find_dotenv's walk, but if it
-    # does it must not contain the key.
+    # find_dotenv의 디렉터리 탐색 결과에 따라 .env가 있을 수도 없을 수도 있지만,
+    # 존재한다면 해당 키가 들어 있으면 안 됩니다.
     env_file = tmp_path / ".env"
     if env_file.exists():
         assert "XAI_API_KEY" not in env_file.read_text()
 
 
 def test_ensure_api_key_updates_existing_env_file(monkeypatch, tmp_path, cli_utils):
-    """An existing .env with other keys must be preserved on writeback."""
+    """기존 .env에 있던 다른 키들이 새 키 기록 시에도 보존되는지 검증하는 테스트."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
     env_file = tmp_path / ".env"

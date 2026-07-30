@@ -1,3 +1,11 @@
+# =============================================================================
+# [모듈 개요 — 초보자용]
+# 이 파일은 기술적 지표(technical indicator, 예: RSI, MACD, 이동평균) 분석 리포트를
+# 가져오는 LangChain 툴(tool)을 정의합니다. TradingAgents 시스템에서
+# 시장 분석가(Market Analyst) 에이전트가 차트 분석에 사용하며, 실제 계산/조회는
+# route_to_vendor()가 설정된 technical_indicators 공급자(vendor)로 라우팅합니다.
+# =============================================================================
+
 from typing import Annotated
 
 from langchain_core.tools import tool
@@ -5,6 +13,9 @@ from langchain_core.tools import tool
 from tradingagents.dataflows.interface import route_to_vendor
 
 
+# [한국어 설명] 지정한 티커의 기술적 지표 1개를 조회하는 툴. LLM이 실수로 여러 지표를
+# 쉼표로 묶어 전달하는 경우를 대비해 내부에서 분리 처리한다.
+# 아래 docstring은 LLM에게 툴 설명으로 전달되므로 영어 원문을 유지한다.
 @tool
 def get_indicators(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -23,8 +34,8 @@ def get_indicators(
     Returns:
         str: A formatted dataframe containing the technical indicators for the specified ticker symbol and indicator.
     """
-    # LLMs sometimes pass multiple indicators as a comma-separated string;
-    # split and process each individually.
+    # LLM이 가끔 여러 지표를 쉼표로 구분한 문자열 하나로 전달하므로,
+    # 분리해서 각 지표를 개별적으로 처리한다.
     indicators = [i.strip().lower() for i in indicator.split(",") if i.strip()]
     results = []
     for ind in indicators:

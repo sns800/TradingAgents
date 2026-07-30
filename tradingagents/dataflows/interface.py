@@ -1,3 +1,13 @@
+# ============================================================================
+# [모듈 개요 - 초보자용]
+# 이 파일은 데이터 요청을 알맞은 벤더(vendor, 데이터 제공사)로 연결해 주는
+# "벤더 라우팅(routing)" 계층입니다. 예컨대 에이전트가 "주가 데이터를 달라"고
+# 하면, 설정에 따라 야후 파이낸스(yfinance)나 알파 밴티지(alpha_vantage) 중
+# 어느 구현을 호출할지 결정하고, 실패 시 다음 벤더로 넘어가는 폴백(fallback)
+# 까지 처리합니다. TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)의
+# 모든 데이터 도구 호출이 이 파일의 route_to_vendor()를 거칩니다.
+# ============================================================================
+
 import logging
 
 from .alpha_vantage import (
@@ -32,9 +42,10 @@ from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 
 logger = logging.getLogger(__name__)
 
-# Tools organized by category
+# 카테고리별로 정리한 도구 목록
 TOOLS_CATEGORIES = {
     "core_stock_apis": {
+        # OHLCV = 시가(Open)·고가(High)·저가(Low)·종가(Close)·거래량(Volume)
         "description": "OHLCV stock price data",
         "tools": [
             "get_stock_data"
@@ -84,26 +95,27 @@ VENDOR_LIST = [
     "alpha_vantage",
 ]
 
-# Optional enrichment categories. These add macro/event context to the news
-# analyst but are not core to a decision, so a vendor failure here degrades to a
-# sentinel instead of aborting the run (a bad LLM-supplied indicator, a missing
-# key, or a network blip should not crash an analysis over flavour data). Core
-# categories (prices, fundamentals, news) still raise so a broken primary is loud.
+# 선택적(optional) 부가 정보 카테고리. 뉴스 분석가에게 거시/이벤트 맥락을
+# 더해 주지만 의사결정의 핵심은 아니므로, 여기서 벤더가 실패하면 실행을
+# 중단하는 대신 안내 문자열(sentinel)로 완화합니다(LLM이 잘못 넘긴 지표,
+# 누락된 키, 일시적 네트워크 문제 때문에 곁가지 데이터가 분석 전체를
+# 죽여서는 안 됩니다). 핵심 카테고리(가격, 재무, 뉴스)는 여전히 예외를
+# 던져 주요 소스 고장이 크게 드러나게 합니다.
 OPTIONAL_CATEGORIES = {"macro_data", "prediction_markets"}
 
-# Mapping of methods to their vendor-specific implementations
+# 각 메서드를 벤더별 구현에 매핑하는 테이블
 VENDOR_METHODS = {
-    # core_stock_apis
+    # core_stock_apis (핵심 주가 API)
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
         "yfinance": get_YFin_data_online,
     },
-    # technical_indicators
+    # technical_indicators (기술적 지표)
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
-    # fundamental_data
+    # fundamental_data (기업 재무 데이터)
     "get_fundamentals": {
         "alpha_vantage": get_alpha_vantage_fundamentals,
         "yfinance": get_yfinance_fundamentals,
@@ -120,7 +132,7 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
-    # news_data
+    # news_data (뉴스 데이터)
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
         "yfinance": get_news_yfinance,
@@ -133,40 +145,40 @@ VENDOR_METHODS = {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
     },
-    # macro_data
+    # macro_data (거시경제 데이터)
     "get_macro_indicators": {
         "fred": get_fred_macro_data,
     },
-    # prediction_markets
+    # prediction_markets (예측 시장)
     "get_prediction_markets": {
         "polymarket": get_polymarket_prediction_markets,
     },
 }
 
 def get_category_for_method(method: str) -> str:
-    """Get the category that contains the specified method."""
+    """지정한 메서드가 속한 카테고리를 반환한다."""
     for category, info in TOOLS_CATEGORIES.items():
         if method in info["tools"]:
             return category
     raise ValueError(f"Method '{method}' not found in any category")
 
 def get_vendor(category: str, method: str = None) -> str:
-    """Get the configured vendor for a data category or specific tool method.
-    Tool-level configuration takes precedence over category-level.
+    """데이터 카테고리 또는 특정 도구 메서드에 설정된 벤더를 반환한다.
+    도구 단위 설정이 카테고리 단위 설정보다 우선한다.
     """
     config = get_config()
 
-    # Check tool-level configuration first (if method provided)
+    # (method가 주어졌다면) 도구 단위 설정을 먼저 확인
     if method:
         tool_vendors = config.get("tool_vendors", {})
         if method in tool_vendors:
             return tool_vendors[method]
 
-    # Fall back to category-level configuration
+    # 없으면 카테고리 단위 설정으로 폴백(fallback)
     return config.get("data_vendors", {}).get(category, "default")
 
 def route_to_vendor(method: str, *args, **kwargs):
-    """Route method calls to appropriate vendor implementation with fallback support."""
+    """메서드 호출을 알맞은 벤더 구현으로 라우팅하고, 폴백을 지원한다."""
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]
@@ -176,11 +188,11 @@ def route_to_vendor(method: str, *args, **kwargs):
 
     all_available_vendors = list(VENDOR_METHODS[method].keys())
 
-    # The configured vendor list IS the chain: we do NOT silently fall back to
-    # vendors the user did not choose (#988/#289) — that returned data from an
-    # unexpected source and caused cross-vendor inconsistencies. For multi-vendor
-    # fallback, list them in order, e.g. data_vendors="yfinance,alpha_vantage".
-    # The "default" sentinel (no explicit config) uses all available vendors.
+    # 설정된 벤더 목록이 곧 폴백 체인(chain)입니다: 사용자가 선택하지 않은
+    # 벤더로 몰래 폴백하지 않습니다(#988/#289) — 그렇게 하면 예상치 못한
+    # 출처의 데이터가 반환되어 벤더 간 불일치를 일으켰습니다. 다중 벤더
+    # 폴백이 필요하면 순서대로 나열하세요. 예: data_vendors="yfinance,alpha_vantage".
+    # "default" 센티널(명시적 설정 없음)은 사용 가능한 모든 벤더를 씁니다.
     explicit = [v for v in primary_vendors if v and v != "default"]
     if explicit:
         vendor_chain = [v for v in explicit if v in VENDOR_METHODS[method]]
@@ -206,28 +218,28 @@ def route_to_vendor(method: str, *args, **kwargs):
         except VendorNotConfiguredError as e:
             logger.warning("Vendor %r not configured for %s; trying next vendor.", vendor, method)
             if first_error is None:
-                first_error = e  # Surface it if no other vendor can serve the call.
+                first_error = e  # 다른 어떤 벤더도 이 호출을 처리하지 못하면 이 오류를 드러낸다.
             continue
         except NoMarketDataError as e:
-            last_no_data = e  # No data here; another configured vendor may have it
+            last_no_data = e  # 이 벤더엔 데이터가 없음; 설정된 다른 벤더에는 있을 수도 있다
             continue
         except Exception as e:
-            # Don't let one vendor's failure crash the call when another can
-            # serve it, but never swallow silently: a broken primary must be
-            # visible in the logs (#989), not hidden behind a fallback's verdict.
+            # 다른 벤더가 처리할 수 있는데 한 벤더의 실패로 호출 전체가
+            # 죽지 않게 하되, 조용히 삼키지도 않습니다: 주요 소스 고장은
+            # 폴백의 결과 뒤에 숨겨지지 않고 로그에 보여야 합니다(#989).
             logger.warning("Vendor %r failed for %s: %s", vendor, method, e)
             if first_error is None:
                 first_error = e
             continue
 
-    # If any vendor reported "no data", the symbol is genuinely unavailable.
-    # Return one explicit, instructive sentinel rather than a vendor-specific
-    # empty string, so the agent reports "unavailable" instead of inventing a
-    # value. This takes precedence over incidental fallback errors.
+    # 어떤 벤더든 "데이터 없음"을 보고했다면 그 심볼은 정말로 조회 불가입니다.
+    # 벤더마다 다른 빈 문자열 대신, 명시적이고 지시적인 센티널(sentinel) 하나를
+    # 반환하여 에이전트가 값을 지어내지 않고 "이용 불가"라고 보고하게 합니다.
+    # 이 처리는 폴백 과정에서 우연히 발생한 오류보다 우선합니다.
     if last_no_data is not None:
         if first_error is not None:
-            # A vendor also hit a real error; surface it in logs so the no-data
-            # verdict can't hide a broken primary (network/auth/etc.).
+            # 어떤 벤더는 실제 오류도 냈습니다; 데이터-없음 결론이 주요 소스의
+            # 고장(네트워크/인증 등)을 가리지 못하도록 로그로 드러냅니다.
             logger.warning(
                 "Returning NO_DATA for %s, but a vendor errored earlier: %s",
                 method, first_error,
@@ -235,9 +247,9 @@ def route_to_vendor(method: str, *args, **kwargs):
         sym = last_no_data.symbol
         canonical = last_no_data.canonical
         resolved = "" if canonical == sym else f" (resolved to '{canonical}')"
-        # Surface the typed error's detail (e.g. "latest row is 2025-06-11 ...
-        # stale") so the agent sees the specific reason — invalid symbol, no
-        # coverage, or stale data — not just a generic "unavailable".
+        # 타입 있는 오류의 상세 내용(예: "latest row is 2025-06-11 ... stale")을
+        # 드러내어, 에이전트가 막연한 "이용 불가"가 아니라 구체적인 이유 —
+        # 잘못된 심볼, 커버리지 없음, 오래된(stale) 데이터 — 를 보게 합니다.
         reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
         return (
             f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
@@ -246,10 +258,10 @@ def route_to_vendor(method: str, *args, **kwargs):
             f"fabricate values — report that data is unavailable for this symbol."
         )
 
-    # No vendor returned data and none reported clean "no data" — surface the
-    # first real error (e.g. the primary vendor's network failure). Optional
-    # enrichment categories degrade to a sentinel instead, so flavour data can't
-    # abort the run.
+    # 데이터를 반환한 벤더도, 깨끗한 "데이터 없음"을 보고한 벤더도 없는 경우 —
+    # 첫 번째 실제 오류(예: 주요 벤더의 네트워크 실패)를 드러냅니다. 단,
+    # 선택적 부가 정보 카테고리는 센티널로 완화하여, 곁가지 데이터가 실행을
+    # 중단시키지 못하게 합니다.
     if first_error is not None:
         if category in OPTIONAL_CATEGORIES:
             logger.warning("Optional %s unavailable for %s: %s", category, method, first_error)

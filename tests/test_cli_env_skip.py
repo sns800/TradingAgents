@@ -1,8 +1,11 @@
-"""Tests for env-driven CLI behavior (#897, #873).
+# 이 파일은 환경 변수로 설정을 미리 지정했을 때 CLI가 해당 대화형 프롬프트를
+# 건너뛰고 그 값을 그대로 사용하는지 검증하는 테스트 모음입니다.
+"""환경 변수 기반 CLI 동작 테스트 (#897, #873).
 
-The config-layer override (TRADINGAGENTS_* -> DEFAULT_CONFIG) is covered by
-test_env_overrides.py. These tests cover the CLI layer: an env-configured
-provider/model/language must skip its interactive prompt and use the value.
+설정 계층의 오버라이드(TRADINGAGENTS_* -> DEFAULT_CONFIG)는
+test_env_overrides.py에서 다룹니다. 이 테스트들은 CLI 계층을 다룹니다:
+환경 변수로 설정된 제공자/모델/언어는 해당 대화형 프롬프트를 건너뛰고
+그 값을 사용해야 합니다.
 """
 
 import os
@@ -14,17 +17,22 @@ import pytest
 
 @pytest.mark.unit
 class TestProviderDefaultUrl(unittest.TestCase):
+    """제공자별 기본 백엔드 URL 조회 헬퍼를 검증하는 테스트 묶음."""
+
     def test_known_providers_resolve(self):
+        """알려진 제공자 이름이 올바른 기본 URL로 변환되는지 검증하는 테스트."""
         from cli.utils import provider_default_url
         self.assertEqual(provider_default_url("openai"), "https://api.openai.com/v1")
         self.assertEqual(provider_default_url("DeepSeek"), "https://api.deepseek.com")
-        self.assertIsNone(provider_default_url("google"))  # uses SDK default
+        self.assertIsNone(provider_default_url("google"))  # SDK 기본값을 사용함
 
     def test_unknown_provider_returns_none(self):
+        """알 수 없는 제공자에는 None을 반환하는지 검증하는 테스트."""
         from cli.utils import provider_default_url
         self.assertIsNone(provider_default_url("not-a-provider"))
 
     def test_ollama_honors_base_url_env(self):
+        """ollama가 OLLAMA_BASE_URL 환경 변수를 존중하는지 검증하는 테스트."""
         from cli.utils import provider_default_url
         with mock.patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://host:1234/v1"}):
             self.assertEqual(provider_default_url("ollama"), "http://host:1234/v1")
@@ -32,7 +40,10 @@ class TestProviderDefaultUrl(unittest.TestCase):
 
 @pytest.mark.unit
 class TestCliSkipsPromptsFromEnv(unittest.TestCase):
+    """환경 변수로 LLM 설정이 지정되면 관련 프롬프트를 건너뛰는지 검증하는 테스트 묶음."""
+
     def test_env_config_skips_llm_prompts(self):
+        """환경 변수로 지정된 제공자/모델/언어에 대해 LLM 선택 프롬프트가 뜨지 않는지 검증하는 테스트."""
         import cli.main as m
 
         env = {
@@ -66,15 +77,15 @@ class TestCliSkipsPromptsFromEnv(unittest.TestCase):
              mock.patch.object(m, "select_deep_thinking_agent") as prompt_deep:
             sel = m.get_user_selections()
 
-        # None of the LLM selection prompts should have been shown.
+        # LLM 선택 프롬프트가 하나도 표시되지 않았어야 합니다.
         prompt_provider.assert_not_called()
         prompt_lang.assert_not_called()
         prompt_quick.assert_not_called()
         prompt_deep.assert_not_called()
-        # API key is still verified for the env-configured provider.
+        # 환경 변수로 설정된 제공자라도 API 키 확인은 여전히 수행됩니다.
         ensure_key.assert_called_once()
 
-        # The env values flow into the returned selections.
+        # 환경 변수 값이 반환된 선택값에 그대로 흘러 들어갑니다.
         self.assertEqual(sel["llm_provider"], "openai")
         self.assertEqual(sel["backend_url"], "https://opencode.ai/zen/go/v1")
         self.assertEqual(sel["shallow_thinker"], "deepseek-v4-pro")
@@ -84,7 +95,10 @@ class TestCliSkipsPromptsFromEnv(unittest.TestCase):
 
 @pytest.mark.unit
 class TestResearchDepthSkippedFromEnv(unittest.TestCase):
+    """라운드 수 환경 변수가 모두 지정되면 리서치 깊이 프롬프트를 건너뛰는지 검증하는 테스트 묶음."""
+
     def test_both_round_envs_skip_depth_prompt(self):
+        """두 라운드 환경 변수가 모두 설정되면 깊이 선택 프롬프트가 생략되는지 검증하는 테스트."""
         import cli.main as m
 
         env = {
@@ -110,14 +124,17 @@ class TestResearchDepthSkippedFromEnv(unittest.TestCase):
              mock.patch.object(m, "ask_openai_reasoning_effort", return_value=None):
             sel = m.get_user_selections()
 
-        # The research-depth prompt is skipped; the value comes from the env config.
+        # 리서치 깊이 프롬프트는 생략되고, 값은 환경 변수 설정에서 옵니다.
         prompt_depth.assert_not_called()
         self.assertEqual(sel["research_depth"], 2)
 
 
 @pytest.mark.unit
 class TestReasoningEffortSkippedFromEnv(unittest.TestCase):
+    """추론 강도(reasoning effort) 환경 변수가 있으면 관련 프롬프트를 건너뛰는지 검증하는 테스트 묶음."""
+
     def test_effort_env_skips_step8_prompt(self):
+        """effort 환경 변수가 설정되면 8단계 프롬프트가 생략되는지 검증하는 테스트."""
         import cli.main as m
 
         env = {"TRADINGAGENTS_OPENAI_REASONING_EFFORT": "high"}
@@ -140,7 +157,7 @@ class TestReasoningEffortSkippedFromEnv(unittest.TestCase):
              mock.patch.object(m, "ask_openai_reasoning_effort") as prompt_effort:
             sel = m.get_user_selections()
 
-        # The reasoning-effort prompt is skipped; the value comes from env config.
+        # 추론 강도 프롬프트는 생략되고, 값은 환경 변수 설정에서 옵니다.
         prompt_effort.assert_not_called()
         self.assertEqual(sel["openai_reasoning_effort"], "high")
 

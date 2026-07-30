@@ -1,3 +1,13 @@
+# =============================================================================
+# [모듈 개요 — 초보자용]
+# 이 파일은 TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)의 공용
+# 유틸리티 모음입니다. 두 가지 역할을 합니다:
+# 1) 각 데이터 툴 파일에 흩어져 있는 LangChain 툴들을 한곳에서 재수출(re-export)해서
+#    에이전트와 그래프가 모두 이 모듈에서 import하도록 하는 공개 창구 역할.
+# 2) 분석 대상 종목의 정체성(instrument identity) 확인, 출력 언어 지시문,
+#    메시지 정리(delete) 헬퍼 등 에이전트 실행에 필요한 보조 함수 제공.
+# =============================================================================
+
 import functools
 import logging
 from collections.abc import Mapping
@@ -6,7 +16,7 @@ from typing import Any
 import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
 
-# Import tools from separate utility files
+# 별도 유틸리티 파일들에서 툴을 가져온다(재수출용)
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
 from tradingagents.agents.utils.fundamental_data_tools import (
     get_balance_sheet,
@@ -24,8 +34,8 @@ from tradingagents.agents.utils.news_data_tools import (
 from tradingagents.agents.utils.prediction_markets_tools import get_prediction_markets
 from tradingagents.agents.utils.technical_indicators_tools import get_indicators
 
-# Public surface: the data tools are imported here so agents and the graph
-# import them from one place, plus the instrument/language helpers defined below.
+# 공개 인터페이스(public surface): 에이전트와 그래프가 데이터 툴을 한곳에서
+# import할 수 있도록 여기에 모아두고, 아래에 정의된 종목 정보/언어 헬퍼도 포함한다.
 __all__ = [
     "get_stock_data",
     "get_indicators",
@@ -50,13 +60,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_language_instruction() -> str:
-    """Return a prompt instruction for the configured output language.
+    """설정된 출력 언어에 맞는 프롬프트 지시문을 반환한다.
 
-    Returns empty string when English (default), so no extra tokens are used.
-    Applied to every agent whose output reaches the saved report —
-    analysts, researchers, debaters, research manager, trader, and
-    portfolio manager — so a non-English run produces a fully localized
-    report rather than a mix of languages.
+    영어(기본값)일 때는 빈 문자열을 반환해 불필요한 토큰을 쓰지 않는다.
+    저장되는 리포트에 출력이 반영되는 모든 에이전트(분석가, 리서처, 토론자,
+    리서치 매니저, 트레이더, 포트폴리오 매니저)에 적용되어, 영어가 아닌
+    언어로 실행할 때 언어가 뒤섞이지 않고 완전히 현지화된 리포트가 나온다.
     """
     from tradingagents.dataflows.config import get_config
     lang = get_config().get("output_language", "English")
@@ -66,7 +75,7 @@ def get_language_instruction() -> str:
 
 
 def _clean_identity_value(value: Any) -> str | None:
-    """Return a trimmed string, or None for empty / placeholder-ish values."""
+    """공백을 제거한 문자열을 반환하고, 빈 값이나 자리표시자(placeholder)성 값이면 None을 반환한다."""
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
@@ -77,27 +86,27 @@ def _clean_identity_value(value: Any) -> str | None:
 
 @functools.lru_cache(maxsize=256)
 def resolve_instrument_identity(ticker: str) -> dict:
-    """Resolve deterministic identity metadata (company name, sector, …) for a ticker.
+    """티커(ticker)의 결정론적 정체성 메타데이터(회사명, 섹터 등)를 확인한다.
 
-    This exists to stop the pipeline from hallucinating a *different* company
-    when a chart pattern suggests a different industry than the real one
-    (#814): without a ground-truth name, the market analyst would pattern-match
-    the price action to a narrative and invent an identity that then cascaded
-    through every downstream agent.
+    이 함수는 차트 패턴이 실제와 다른 업종을 암시할 때 파이프라인이 *다른*
+    회사를 지어내는(환각, hallucination) 문제를 막기 위해 존재한다(#814):
+    확정된(ground-truth) 회사명이 없으면 시장 분석가가 가격 움직임을
+    그럴듯한 서사에 끼워 맞춰 엉뚱한 정체성을 만들어내고, 그것이 이후의
+    모든 하위 에이전트로 연쇄 전파된다.
 
-    Best-effort by design: if yfinance is unavailable, rate-limited, or doesn't
-    recognise the ticker, we return ``{}`` and the caller falls back to
-    ticker-only context rather than failing before analysis starts. Cached so
-    the lookup happens at most once per ticker per process.
+    설계상 최선 노력(best-effort) 방식: yfinance를 쓸 수 없거나, 요청 제한
+    (rate limit)에 걸리거나, 티커를 인식하지 못하면 ``{}``를 반환하고 호출자는
+    분석 시작 전에 실패하는 대신 티커만 담긴 컨텍스트로 대체(fallback)한다.
+    캐시(lru_cache)를 적용해 프로세스당 티커별로 최대 한 번만 조회한다.
 
-    The symbol is normalized first (e.g. ``XAUUSD`` -> ``GC=F``) so identity
-    resolves for the same instrument the price path actually fetches (#983).
+    심볼은 먼저 정규화(normalize)된다(예: ``XAUUSD`` -> ``GC=F``). 이렇게 해야
+    가격 조회 경로가 실제로 가져오는 것과 같은 종목의 정체성을 확인한다(#983).
     """
     from tradingagents.dataflows.symbol_utils import normalize_symbol
 
     try:
         info = yf.Ticker(normalize_symbol(ticker)).info or {}
-    except Exception as exc:  # noqa: BLE001 — fail open, never block the run
+    except Exception as exc:  # noqa: BLE001 — 실패해도 열어둔다(fail open), 실행을 절대 막지 않음
         logger.debug("Could not resolve instrument identity for %s: %s", ticker, exc)
         return {}
 
@@ -124,13 +133,13 @@ def build_instrument_context(
     asset_type: str = "stock",
     identity: Mapping[str, str] | None = None,
 ) -> str:
-    """Describe the exact instrument so agents preserve identity and ticker.
+    """분석 대상 종목을 정확히 서술해 에이전트가 정체성과 티커를 유지하게 한다.
 
-    When ``identity`` is provided (resolved deterministically via
-    :func:`resolve_instrument_identity`), the company name and business
-    classification are injected so agents anchor to the real company rather
-    than pattern-matching the price chart to a wrong one (#814).
+    ``identity``가 주어지면(:func:`resolve_instrument_identity`로 결정론적으로
+    확인된 값), 회사명과 업종 분류를 컨텍스트에 주입해 에이전트가 가격 차트를
+    엉뚱한 회사에 끼워 맞추지 않고 실제 회사에 고정(anchor)되도록 한다(#814).
     """
+    # 아래 문자열들은 LLM 프롬프트에 그대로 들어가므로 영어 원문을 유지한다.
     is_crypto = asset_type == "crypto"
     instrument_label = "asset" if is_crypto else "instrument"
     context = (
@@ -170,13 +179,13 @@ def build_instrument_context(
 
 
 def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
-    """Return the instrument context for the current run.
+    """현재 실행(run)에 해당하는 종목 컨텍스트를 반환한다.
 
-    Prefers the identity-resolved context computed once at run start and
-    stored on the state (see ``TradingAgentsGraph.resolve_instrument_context``).
-    Falls back to a ticker-only context — with no network lookup — when the
-    state was constructed without it (bare programmatic states, tests), so a
-    consumer is never forced to make a yfinance call mid-graph.
+    실행 시작 시 한 번 계산되어 상태(state)에 저장된 정체성 확인 컨텍스트를
+    우선 사용한다(``TradingAgentsGraph.resolve_instrument_context`` 참고).
+    상태가 그 값 없이 만들어진 경우(프로그래밍 방식의 최소 상태, 테스트)에는
+    네트워크 조회 없이 티커만 담긴 컨텍스트로 대체하므로, 그래프 실행 중간에
+    yfinance 호출을 강제당하는 일이 없다.
     """
     context = state.get("instrument_context")
     if isinstance(context, str) and context.strip():
@@ -189,14 +198,13 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
 
 def create_msg_delete():
     def delete_messages(state):
-        """Clear messages and add a context-anchored placeholder.
+        """메시지들을 비우고 컨텍스트에 고정된 자리표시자(placeholder)를 추가한다.
 
-        The placeholder must not be a bare ``"Continue"``: some
-        OpenAI-compatible providers interpret that literally as the user task
-        and produce output about the word "continue" instead of analysing the
-        instrument (#888). Anchoring it to the resolved instrument context and
-        date keeps the next analyst on-task even if the provider treats the
-        placeholder as a standalone request.
+        자리표시자는 단순한 ``"Continue"``여서는 안 된다: 일부 OpenAI 호환
+        공급자(provider)는 그것을 문자 그대로 사용자 과제로 해석해 종목 분석
+        대신 "continue"라는 단어에 대한 출력을 생성한다(#888). 확인된 종목
+        컨텍스트와 날짜에 자리표시자를 고정해 두면, 공급자가 자리표시자를
+        독립된 요청으로 취급하더라도 다음 분석가가 과제에서 벗어나지 않는다.
         """
         messages = state["messages"]
         removal_operations = [RemoveMessage(id=m.id) for m in messages]
@@ -212,6 +220,3 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
 
     return delete_messages
-
-
-

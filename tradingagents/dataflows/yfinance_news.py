@@ -1,4 +1,14 @@
-"""yfinance-based news data fetching functions."""
+# ============================================================================
+# [모듈 개요 - 초보자용]
+# 이 파일은 야후 파이낸스(yfinance)에서 특정 종목의 뉴스와 글로벌 거시경제
+# 뉴스를 가져오는 모듈입니다. 기사 발행 시각을 UTC 기준으로 통일해 요청한
+# 날짜 창(window) 안의 기사만 남기므로, 백테스트에서 미래 뉴스가 새어
+# 들어오는 것(look-ahead, 선견 편향)을 막습니다.
+# TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)에서 뉴스 분석가
+# 에이전트의 데이터 소스로 쓰입니다.
+# ============================================================================
+
+"""yfinance 기반 뉴스 데이터 수집 함수들."""
 
 import contextlib
 from datetime import datetime, timedelta, timezone
@@ -12,18 +22,19 @@ from .symbol_utils import normalize_symbol
 
 
 def _as_utc(dt: datetime) -> datetime:
-    """Normalize a datetime to UTC-aware; a naive value is assumed to be UTC.
+    """datetime을 UTC 시간대 인식(aware) 값으로 정규화한다; naive 값은 UTC로 간주한다.
 
-    Window bounds arrive naive (parsed from ``yyyy-mm-dd``) while article
-    timestamps may be offset-aware, so every operand is normalized before
-    comparison. Without this the filter depends on the host timezone (#1126).
+    날짜 창(window)의 경계는 ``yyyy-mm-dd``에서 파싱되어 시간대 정보 없이
+    (naive) 도착하는 반면, 기사 타임스탬프는 시간대가 붙어(offset-aware)
+    있을 수 있으므로 비교 전에 모든 피연산자를 정규화합니다. 이것이 없으면
+    필터 결과가 실행 호스트의 시간대에 따라 달라집니다(#1126).
     """
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
 
 def _extract_article_data(article: dict) -> dict:
-    """Extract article data from yfinance news format (handles nested 'content' structure)."""
-    # Handle nested content structure
+    """yfinance 뉴스 형식에서 기사 데이터를 추출한다(중첩된 'content' 구조 처리)."""
+    # 중첩된 content 구조 처리
     if "content" in article:
         content = article["content"]
         title = content.get("title", "No title")
@@ -31,11 +42,11 @@ def _extract_article_data(article: dict) -> dict:
         provider = content.get("provider", {})
         publisher = provider.get("displayName", "Unknown")
 
-        # Get URL from canonicalUrl or clickThroughUrl
+        # canonicalUrl 또는 clickThroughUrl에서 URL을 얻는다
         url_obj = content.get("canonicalUrl") or content.get("clickThroughUrl") or {}
         link = url_obj.get("url", "")
 
-        # Get publish date
+        # 발행 일시를 얻는다
         pub_date_str = content.get("pubDate", "")
         pub_date = None
         if pub_date_str:
@@ -50,14 +61,14 @@ def _extract_article_data(article: dict) -> dict:
             "pub_date": pub_date,
         }
     else:
-        # Fallback for flat structure. Parse the epoch publish time so flat
-        # articles are date-filterable too (otherwise they bypass the
-        # historical window and leak future news, #992/#1007).
+        # 평평한(flat) 구조를 위한 폴백. 에포크(epoch) 발행 시각을 파싱해서
+        # 평평한 구조의 기사도 날짜로 필터링할 수 있게 합니다(그러지 않으면
+        # 과거 날짜 창을 우회해 미래 뉴스가 새어 듭니다, #992/#1007).
         pub_date = None
         ts = article.get("providerPublishTime")
         if ts:
-            # Epoch seconds are UTC; parse them as UTC-aware so filtering does
-            # not shift with the host timezone (#1126).
+            # 에포크 초는 UTC입니다; 필터링이 호스트 시간대에 따라 흔들리지
+            # 않도록 UTC 인식 값으로 파싱합니다(#1126).
             with contextlib.suppress(ValueError, OSError, TypeError):
                 pub_date = datetime.fromtimestamp(ts, tz=timezone.utc)
         return {
@@ -70,13 +81,13 @@ def _extract_article_data(article: dict) -> dict:
 
 
 def _in_news_window(pub_date, start_dt, end_dt) -> bool:
-    """Whether an article belongs in the half-open window ``[start, end + 1 day)``.
+    """기사가 반개(half-open) 구간 ``[start, end + 1 day)``에 속하는지 여부.
 
-    Every operand is normalized to UTC, and the upper bound is exclusive so an
-    article stamped exactly at midnight after ``end_dt`` cannot leak into a
-    historical run (#1126). An undated article is kept only when the window
-    reaches the present (live run) — in a historical/backtest window it's
-    excluded, since we can't prove it isn't future news (#992/#1007).
+    모든 피연산자를 UTC로 정규화하고, 상한을 미포함(exclusive)으로 두어
+    ``end_dt`` 다음 날 자정 정각에 찍힌 기사가 과거 실행에 새어 들지
+    못하게 합니다(#1126). 날짜 없는 기사는 창이 현재에 닿을 때(실시간 실행)
+    만 유지합니다 — 과거/백테스트 창에서는 미래 뉴스가 아니라고 증명할 수
+    없으므로 제외합니다(#992/#1007).
     """
     end = _as_utc(end_dt)
     if pub_date is not None:
@@ -90,20 +101,20 @@ def get_news_yfinance(
     end_date: str,
 ) -> str:
     """
-    Retrieve news for a specific stock ticker using yfinance.
+    yfinance를 사용해 특정 종목 티커의 뉴스를 가져온다.
 
     Args:
-        ticker: Stock ticker symbol (e.g., "AAPL")
-        start_date: Start date in yyyy-mm-dd format
-        end_date: End date in yyyy-mm-dd format
+        ticker: 종목 티커 심볼 (예: "AAPL")
+        start_date: yyyy-mm-dd 형식의 시작 날짜
+        end_date: yyyy-mm-dd 형식의 종료 날짜
 
     Returns:
-        Formatted string containing news articles
+        뉴스 기사를 담은 형식화된 문자열
     """
     article_limit = get_config()["news_article_limit"]
-    # Query Yahoo with the canonical symbol, like every other yfinance path —
-    # a raw broker/forex/crypto alias (XAUUSD, BTCUSD) otherwise silently
-    # returns no news. Keep the user's ticker in the report header.
+    # 다른 모든 yfinance 경로처럼 정식(canonical) 심볼로 야후에 질의합니다 —
+    # 브로커/외환/암호화폐 별칭(XAUUSD, BTCUSD)을 그대로 쓰면 조용히
+    # 뉴스가 없다고 나옵니다. 보고서 헤더에는 사용자가 입력한 티커를 유지합니다.
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
     try:
@@ -113,7 +124,7 @@ def get_news_yfinance(
         if not news:
             return f"No news found for {ticker}{resolved}"
 
-        # Parse date range for filtering
+        # 필터링을 위한 날짜 범위를 파싱한다
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
@@ -123,7 +134,7 @@ def get_news_yfinance(
         for article in news:
             data = _extract_article_data(article)
 
-            # Keep only articles within the requested window (look-ahead safe).
+            # 요청한 날짜 창 안의 기사만 유지한다 (선견 편향 안전).
             if not _in_news_window(data["pub_date"], start_dt, end_dt):
                 continue
 
@@ -150,17 +161,17 @@ def get_global_news_yfinance(
     limit: int | None = None,
 ) -> str:
     """
-    Retrieve global/macro economic news using yfinance Search.
+    yfinance Search를 사용해 글로벌/거시경제 뉴스를 가져온다.
 
     Args:
-        curr_date: Current date in yyyy-mm-dd format
-        look_back_days: Number of days to look back. ``None`` falls back to
-            ``global_news_lookback_days`` from the active config.
-        limit: Maximum number of articles to return. ``None`` falls back to
-            ``global_news_article_limit`` from the active config.
+        curr_date: yyyy-mm-dd 형식의 현재 날짜
+        look_back_days: 되돌아볼 일수. ``None``이면 활성 설정의
+            ``global_news_lookback_days``로 폴백.
+        limit: 반환할 최대 기사 수. ``None``이면 활성 설정의
+            ``global_news_article_limit``로 폴백.
 
     Returns:
-        Formatted string containing global news articles
+        글로벌 뉴스 기사를 담은 형식화된 문자열
     """
     config = get_config()
     if look_back_days is None:
@@ -182,14 +193,14 @@ def get_global_news_yfinance(
 
             if search.news:
                 for article in search.news:
-                    # Handle both flat and nested structures
+                    # 평평한 구조와 중첩 구조 모두 처리한다
                     if "content" in article:
                         data = _extract_article_data(article)
                         title = data["title"]
                     else:
                         title = article.get("title", "")
 
-                    # Deduplicate by title
+                    # 제목으로 중복 제거
                     if title and title not in seen_titles:
                         seen_titles.add(title)
                         all_news.append(article)
@@ -200,7 +211,7 @@ def get_global_news_yfinance(
         if not all_news:
             return f"No global news found for {curr_date}"
 
-        # Calculate date range
+        # 날짜 범위를 계산한다
         curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         start_dt = curr_dt - relativedelta(days=look_back_days)
         start_date = start_dt.strftime("%Y-%m-%d")
@@ -208,8 +219,9 @@ def get_global_news_yfinance(
         news_str = ""
         kept = 0
         for article in all_news[:limit]:
-            # Extract uniformly (flat + nested) and apply the same look-ahead-safe
-            # window filter, so flat articles can't leak future news (#1007).
+            # (평평한 구조든 중첩 구조든) 동일하게 추출하고 동일한 선견 편향
+            # 안전 창 필터를 적용해, 평평한 구조의 기사도 미래 뉴스를 흘리지
+            # 못하게 합니다(#1007).
             data = _extract_article_data(article)
             if not _in_news_window(data["pub_date"], start_dt, curr_dt):
                 continue
@@ -221,8 +233,8 @@ def get_global_news_yfinance(
             news_str += "\n"
             kept += 1
 
-        # All candidates fell outside the window -> say so rather than return an
-        # empty-bodied report (#993).
+        # 후보 기사가 모두 날짜 창 밖으로 떨어졌다면 -> 본문이 빈 보고서를
+        # 돌려주는 대신 그렇다고 말한다(#993).
         if kept == 0:
             return f"No global news found between {start_date} and {curr_date}"
 

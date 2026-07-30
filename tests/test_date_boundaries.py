@@ -1,8 +1,10 @@
-"""yfinance treats ``end`` as exclusive; we must request one extra day so the
-requested end_date (and the current day) is actually included.
+# 이 파일은 yfinance 데이터 조회 시 날짜 경계(boundary) 처리를 검증하는
+# 테스트 모음입니다. 요청한 종료일과 당일 데이터가 결과에 빠지지 않는지 확인합니다.
+"""yfinance는 ``end``를 배타적(exclusive)으로 취급하므로, 요청한 end_date(그리고
+당일)가 실제로 포함되려면 하루를 더해서 요청해야 합니다.
 
-Regressions for #986 (current-day OHLCV excluded) and #987 (requested end_date
-row omitted).
+다음 이슈들의 회귀(regression) 방지용: #986 (당일 OHLCV 누락),
+#987 (요청한 end_date 행 누락).
 """
 import pandas as pd
 import pytest
@@ -14,6 +16,7 @@ from tradingagents.dataflows.config import set_config
 
 @pytest.mark.unit
 def test_get_yfin_requests_inclusive_end(monkeypatch):
+    """요청한 종료일(end_date)이 결과에 포함되도록 하루를 더해 요청하는지 검증하는 테스트 (#987)."""
     captured = {}
 
     class FakeTicker:
@@ -33,14 +36,15 @@ def test_get_yfin_requests_inclusive_end(monkeypatch):
     monkeypatch.setattr(yfin.yf, "Ticker", FakeTicker)
     out = yfin.get_YFin_data_online("AAPL", "2025-05-01", "2025-05-09")
 
-    # end is requested one day past end_date so 2025-05-09 is included (#987).
+    # 2025-05-09가 포함되도록 end는 end_date보다 하루 뒤로 요청됩니다 (#987).
     assert captured["end"] == "2025-05-10"
-    # Header still reflects the requested range, not the internal +1 day.
+    # 헤더에는 내부적으로 더한 +1일이 아닌, 사용자가 요청한 범위가 표시되어야 합니다.
     assert "to 2025-05-09" in out
 
 
 @pytest.mark.unit
 def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
+    """당일 OHLCV(시가·고가·저가·종가·거래량) 행이 포함되도록 내일 날짜로 요청하는지 검증하는 테스트 (#986)."""
     set_config({"data_cache_dir": str(tmp_path)})
     captured = {}
 
@@ -58,4 +62,4 @@ def test_load_ohlcv_requests_inclusive_end(monkeypatch, tmp_path):
     su.load_ohlcv("AAPL", today)
 
     expected_end = (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    assert captured["end"] == expected_end  # tomorrow -> today's row included (#986)
+    assert captured["end"] == expected_end  # 내일로 요청 -> 오늘 행이 포함됨 (#986)

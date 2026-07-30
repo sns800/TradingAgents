@@ -1,4 +1,12 @@
 # TradingAgents/graph/propagation.py
+#
+# [모듈 개요 - 초보자용]
+# 이 파일은 그래프(graph) 실행에 필요한 초기 상태(state, 에이전트들이 읽고 쓰는
+# 공유 데이터 딕셔너리)를 만들고, 그래프 호출 인자(recursion_limit, 콜백 등)를
+# 구성하는 역할을 합니다. trading_graph.py가 분석을 시작할 때 여기서 만든
+# 초기 상태를 그래프에 흘려보내며(propagate), 토론 상태·보고서 칸 등이
+# 모두 빈 값으로 준비됩니다. 아래 딕셔너리 키들은 다른 코드가 그대로
+# 참조하므로 절대 바꾸면 안 됩니다.
 
 from typing import Any
 
@@ -9,10 +17,10 @@ from tradingagents.agents.utils.agent_states import (
 
 
 class Propagator:
-    """Handles state initialization and propagation through the graph."""
+    """그래프 전체에 걸친 상태 초기화와 전파(propagation)를 담당하는 클래스."""
 
     def __init__(self, max_recur_limit=100):
-        """Initialize with configuration parameters."""
+        """설정 파라미터로 초기화한다."""
         self.max_recur_limit = max_recur_limit
 
     def create_initial_state(
@@ -23,13 +31,13 @@ class Propagator:
         past_context: str = "",
         instrument_context: str = "",
     ) -> dict[str, Any]:
-        """Create the initial state for the agent graph.
+        """에이전트 그래프의 초기 상태를 생성한다.
 
-        ``instrument_context`` is the deterministic ticker-identity string
-        resolved once at run start (see
-        ``TradingAgentsGraph.resolve_instrument_context``). When empty, agents
-        fall back to ticker-only context via
-        ``get_instrument_context_from_state``.
+        ``instrument_context``는 실행 시작 시 한 번만 결정적으로(deterministic)
+        조회한 티커 정체성(ticker identity) 문자열입니다
+        (``TradingAgentsGraph.resolve_instrument_context`` 참고). 빈 문자열이면
+        에이전트들은 ``get_instrument_context_from_state``를 통해 티커만 담긴
+        컨텍스트로 대체(fallback)합니다.
         """
         return {
             "messages": [("human", company_name)],
@@ -38,6 +46,8 @@ class Propagator:
             "instrument_context": instrument_context,
             "trade_date": str(trade_date),
             "past_context": past_context,
+            # 강세/약세 투자 토론의 진행 상황을 담는 상태. count는 발언 횟수로,
+            # conditional_logic.py가 토론 종료 여부를 판단할 때 사용합니다.
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",
@@ -48,6 +58,7 @@ class Propagator:
                     "count": 0,
                 }
             ),
+            # 리스크 토론(공격적/보수적/중립 3자 토론)의 진행 상황을 담는 상태.
             "risk_debate_state": RiskDebateState(
                 {
                     "aggressive_history": "",
@@ -69,11 +80,11 @@ class Propagator:
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:
-        """Get arguments for the graph invocation.
+        """그래프 호출(invocation)에 넘길 인자들을 구성한다.
 
         Args:
-            callbacks: Optional list of callback handlers for tool execution tracking.
-                       Note: LLM callbacks are handled separately via LLM constructor.
+            callbacks: 도구 실행 추적용 콜백 핸들러 목록(선택).
+                       참고: LLM 콜백은 LLM 생성자를 통해 별도로 처리됩니다.
         """
         config = {"recursion_limit": self.max_recur_limit}
         if callbacks:

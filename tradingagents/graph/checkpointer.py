@@ -1,6 +1,14 @@
-"""LangGraph checkpoint support for resumable analysis runs.
+"""재개 가능한 분석 실행을 위한 LangGraph 체크포인트(checkpoint) 지원 모듈.
 
-Per-ticker SQLite databases so concurrent tickers don't contend.
+[모듈 개요 - 초보자용]
+체크포인트란 그래프(graph)가 노드(node) 하나를 끝낼 때마다 진행 상태를
+SQLite 데이터베이스에 저장해 두는 기능입니다. 실행 도중 프로그램이 죽어도
+같은 티커(ticker, 종목 코드)+날짜로 다시 실행하면 마지막으로 성공한 단계부터
+이어서 진행할 수 있습니다. trading_graph.py의 propagate()가
+``checkpoint_enabled`` 설정이 켜져 있을 때 이 모듈을 사용합니다.
+
+티커별로 SQLite DB 파일을 따로 두어, 여러 티커를 동시에 실행해도
+파일 잠금 경합이 생기지 않도록 합니다.
 """
 
 from __future__ import annotations
@@ -17,8 +25,8 @@ from tradingagents.dataflows.utils import safe_ticker_component
 
 
 def _db_path(data_dir: str | Path, ticker: str) -> Path:
-    """Return the SQLite checkpoint DB path for a ticker."""
-    # Reject ticker values that would escape the checkpoints directory.
+    """해당 티커의 SQLite 체크포인트 DB 경로를 반환한다."""
+    # checkpoints 디렉터리를 벗어날 수 있는 티커 값(예: "../evil")은 거부합니다.
     safe = safe_ticker_component(ticker).upper()
     p = Path(data_dir) / "checkpoints"
     p.mkdir(parents=True, exist_ok=True)
@@ -26,11 +34,12 @@ def _db_path(data_dir: str | Path, ticker: str) -> Path:
 
 
 def thread_id(ticker: str, date: str, signature: str = "") -> str:
-    """Deterministic thread ID for a ticker+date pair.
+    """티커+날짜 조합에 대한 결정적(deterministic) 스레드 ID를 생성한다.
 
-    ``signature`` folds in graph-shape-affecting run choices so a resume under a
-    different graph can't reuse this checkpoint (#1089); omitting it keeps the
-    legacy ID.
+    ``signature``에는 그래프 모양에 영향을 주는 실행 옵션(선택된 애널리스트,
+    토론 라운드 수 등)이 담깁니다. 이를 ID에 섞어 넣으면, 다른 그래프 구성으로
+    재개(resume)할 때 이전 체크포인트를 잘못 재사용하는 일을 막을 수 있습니다
+    (#1089). signature를 생략하면 기존(legacy) ID가 유지됩니다.
     """
     base = f"{ticker.upper()}:{date}"
     if signature:
@@ -40,7 +49,7 @@ def thread_id(ticker: str, date: str, signature: str = "") -> str:
 
 @contextmanager
 def get_checkpointer(data_dir: str | Path, ticker: str) -> Generator[SqliteSaver, None, None]:
-    """Context manager yielding a SqliteSaver backed by a per-ticker DB."""
+    """티커별 DB에 연결된 SqliteSaver를 내어주는 컨텍스트 매니저(context manager)."""
     db = _db_path(data_dir, ticker)
     conn = sqlite3.connect(str(db), check_same_thread=False)
     try:
@@ -52,12 +61,12 @@ def get_checkpointer(data_dir: str | Path, ticker: str) -> Generator[SqliteSaver
 
 
 def has_checkpoint(data_dir: str | Path, ticker: str, date: str, signature: str = "") -> bool:
-    """Check whether a resumable checkpoint exists for ticker+date."""
+    """티커+날짜에 대해 재개 가능한 체크포인트가 존재하는지 확인한다."""
     return checkpoint_step(data_dir, ticker, date, signature) is not None
 
 
 def checkpoint_step(data_dir: str | Path, ticker: str, date: str, signature: str = "") -> int | None:
-    """Return the step number of the latest checkpoint, or None if none exists."""
+    """가장 최근 체크포인트의 단계(step) 번호를 반환하고, 없으면 None을 반환한다."""
     db = _db_path(data_dir, ticker)
     if not db.exists():
         return None
@@ -71,7 +80,7 @@ def checkpoint_step(data_dir: str | Path, ticker: str, date: str, signature: str
 
 
 def clear_all_checkpoints(data_dir: str | Path) -> int:
-    """Remove all checkpoint DBs. Returns number of files deleted."""
+    """모든 체크포인트 DB 파일을 삭제한다. 삭제한 파일 개수를 반환한다."""
     cp_dir = Path(data_dir) / "checkpoints"
     if not cp_dir.exists():
         return 0
@@ -82,7 +91,7 @@ def clear_all_checkpoints(data_dir: str | Path) -> int:
 
 
 def clear_checkpoint(data_dir: str | Path, ticker: str, date: str, signature: str = "") -> None:
-    """Remove checkpoint for a specific ticker+date by deleting the thread's rows."""
+    """특정 티커+날짜의 체크포인트를, 해당 스레드의 행(row)만 지워서 제거한다."""
     db = _db_path(data_dir, ticker)
     if not db.exists():
         return

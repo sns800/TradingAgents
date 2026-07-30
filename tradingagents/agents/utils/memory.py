@@ -1,4 +1,14 @@
-"""Append-only markdown decision log for TradingAgents."""
+# =============================================================================
+# [모듈 개요 — 초보자용]
+# 이 파일은 TradingAgents의 "기억(memory)" 역할을 하는 추가 전용(append-only)
+# 마크다운 결정 로그를 구현합니다. 매 실행이 끝나면 최종 매매 결정을 로그 파일에
+# 기록하고(Phase A), 나중에 실제 수익률이 확정되면 결과와 반성(reflection)을
+# 덧붙입니다(Phase B). 다음 실행 시작 시 같은 종목의 과거 결정과 다른 종목의
+# 교훈을 읽어 에이전트 프롬프트에 주입함으로써, 시스템이 과거 실수에서
+# 배우도록 합니다. (임베딩/벡터 DB 없이 텍스트 파싱만으로 동작하는 단순한 구조)
+# =============================================================================
+
+"""TradingAgents용 추가 전용(append-only) 마크다운 결정 로그."""
 
 import re
 from pathlib import Path
@@ -7,11 +17,11 @@ from tradingagents.agents.utils.rating import parse_rating
 
 
 class TradingMemoryLog:
-    """Append-only markdown log of trading decisions and reflections."""
+    """매매 결정과 반성(reflection)을 기록하는 추가 전용 마크다운 로그."""
 
-    # HTML comment: cannot appear in LLM prose output, safe as a hard delimiter
+    # HTML 주석: LLM의 서술 출력에 나타날 수 없으므로 안전한 확정 구분자(delimiter)
     _SEPARATOR = "\n\n<!-- ENTRY_END -->\n\n"
-    # Precompiled patterns — avoids re-compilation on every load_entries() call
+    # 미리 컴파일한 정규식 패턴 — load_entries() 호출 때마다 재컴파일되는 것을 방지
     _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
 
@@ -22,10 +32,10 @@ class TradingMemoryLog:
         if path:
             self._log_path = Path(path).expanduser()
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
-        # Optional cap on resolved entries. None disables rotation.
+        # 결과 확정(resolved) 항목 수의 선택적 상한. None이면 로테이션(rotation) 비활성화.
         self._max_entries = cfg.get("memory_log_max_entries")
 
-    # --- Write path (Phase A) ---
+    # --- 쓰기 경로 (Phase A) ---
 
     def store_decision(
         self,
@@ -33,10 +43,10 @@ class TradingMemoryLog:
         trade_date: str,
         final_trade_decision: str,
     ) -> None:
-        """Append pending entry at end of propagate(). No LLM call."""
+        """propagate() 종료 시점에 대기(pending) 항목을 추가한다. LLM 호출 없음."""
         if not self._log_path:
             return
-        # Idempotency guard: fast raw-text scan instead of full parse
+        # 멱등성(idempotency) 가드: 전체 파싱 대신 빠른 원문 텍스트 스캔
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
             for line in raw.splitlines():
@@ -48,10 +58,10 @@ class TradingMemoryLog:
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
-    # --- Read path (Phase A) ---
+    # --- 읽기 경로 (Phase A) ---
 
     def load_entries(self) -> list[dict]:
-        """Parse all entries from log. Returns list of dicts."""
+        """로그에서 모든 항목을 파싱한다. dict의 리스트를 반환한다."""
         if not self._log_path or not self._log_path.exists():
             return []
         text = self._log_path.read_text(encoding="utf-8")
@@ -64,11 +74,13 @@ class TradingMemoryLog:
         return entries
 
     def get_pending_entries(self) -> list[dict]:
-        """Return entries with outcome:pending (for Phase B)."""
+        """결과가 pending(대기) 상태인 항목을 반환한다(Phase B에서 사용)."""
         return [e for e in self.load_entries() if e.get("pending")]
 
     def get_past_context(self, ticker: str, n_same: int = 5, n_cross: int = 3) -> str:
-        """Return formatted past context string for agent prompt injection."""
+        """에이전트 프롬프트 주입용으로 포맷된 과거 컨텍스트 문자열을 반환한다."""
+        # 결과가 확정된(pending 아님) 항목만 대상으로,
+        # 같은 종목(same)은 전체 내용, 다른 종목(cross)은 반성만 최근순으로 모은다.
         entries = [e for e in self.load_entries() if not e.get("pending")]
         if not entries:
             return ""
@@ -94,7 +106,7 @@ class TradingMemoryLog:
             parts.extend(self._format_reflection_only(e) for e in cross)
         return "\n\n".join(parts)
 
-    # --- Update path (Phase B) ---
+    # --- 갱신 경로 (Phase B) ---
 
     def update_with_outcome(
         self,
@@ -105,11 +117,12 @@ class TradingMemoryLog:
         holding_days: int,
         reflection: str,
     ) -> None:
-        """Replace pending tag and append REFLECTION section using atomic write.
+        """pending 태그를 교체하고 원자적 쓰기(atomic write)로 REFLECTION 섹션을 덧붙인다.
 
-        Finds the first pending entry matching (trade_date, ticker), updates
-        its tag with return figures, and appends a REFLECTION section.  Uses
-        a temp-file + os.replace() so a crash mid-write never corrupts the log.
+        (trade_date, ticker)와 일치하는 첫 번째 pending 항목을 찾아 태그를
+        수익률 수치로 갱신하고 REFLECTION 섹션을 덧붙인다. 임시 파일 +
+        os.replace() 방식을 사용해 쓰기 도중 크래시가 나도 로그가 절대
+        손상되지 않는다.
         """
         if not self._log_path or not self._log_path.exists():
             return
@@ -137,7 +150,7 @@ class TradingMemoryLog:
                 and tag_line.startswith(pending_prefix)
                 and tag_line.endswith("| pending]")
             ):
-                # Parse rating from the existing pending tag
+                # 기존 pending 태그에서 등급(rating)을 파싱한다
                 fields = [f.strip() for f in tag_line[1:-1].split("|")]
                 rating = fields[2]
                 new_tag = (
@@ -162,9 +175,9 @@ class TradingMemoryLog:
         tmp_path.replace(self._log_path)
 
     def batch_update_with_outcomes(self, updates: list[dict]) -> None:
-        """Apply multiple outcome updates in a single read + atomic write.
+        """여러 결과 갱신을 한 번의 읽기 + 원자적 쓰기로 일괄 적용한다.
 
-        Each element of updates must have keys: ticker, trade_date,
+        updates의 각 원소는 다음 키를 가져야 한다: ticker, trade_date,
         raw_return, alpha_return, holding_days, reflection.
         """
         if not self._log_path or not self._log_path.exists() or not updates:
@@ -173,7 +186,7 @@ class TradingMemoryLog:
         text = self._log_path.read_text(encoding="utf-8")
         blocks = text.split(self._SEPARATOR)
 
-        # Build lookup keyed by (trade_date, ticker) for O(1) dispatch
+        # (trade_date, ticker)를 키로 하는 조회 테이블을 만들어 O(1) 매칭
         update_map = {(u["trade_date"], u["ticker"]): u for u in updates}
 
         new_blocks = []
@@ -215,18 +228,18 @@ class TradingMemoryLog:
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
 
-    # --- Helpers ---
+    # --- 헬퍼(Helpers) ---
 
     def _apply_rotation(self, blocks: list[str]) -> list[str]:
-        """Drop oldest resolved blocks when their count exceeds max_entries.
+        """결과 확정 블록 수가 max_entries를 초과하면 가장 오래된 것부터 버린다.
 
-        Pending blocks are always kept (they represent unprocessed work).
-        Returns ``blocks`` unchanged when rotation is disabled or under cap.
+        pending 블록은 항상 유지한다(아직 처리되지 않은 작업을 나타내므로).
+        로테이션이 비활성화됐거나 상한 이하이면 ``blocks``를 그대로 반환한다.
         """
         if not self._max_entries or self._max_entries <= 0:
             return blocks
 
-        # Tag each block with (kept, is_resolved) by parsing tag-line markers.
+        # 태그 줄 마커를 파싱해 각 블록에 (블록, 결과확정여부)를 표시한다.
         decisions = []
         for block in blocks:
             stripped = block.strip()
@@ -255,6 +268,8 @@ class TradingMemoryLog:
         return kept
 
     def _parse_entry(self, raw: str) -> dict | None:
+        # 항목 하나의 원문 텍스트를 dict로 파싱한다.
+        # 첫 줄은 "[날짜 | 티커 | 등급 | ...]" 형태의 태그 줄이어야 한다.
         lines = raw.strip().splitlines()
         if not lines:
             return None
@@ -281,6 +296,7 @@ class TradingMemoryLog:
         return entry
 
     def _format_full(self, e: dict) -> str:
+        # 같은 종목의 과거 항목용: 태그 + 결정(DECISION) + 반성(REFLECTION) 전체 포맷
         raw = e["raw"] or "n/a"
         alpha = e["alpha"] or "n/a"
         holding = e["holding"] or "n/a"
@@ -291,6 +307,8 @@ class TradingMemoryLog:
         return "\n\n".join(parts)
 
     def _format_reflection_only(self, e: dict) -> str:
+        # 다른 종목(cross-ticker) 항목용: 태그 + 반성만 짧게 포맷
+        # (반성이 없으면 결정 내용 앞 300자로 대체)
         tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {e['raw'] or 'n/a'}]"
         if e["reflection"]:
             return f"{tag}\n{e['reflection']}"

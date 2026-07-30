@@ -1,3 +1,12 @@
+# =============================================================================
+# [모듈 개요 - 초보자용 안내]
+# 이 파일은 Alpha Vantage API 호출에 필요한 공통 기능(유틸리티)을 모아 둔 모듈입니다.
+# API 키(key) 조회, 날짜 형식 변환, 실제 HTTP 요청 수행, 요청 한도 초과(rate limit)
+# 감지, 날짜 범위로 CSV 데이터 필터링 등을 담당합니다.
+# TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)의 다른 Alpha Vantage
+# 모듈들(주가, 뉴스, 재무제표, 기술적 지표)은 모두 이 모듈의 _make_api_request 를
+# 통해 API를 호출합니다.
+# =============================================================================
 import json
 import os
 from datetime import datetime
@@ -10,23 +19,23 @@ from .errors import VendorNotConfiguredError, VendorRateLimitError
 
 API_BASE_URL = "https://www.alphavantage.co/query"
 
-# Network timeout (seconds) so a stalled Alpha Vantage request can't hang the
-# CLI/agents indefinitely (#990).
+# 네트워크 타임아웃(timeout, 초 단위). 응답이 멈춘 Alpha Vantage 요청이
+# CLI/에이전트를 무한정 멈추게 하지 않도록 제한한다 (#990).
 REQUEST_TIMEOUT = 30
 
 
 class AlphaVantageNotConfiguredError(VendorNotConfiguredError):
-    """Raised when Alpha Vantage is selected but no API key is configured.
+    """Alpha Vantage가 선택되었지만 API 키가 설정되지 않았을 때 발생하는 예외.
 
-    A VendorNotConfiguredError (and thus still a ValueError), so the routing
-    layer's "vendor unavailable" handling and existing ValueError callers both
-    keep working.
+    VendorNotConfiguredError(즉, 여전히 ValueError)이기도 하므로, 라우팅 계층의
+    "벤더 사용 불가(vendor unavailable)" 처리와 기존에 ValueError를 잡던 호출부가
+    모두 그대로 동작한다.
     """
     pass
 
 
 def get_api_key() -> str:
-    """Retrieve the API key for Alpha Vantage from environment variables."""
+    """환경변수에서 Alpha Vantage API 키를 가져온다."""
     api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
     if not api_key:
         raise AlphaVantageNotConfiguredError(
@@ -35,12 +44,12 @@ def get_api_key() -> str:
     return api_key
 
 def format_datetime_for_api(date_input) -> str:
-    """Convert various date formats to YYYYMMDDTHHMM format required by Alpha Vantage API."""
+    """다양한 날짜 형식을 Alpha Vantage API가 요구하는 YYYYMMDDTHHMM 형식으로 변환한다."""
     if isinstance(date_input, str):
-        # If already in correct format, return as-is
+        # 이미 올바른 형식이면 그대로 반환
         if len(date_input) == 13 and 'T' in date_input:
             return date_input
-        # Try to parse common date formats
+        # 흔히 쓰이는 날짜 형식들을 순서대로 파싱 시도
         try:
             dt = datetime.strptime(date_input, "%Y-%m-%d")
             return dt.strftime("%Y%m%dT0000")
@@ -56,16 +65,16 @@ def format_datetime_for_api(date_input) -> str:
         raise ValueError(f"Date must be string or datetime object, got {type(date_input)}")
 
 class AlphaVantageRateLimitError(VendorRateLimitError):
-    """Raised when the Alpha Vantage API rate limit is exceeded."""
+    """Alpha Vantage API 요청 한도(rate limit)를 초과했을 때 발생하는 예외."""
     pass
 
 def _make_api_request(function_name: str, params: dict) -> dict | str:
-    """Helper function to make API requests and handle responses.
+    """API 요청을 보내고 응답을 처리하는 헬퍼(helper) 함수.
 
     Raises:
-        AlphaVantageRateLimitError: When API rate limit is exceeded
+        AlphaVantageRateLimitError: API 요청 한도(rate limit) 초과 시
     """
-    # Create a copy of params to avoid modifying the original
+    # 원본 params 를 수정하지 않도록 복사본을 만든다
     api_params = params.copy()
     api_params.update({
         "function": function_name,
@@ -73,14 +82,14 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
         "source": "trading_agents",
     })
 
-    # Handle entitlement parameter if present in params or global variable
+    # params 또는 전역 변수에 entitlement(유료 구독 권한) 파라미터가 있으면 처리
     current_entitlement = globals().get('_current_entitlement')
     entitlement = api_params.get("entitlement") or current_entitlement
 
     if entitlement:
         api_params["entitlement"] = entitlement
     elif "entitlement" in api_params:
-        # Remove entitlement if it's None or empty
+        # entitlement 값이 None 이거나 비어 있으면 제거
         api_params.pop("entitlement", None)
 
     response = requests.get(API_BASE_URL, params=api_params, timeout=REQUEST_TIMEOUT)
@@ -88,25 +97,26 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
 
     response_text = response.text
 
-    # Error responses are JSON; data responses are usually CSV (or data-keyed
-    # JSON). A non-JSON body is normal data.
+    # 오류 응답은 JSON 형식이고, 정상 데이터 응답은 보통 CSV(또는 data 키를 가진
+    # JSON)다. 즉 JSON 파싱에 실패한 본문은 정상 데이터로 간주하면 된다.
     try:
         response_json = json.loads(response_text)
     except json.JSONDecodeError:
         return response_text
 
-    # Alpha Vantage reports problems via "Information" / "Note". Classify so a
-    # genuine rate limit and an invalid/missing key aren't conflated (#991):
-    # rate-limit phrasing is checked first because those notices also mention
-    # "API key" ("your API key ... 25 requests per day").
+    # Alpha Vantage는 문제를 "Information" / "Note" 필드로 알려준다. 진짜 요청 한도
+    # 초과(rate limit)와 잘못된/누락된 API 키가 뒤섞이지 않도록 분류한다 (#991):
+    # 한도 초과 안내문에도 "API key"라는 문구가 등장하기 때문에("your API key ...
+    # 25 requests per day") 한도 초과 문구를 먼저 검사한다.
     notice = response_json.get("Information") or response_json.get("Note")
     if notice:
         low = notice.lower()
         if any(m in low for m in ("rate limit", "requests per day", "call frequency", "premium")):
             raise AlphaVantageRateLimitError(f"Alpha Vantage rate limit exceeded: {notice}")
         if "api key" in low or "apikey" in low:
-            # Reuse the existing "not configured" error so a bad key surfaces as
-            # a real, actionable failure rather than a mislabeled rate limit (#991).
+            # 기존의 "설정 안 됨(not configured)" 예외를 재사용해, 잘못된 키가
+            # 요청 한도 초과로 잘못 표시되는 대신 실제로 조치 가능한 실패로
+            # 드러나게 한다 (#991).
             raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
 
     return response_text
@@ -115,37 +125,42 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
 
 def _filter_csv_by_date_range(csv_data: str, start_date: str, end_date: str) -> str:
     """
-    Filter CSV data to include only rows within the specified date range.
+    CSV 데이터에서 지정한 날짜 범위 안의 행만 남기도록 필터링한다.
+
+    (초보자 설명) 백테스트(backtest, 과거 데이터로 전략을 검증하는 것)에서는
+    "그 시점에 알 수 있었던 데이터"만 사용해야 한다. API가 요청 범위 밖의 데이터를
+    함께 돌려줄 수 있으므로, 여기서 날짜 범위를 다시 한번 잘라내어 미래 데이터가
+    섞이는 룩어헤드 편향(look-ahead bias)을 막는다.
 
     Args:
-        csv_data: CSV string from Alpha Vantage API
-        start_date: Start date in yyyy-mm-dd format
-        end_date: End date in yyyy-mm-dd format
+        csv_data: Alpha Vantage API가 반환한 CSV 문자열
+        start_date: 시작 날짜, yyyy-mm-dd 형식
+        end_date: 종료 날짜, yyyy-mm-dd 형식
 
     Returns:
-        Filtered CSV string
+        필터링된 CSV 문자열
     """
     if not csv_data or csv_data.strip() == "":
         return csv_data
 
     try:
-        # Parse CSV data
+        # CSV 데이터 파싱
         df = pd.read_csv(StringIO(csv_data))
 
-        # Assume the first column is the date column (timestamp)
+        # 첫 번째 열이 날짜 열(timestamp)이라고 가정한다
         date_col = df.columns[0]
         df[date_col] = pd.to_datetime(df[date_col])
 
-        # Filter by date range
+        # 날짜 범위로 필터링
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
 
         filtered_df = df[(df[date_col] >= start_dt) & (df[date_col] <= end_dt)]
 
-        # Convert back to CSV string
+        # 다시 CSV 문자열로 변환
         return filtered_df.to_csv(index=False)
 
     except Exception as e:
-        # If filtering fails, return original data with a warning
+        # 필터링에 실패하면 경고를 출력하고 원본 데이터를 그대로 반환한다
         print(f"Warning: Failed to filter CSV data by date range: {e}")
         return csv_data

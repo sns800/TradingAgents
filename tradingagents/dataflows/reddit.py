@@ -1,18 +1,27 @@
-"""Reddit search fetcher for ticker-specific discussion posts.
+# ============================================================================
+# [모듈 개요 - 초보자용]
+# 이 파일은 레딧(Reddit)의 금융 커뮤니티(서브레딧)에서 특정 종목을 언급한
+# 최근 게시글을 검색해 오는 모듈입니다. API 키 없이 공개 RSS 검색 피드를
+# 사용하며, 요청 제한(rate limit)에 걸리면 잠시 기다렸다가 한 번 재시도합니다.
+# TradingAgents(LLM 멀티 에이전트 주식 트레이딩 프레임워크)에서 소셜 미디어
+# 분석가 에이전트가 개인 투자자들의 여론을 파악하는 데이터 소스로 쓰입니다.
+# ============================================================================
 
-Default path is Reddit's public Atom/RSS search feed
-(``reddit.com/r/{sub}/search.rss``). The richer JSON search endpoint
-(``/search.json``) is reliably WAF-blocked (``HTTP 403``) for public clients
-(issue #862), and probing it on every call only doubled our request volume
-against Reddit's per-IP rate limit — tripping ``429`` on the RSS fallback — so
-it is kept (``_fetch_subreddit_json``) but not used by default. On a 429 we back
-off once (honouring ``Retry-After``). RSS lacks score / comment counts, so those
-posts are marked and the formatter omits the metrics rather than printing fake
-zeros.
+"""티커별 토론 게시글을 가져오는 Reddit 검색 수집기.
 
-No API key required. Returns formatted plaintext blocks ready for prompt
-injection and degrades gracefully — returns a placeholder string rather than
-raising, so callers never special-case missing data.
+기본 경로는 Reddit의 공개 Atom/RSS 검색 피드
+(``reddit.com/r/{sub}/search.rss``)입니다. 더 풍부한 JSON 검색 엔드포인트
+(``/search.json``)는 공개 클라이언트에 대해 WAF(웹 방화벽)가 확실하게
+차단하고(``HTTP 403``, 이슈 #862), 매 호출마다 그것을 먼저 시도하는 것은
+Reddit의 IP당 요청 제한에 대한 요청량만 두 배로 늘려 RSS 폴백에서
+``429``를 유발했기에, 코드는 남겨두되(``_fetch_subreddit_json``) 기본으로는
+쓰지 않습니다. 429를 받으면 (``Retry-After`` 헤더를 존중하며) 한 번만
+백오프(backoff, 대기 후 재시도)합니다. RSS에는 점수/댓글 수가 없으므로,
+그런 게시글은 표시를 남기고 포매터가 가짜 0을 찍는 대신 지표를 생략합니다.
+
+API 키가 필요 없습니다. 프롬프트에 바로 넣을 수 있는 형식의 일반 텍스트
+블록을 반환하고, 우아하게 완화됩니다 — 예외를 던지는 대신 자리표시
+문자열을 반환하므로 호출자는 누락 데이터를 따로 처리할 일이 없습니다.
 """
 
 from __future__ import annotations
@@ -36,31 +45,32 @@ logger = logging.getLogger(__name__)
 
 _API = "https://www.reddit.com/r/{sub}/search.json?{qs}"
 _RSS = "https://www.reddit.com/r/{sub}/search.rss?{qs}"
-# A descriptive, identified User-Agent (per Reddit's API etiquette). Reddit
-# blocks generic/anonymous tokens like bare "Mozilla/5.0" or "curl/…" but
-# serves this one on both endpoints; the RSS feed accepts it even when the
-# JSON search endpoint 403s, so no browser-spoofing is needed.
+# 서술적이고 신원이 드러나는 User-Agent(Reddit API 에티켓 준수). Reddit은
+# 맨 "Mozilla/5.0"이나 "curl/…" 같은 일반적/익명 토큰은 차단하지만 이
+# 값은 두 엔드포인트 모두에서 통과시킵니다; JSON 검색 엔드포인트가 403을
+# 내는 상황에서도 RSS 피드는 이 값을 받아 주므로 브라우저 위장이 필요 없습니다.
 _UA = "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)"
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
-# Default subreddits ordered roughly by signal density for ticker-specific
-# discussion. wallstreetbets has the most volume but most noise; stocks /
-# investing trend more measured. Caller can override.
+# 티커별 토론의 신호 밀도(잡음 대비 유용한 정보량) 순으로 대략 정렬한 기본
+# 서브레딧 목록. wallstreetbets는 글이 가장 많지만 잡음도 가장 많고,
+# stocks/investing은 더 신중한 경향이 있습니다. 호출자가 재정의할 수 있습니다.
 DEFAULT_SUBREDDITS = ("wallstreetbets", "stocks", "investing")
 
 
 def _search_qs(ticker: str, limit: int) -> str:
+    # Reddit 검색용 쿼리 스트링을 만든다.
     return urlencode({
         "q": ticker,
         "restrict_sr": "on",
         "sort": "new",
-        "t": "week",  # last 7 days
+        "t": "week",  # 최근 7일
         "limit": limit,
     })
 
 
 def _iso_to_timestamp(iso_str: str | None) -> float | None:
-    """Parse an Atom ``published`` timestamp to a UTC epoch, or None."""
+    """Atom의 ``published`` 타임스탬프를 UTC 에포크(epoch) 초로 파싱한다. 실패 시 None."""
     if not iso_str:
         return None
     try:
@@ -71,10 +81,10 @@ def _iso_to_timestamp(iso_str: str | None) -> float | None:
 
 
 def _strip_html(content: str) -> str:
-    """Reduce the HTML body Reddit embeds in an Atom entry to plain text."""
+    """Reddit이 Atom 엔트리에 담아 보내는 HTML 본문을 일반 텍스트로 정리한다."""
     if not content:
         return ""
-    # Reddit wraps the real selftext between SC_OFF / SC_ON markers.
+    # Reddit은 실제 본문(selftext)을 SC_OFF / SC_ON 마커 사이에 감싸서 보낸다.
     if "<!-- SC_OFF -->" in content and "<!-- SC_ON -->" in content:
         content = content.split("<!-- SC_OFF -->")[1].split("<!-- SC_ON -->")[0]
     text = re.sub(r"<[^>]+>", " ", content)
@@ -82,7 +92,7 @@ def _strip_html(content: str) -> str:
 
 
 def _retry_after_seconds(exc: HTTPError) -> float | None:
-    """Seconds to wait from a 429's ``Retry-After`` header, capped at 30s."""
+    """429 응답의 ``Retry-After`` 헤더에서 대기 시간(초)을 얻는다. 최대 30초로 제한."""
     try:
         val = exc.headers.get("Retry-After") if getattr(exc, "headers", None) else None
         return min(float(val), 30.0) if val else None
@@ -97,12 +107,12 @@ def _fetch_subreddit_rss(
     timeout: float,
     _retry: bool = True,
 ) -> list[dict]:
-    """Default path: parse the public Atom search feed for a subreddit.
+    """기본 경로: 서브레딧의 공개 Atom 검색 피드를 파싱한다.
 
-    Carries no score / comment counts, so those fields are left None and the
-    post is tagged ``source="rss"`` for honest display. On a 429 (Reddit's
-    per-IP rate limit) we back off once — honouring ``Retry-After`` when
-    present — before giving up, so a transient burst doesn't blank the feed.
+    점수/댓글 수가 실려 오지 않으므로 해당 필드는 None으로 두고, 정직한
+    표시를 위해 게시글에 ``source="rss"`` 태그를 답니다. 429(Reddit의
+    IP당 요청 제한)를 받으면 — ``Retry-After``가 있으면 존중하며 — 포기하기
+    전에 한 번 백오프하므로, 일시적 폭주가 피드를 통째로 비우지 않습니다.
     """
     url = _RSS.format(sub=sub, qs=_search_qs(ticker, limit))
     req = Request(url, headers={"User-Agent": _UA})
@@ -121,8 +131,8 @@ def _fetch_subreddit_rss(
         logger.warning("Reddit RSS fetch failed for r/%s · %s: %s", sub, ticker, exc)
         return []
     except (OSError, http.client.HTTPException, ET.ParseError) as exc:
-        # OSError covers URLError/TimeoutError/connection resets; HTTPException
-        # covers chunked-transfer errors (IncompleteRead/BadStatusLine, #1024).
+        # OSError는 URLError/TimeoutError/연결 리셋을 포괄하고, HTTPException은
+        # 청크 전송(chunked-transfer) 오류(IncompleteRead/BadStatusLine, #1024)를 포괄합니다.
         logger.warning("Reddit RSS fetch failed for r/%s · %s: %s", sub, ticker, exc)
         return []
 
@@ -150,13 +160,13 @@ def _fetch_subreddit_json(
     limit: int,
     timeout: float,
 ) -> list[dict]:
-    """Richer JSON search path (carries score / comment counts).
+    """더 풍부한 JSON 검색 경로(점수/댓글 수가 실려 온다).
 
-    Reddit's WAF currently returns ``403 Blocked`` on this endpoint for
-    non-OAuth clients (issue #862), so it is NOT used by default — calling it on
-    every request only doubled our volume against the per-IP rate limit and
-    triggered 429s on the RSS fallback. Kept for the day the WAF relaxes or an
-    OAuth token is wired in; degrades to RSS on failure.
+    Reddit의 WAF가 현재 비(非)OAuth 클라이언트의 이 엔드포인트 요청에
+    ``403 Blocked``를 반환하므로(이슈 #862), 기본으로는 쓰지 않습니다 —
+    매 요청마다 호출하면 IP당 요청 제한 대비 요청량만 두 배가 되어 RSS
+    폴백에서 429를 유발했습니다. WAF가 완화되거나 OAuth 토큰이 연결될 날을
+    위해 남겨 둡니다; 실패 시 RSS로 완화됩니다.
     """
     url = _API.format(sub=sub, qs=_search_qs(ticker, limit))
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
@@ -179,11 +189,12 @@ def _fetch_subreddit(
     limit: int,
     timeout: float,
 ) -> list[dict]:
-    """Fetch one subreddit, RSS-first.
+    """서브레딧 하나를 RSS 우선으로 가져온다.
 
-    The JSON search endpoint is reliably WAF-blocked (403) for public clients,
-    so we go straight to the RSS feed — which serves our identified User-Agent
-    reliably — halving our request volume against Reddit's per-IP rate limit.
+    JSON 검색 엔드포인트는 공개 클라이언트에 대해 WAF가 확실하게
+    차단하므로(403), 신원이 드러나는 User-Agent를 안정적으로 받아 주는
+    RSS 피드로 바로 갑니다 — Reddit의 IP당 요청 제한 대비 요청량이
+    절반으로 줄어듭니다.
     """
     return _fetch_subreddit_rss(ticker, sub, limit, timeout)
 
@@ -195,15 +206,15 @@ def fetch_reddit_posts(
     timeout: float = 10.0,
     inter_request_delay: float = 1.0,
 ) -> str:
-    """Fetch recent Reddit posts mentioning ``ticker`` across finance
-    subreddits and return them as a formatted plaintext block.
+    """금융 서브레딧들에서 ``ticker``를 언급한 최근 Reddit 게시글을 가져와
+    형식을 갖춘 일반 텍스트 블록으로 반환한다.
 
-    ``inter_request_delay`` paces the (now RSS-only) per-subreddit requests to
-    stay under Reddit's public per-IP rate limit; combined with the RSS-first
-    path it makes 429s rare even when several analyses run back-to-back.
+    ``inter_request_delay``는 (이제 RSS 전용인) 서브레딧별 요청 사이에
+    간격을 두어 Reddit의 공개 IP당 요청 제한을 넘지 않게 합니다; RSS 우선
+    경로와 결합하면 여러 분석이 연달아 돌아도 429가 드물어집니다.
     """
-    # Crypto reaches us as a Yahoo pair (BTC-USD); search Reddit for the base
-    # ("BTC") so the query actually matches discussion instead of near-nothing.
+    # 암호화폐는 야후 페어(BTC-USD) 형태로 들어오는데, Reddit에서는 기초
+    # 자산("BTC")으로 검색해야 거의 아무것도 안 걸리는 대신 실제 토론이 걸립니다.
     ticker = crypto_base(ticker) or ticker
     blocks = []
     total_posts = 0
@@ -228,8 +239,8 @@ def fetch_reddit_posts(
             created_str = (
                 time.strftime("%Y-%m-%d", time.gmtime(created)) if created else "?"
             )
-            # Score / comment counts are absent on the RSS fallback path —
-            # show them only when present rather than printing fake zeros.
+            # RSS 폴백 경로에서는 점수/댓글 수가 없습니다 — 가짜 0을 찍는
+            # 대신 값이 있을 때만 표시합니다.
             meta = created_str
             if score is not None and comments is not None:
                 meta += f" · {score:>4}↑ · {comments:>3}c"

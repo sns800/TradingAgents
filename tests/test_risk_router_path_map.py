@@ -1,11 +1,12 @@
-"""Shared-router / path_map completeness (#1088).
+"""[모듈 개요] 공용 라우터(router)와 경로 맵(path_map)의 완전성을 검증하는 테스트 (#1088).
 
-Both `should_continue_risk_analysis` (three risk edges) and
-`should_continue_debate` (two research-debate edges) are single routers whose
-return set is larger than any one edge previously mapped. Each edge now shares a
-complete path map (`RISK_ANALYSIS_PATH_MAP` / `DEBATE_PATH_MAP`), so a
-fall-through return can never hit a missing entry -- which would crash LangGraph
-mid-run on prompt/i18n/refactor drift in the speaker labels.
+`should_continue_risk_analysis`(리스크 간선(edge) 3개)와
+`should_continue_debate`(리서치 토론 간선 2개)는 모두 단일 라우터인데,
+그 반환값 집합이 예전에 개별 간선에 매핑된 것보다 크다. 이제 각 간선은
+완전한 경로 맵(`RISK_ANALYSIS_PATH_MAP` / `DEBATE_PATH_MAP`)을 공유하므로,
+폴스루(fall-through) 반환이 누락된 항목에 걸리는 일이 없다 — 누락되면
+화자(speaker) 라벨의 프롬프트/국제화(i18n)/리팩터링 변화 때 LangGraph가
+실행 도중 크래시했을 것이다.
 """
 import pytest
 
@@ -26,11 +27,12 @@ def _debate_state(current_response, count=0):
     "Aggressive", "Aggressive Analyst",
     "Conservative", "Conservative Analyst",
     "Neutral", "Neutral Analyst",
-    "",                          # drift: empty label
-    "Aggressive Risk Analyst",   # drift: node renamed
-    "Agresivo",                  # drift: i18n / translated label
+    "",                          # 변형(drift): 빈 라벨
+    "Aggressive Risk Analyst",   # 변형(drift): 노드 이름 변경
+    "Agresivo",                  # 변형(drift): 국제화(i18n)/번역된 라벨
 ])
 def test_router_return_always_routable(latest_speaker):
+    """리스크 라우터의 반환값이 어떤 화자 라벨이든 항상 경로 맵에 존재하는지 검증하는 테스트."""
     logic = ConditionalLogic(max_risk_discuss_rounds=1)
     target = logic.should_continue_risk_analysis(_state(latest_speaker))
     assert target in RISK_ANALYSIS_PATH_MAP
@@ -38,32 +40,35 @@ def test_router_return_always_routable(latest_speaker):
 
 @pytest.mark.unit
 def test_router_terminates_at_round_limit():
+    """토론 라운드 한도에 도달하면 라우터가 토론을 종료시키는지 검증하는 테스트."""
     logic = ConditionalLogic(max_risk_discuss_rounds=1)
-    # count >= 3 * rounds routes to the Portfolio Manager (debate ends)
+    # count >= 3 * rounds이면 포트폴리오 매니저(Portfolio Manager)로 라우팅 (토론 종료)
     assert logic.should_continue_risk_analysis(_state("Neutral", count=3)) == "Portfolio Manager"
 
 
 @pytest.mark.unit
 def test_path_map_covers_full_router_range():
+    """리스크 라우터가 낼 수 있는 모든 반환값을 경로 맵이 포괄하는지 검증하는 테스트."""
     logic = ConditionalLogic(max_risk_discuss_rounds=1)
     returns = {
         logic.should_continue_risk_analysis(_state(s, c))
         for s in ("Aggressive", "Conservative", "Neutral", "drift")
         for c in (0, 99)
     }
-    # Every value the router can emit is a key in the shared map...
+    # 라우터가 낼 수 있는 모든 값이 공용 맵의 키이고...
     assert returns <= set(RISK_ANALYSIS_PATH_MAP)
-    # ...and the terminal target is reachable.
+    # ...종착(terminal) 대상에도 도달할 수 있어야 한다.
     assert "Portfolio Manager" in returns
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("current_response", [
     "Bull", "Bull Researcher", "Bear", "Bear Researcher",
-    "",                       # drift: empty label
-    "Optimista",              # drift: i18n / translated label
+    "",                       # 변형(drift): 빈 라벨
+    "Optimista",              # 변형(drift): 국제화(i18n)/번역된 라벨
 ])
 def test_debate_router_return_always_routable(current_response):
+    """토론 라우터의 반환값이 어떤 응답 라벨이든 항상 경로 맵에 존재하는지 검증하는 테스트."""
     logic = ConditionalLogic(max_debate_rounds=1)
     target = logic.should_continue_debate(_debate_state(current_response))
     assert target in DEBATE_PATH_MAP
@@ -71,6 +76,7 @@ def test_debate_router_return_always_routable(current_response):
 
 @pytest.mark.unit
 def test_debate_path_map_covers_full_router_range():
+    """토론 라우터가 낼 수 있는 모든 반환값을 경로 맵이 포괄하는지 검증하는 테스트."""
     logic = ConditionalLogic(max_debate_rounds=1)
     returns = {
         logic.should_continue_debate(_debate_state(s, c))
@@ -78,4 +84,4 @@ def test_debate_path_map_covers_full_router_range():
         for c in (0, 99)
     }
     assert returns <= set(DEBATE_PATH_MAP)
-    assert "Research Manager" in returns  # terminal reachable
+    assert "Research Manager" in returns  # 종착 대상 도달 가능

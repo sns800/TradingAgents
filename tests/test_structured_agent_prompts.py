@@ -1,12 +1,13 @@
-"""Agents on the schema-only structured-output path must not invite tool calls (#1130).
+"""[모듈 개요] 스키마 전용 구조화 출력(structured output) 경로의 에이전트가
+도구 호출(tool call)을 유도하지 않는지 검증하는 테스트 (#1130).
 
-`with_structured_output` binds exactly one tool (the schema). A prompt that
-primes tool use makes models emit an unknown `web_search` call, which discards
-the structured attempt and forces a free-text retry — an extra LLM round trip
-and the loss of typed output.
+`with_structured_output`은 정확히 하나의 도구(스키마)만 바인딩한다. 도구 사용을
+부추기는 프롬프트는 모델이 알 수 없는 `web_search` 호출을 내뱉게 만들고,
+그러면 구조화 시도가 폐기되어 자유 텍스트 재시도가 강제된다 — LLM 왕복이
+한 번 더 발생하고 타입 지정 출력도 잃는다.
 
-These assert the constraint reaches the *rendered* prompt each agent actually
-sends, not merely that the constant is referenced in the module.
+이 테스트들은 제약 문구가 모듈에서 상수로 참조되는 것에 그치지 않고,
+각 에이전트가 실제로 보내는 *렌더링된* 프롬프트에 도달하는지 확인한다.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from tradingagents.agents.utils.structured import NO_EXTERNAL_TOOLS
 
 
 def _capturing_llm(captured: dict, result):
-    """LLM whose structured binding records the prompt it was handed."""
+    """구조화 바인딩이 전달받은 프롬프트를 기록하는 모의(mock) LLM을 생성한다."""
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
         captured.__setitem__("prompt", prompt) or result
@@ -34,7 +35,7 @@ def _capturing_llm(captured: dict, result):
 
 
 def _prompt_text(prompt) -> str:
-    """Flatten a captured prompt (str, message list, or objects) to text."""
+    """캡처한 프롬프트(문자열, 메시지 목록, 객체)를 하나의 텍스트로 평탄화한다."""
     if isinstance(prompt, str):
         return prompt
     parts = []
@@ -45,6 +46,7 @@ def _prompt_text(prompt) -> str:
 
 @pytest.mark.unit
 def test_trader_prompt_states_constraint():
+    """트레이더(trader) 에이전트의 실제 프롬프트에 외부 도구 금지 문구가 포함되는지 검증하는 테스트."""
     from tradingagents.agents.schemas import TraderAction, TraderProposal
 
     captured = {}
@@ -58,6 +60,7 @@ def test_trader_prompt_states_constraint():
 
 @pytest.mark.unit
 def test_research_manager_prompt_states_constraint():
+    """리서치 매니저의 실제 프롬프트에 외부 도구 금지 문구가 포함되는지 검증하는 테스트."""
     from tradingagents.agents.schemas import PortfolioRating, ResearchPlan
 
     captured = {}
@@ -79,6 +82,7 @@ def test_research_manager_prompt_states_constraint():
 
 @pytest.mark.unit
 def test_portfolio_manager_prompt_states_constraint():
+    """포트폴리오 매니저의 실제 프롬프트에 외부 도구 금지 문구가 포함되는지 검증하는 테스트."""
     from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
 
     captured = {}
@@ -107,9 +111,10 @@ def test_portfolio_manager_prompt_states_constraint():
 
 @pytest.mark.unit
 def test_sentiment_prompt_states_constraint(monkeypatch):
+    """감성 분석가(sentiment analyst)의 프롬프트에 외부 도구 금지 문구가 포함되는지 검증하는 테스트."""
     from tradingagents.agents.schemas import SentimentBand, SentimentReport
 
-    # Pre-fetched sources are stubbed so the prompt builds without network I/O.
+    # 미리 수집되는 소스들을 스텁(stub) 처리해 네트워크 I/O 없이 프롬프트를 만든다.
     monkeypatch.setattr(sentiment, "fetch_stocktwits_messages", lambda *a, **k: "st")
     monkeypatch.setattr(sentiment, "fetch_reddit_posts", lambda *a, **k: "rd")
     monkeypatch.setattr(sentiment.get_news, "func", lambda *a, **k: "news", raising=False)
@@ -125,14 +130,15 @@ def test_sentiment_prompt_states_constraint(monkeypatch):
     })
     text = _prompt_text(captured["prompt"])
     assert NO_EXTERNAL_TOOLS in text
-    # This agent binds no tools, so tool-range wording must not reappear.
+    # 이 에이전트는 도구를 바인딩하지 않으므로 도구 날짜 범위 문구가 다시 나타나면 안 된다.
     assert "tool-call date ranges" not in text
 
 
 @pytest.mark.unit
 def test_tool_using_analysts_keep_their_date_guidance():
-    # The analysts that really do call tools keep the wording that anchors their
-    # tool date ranges (#836) — this fix is scoped to no-tool agents.
+    """도구를 실제로 쓰는 분석가들은 날짜 범위 안내 문구를 유지하는지 검증하는 테스트."""
+    # 실제로 도구를 호출하는 분석가들은 도구 날짜 범위를 고정하는 문구를 유지한다
+    # (#836) — 이 수정은 도구를 쓰지 않는 에이전트에만 적용된다.
     import tradingagents.agents.analysts.market_analyst as market
     import tradingagents.agents.analysts.news_analyst as news
     for module in (market, news):
@@ -141,7 +147,8 @@ def test_tool_using_analysts_keep_their_date_guidance():
 
 @pytest.mark.unit
 def test_constraint_text_is_unambiguous():
+    """제약 상수 문구가 명확하고 템플릿과 충돌하지 않는지 검증하는 테스트."""
     assert "do not call external tools" in NO_EXTERNAL_TOOLS.lower()
-    # No template braces: it is embedded in ChatPromptTemplate strings, where
-    # braces would be parsed as input variables.
+    # 템플릿 중괄호 금지: 이 문구는 ChatPromptTemplate 문자열에 삽입되는데,
+    # 중괄호는 입력 변수로 파싱되기 때문이다.
     assert "{" not in NO_EXTERNAL_TOOLS and "}" not in NO_EXTERNAL_TOOLS

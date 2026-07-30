@@ -1,9 +1,19 @@
+# =============================================================================
+# [모듈 개요 - 초보자용]
+# tradingagents.agents 서브패키지의 진입점으로, 각 에이전트 생성 함수와 상태
+# 클래스를 한곳에 모아 내보내는(re-export) 역할만 합니다.
+# 전체 파이프라인의 등장인물이 모두 여기 나열되어 있습니다:
+#   분석가(Analyst: 시장/뉴스/심리/펀더멘털) → 리서처 토론(강세론자 Bull vs
+#   약세론자 Bear, 리서치 매니저가 중재) → 트레이더(Trader) → 리스크 토론
+#   (공격적/보수적/중립적 애널리스트) → 포트폴리오 매니저(Portfolio Manager).
+# =============================================================================
+
 from .analysts.fundamentals_analyst import create_fundamentals_analyst
 from .analysts.market_analyst import create_market_analyst
 from .analysts.news_analyst import create_news_analyst
 from .analysts.sentiment_analyst import (
     create_sentiment_analyst,
-    create_social_media_analyst,  # deprecated alias kept for back-compat
+    create_social_media_analyst,  # 지원 중단(deprecated)된 별칭. 하위 호환성 유지용
 )
 from .managers.portfolio_manager import create_portfolio_manager
 from .managers.research_manager import create_research_manager
@@ -32,6 +42,6 @@ __all__ = [
     "create_portfolio_manager",
     "create_conservative_debator",
     "create_sentiment_analyst",
-    "create_social_media_analyst",  # deprecated; will be removed in a future version
+    "create_social_media_analyst",  # 지원 중단(deprecated). 향후 버전에서 제거 예정
     "create_trader",
 ]

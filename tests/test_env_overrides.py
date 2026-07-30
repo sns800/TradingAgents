@@ -1,4 +1,7 @@
-"""Tests for TRADINGAGENTS_* env-var overlay onto DEFAULT_CONFIG."""
+# 이 파일은 TRADINGAGENTS_* 환경 변수가 기본 설정(DEFAULT_CONFIG)을
+# 올바르게 덮어쓰는지(overlay) 검증하는 테스트 모음입니다.
+# 문자열/정수/불리언 변환과 잘못된 값 처리도 함께 확인합니다.
+"""TRADINGAGENTS_* 환경 변수의 DEFAULT_CONFIG 오버레이(overlay) 테스트."""
 
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ import tradingagents.default_config as default_config_module
 
 
 def _reload_with_env(monkeypatch, **overrides):
-    """Set/clear env vars then reload default_config to re-evaluate DEFAULT_CONFIG."""
+    """환경 변수를 설정/해제한 뒤 default_config를 다시 로드해 DEFAULT_CONFIG를 재평가하는 헬퍼."""
     for key in list(default_config_module._ENV_OVERRIDES):
         monkeypatch.delenv(key, raising=False)
     for key, val in overrides.items():
@@ -19,6 +22,7 @@ def _reload_with_env(monkeypatch, **overrides):
 
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
+    """환경 변수가 없으면 내장 기본값이 그대로 쓰이는지 검증하는 테스트."""
     dc = _reload_with_env(monkeypatch)
     assert dc.DEFAULT_CONFIG["llm_provider"] == "openai"
     assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gpt-5.5"
@@ -29,6 +33,7 @@ def test_no_env_uses_built_in_defaults(monkeypatch):
 
 
 def test_string_overrides(monkeypatch):
+    """문자열 타입 설정들이 환경 변수 값으로 덮어써지는지 검증하는 테스트."""
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_LLM_PROVIDER="google",
@@ -45,6 +50,7 @@ def test_string_overrides(monkeypatch):
 
 
 def test_int_coercion(monkeypatch):
+    """숫자 문자열 환경 변수가 정수(int)로 변환되는지 검증하는 테스트."""
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_MAX_DEBATE_ROUNDS="3",
@@ -64,12 +70,13 @@ def test_int_coercion(monkeypatch):
     ],
 )
 def test_bool_coercion(monkeypatch, raw, expected):
+    """다양한 표기(true/1/yes/on 등)의 불리언 환경 변수가 올바르게 변환되는지 검증하는 테스트."""
     dc = _reload_with_env(monkeypatch, TRADINGAGENTS_CHECKPOINT_ENABLED=raw)
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
 
 
 def test_reasoning_thinking_overrides(monkeypatch):
-    """The provider reasoning/thinking knobs are env-configurable (non-interactive runs)."""
+    """제공자별 추론/사고(reasoning/thinking) 옵션이 환경 변수로 설정 가능한지 검증하는 테스트 (비대화형 실행용)."""
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_OPENAI_REASONING_EFFORT="high",
@@ -82,7 +89,7 @@ def test_reasoning_thinking_overrides(monkeypatch):
 
 
 def test_reasoning_effort_defaults_to_none(monkeypatch):
-    """Unset reasoning/thinking knobs stay None so each provider uses its own default."""
+    """설정하지 않은 추론/사고 옵션은 None으로 남아 각 제공자의 자체 기본값이 쓰이는지 검증하는 테스트."""
     dc = _reload_with_env(monkeypatch)
     assert dc.DEFAULT_CONFIG["openai_reasoning_effort"] is None
     assert dc.DEFAULT_CONFIG["google_thinking_level"] is None
@@ -90,7 +97,7 @@ def test_reasoning_effort_defaults_to_none(monkeypatch):
 
 
 def test_empty_env_value_is_passthrough(monkeypatch):
-    """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
+    """빈 값의 TRADINGAGENTS_* 환경 변수는 내장 기본값을 덮어쓰지 않는지 검증하는 테스트."""
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_LLM_PROVIDER="",
@@ -101,18 +108,18 @@ def test_empty_env_value_is_passthrough(monkeypatch):
 
 
 def test_invalid_int_raises(monkeypatch):
-    """Garbage int values should surface a ValueError at import, not silently misconfigure."""
+    """숫자가 아닌 값은 조용히 잘못 설정되는 대신 임포트 시점에 ValueError를 내는지 검증하는 테스트."""
     monkeypatch.setenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", "not-a-number")
     with pytest.raises(ValueError, match="TRADINGAGENTS_MAX_DEBATE_ROUNDS"):
         importlib.reload(default_config_module)
-    # Restore module state for subsequent tests in this process
+    # 같은 프로세스의 이후 테스트를 위해 모듈 상태를 복원
     monkeypatch.delenv("TRADINGAGENTS_MAX_DEBATE_ROUNDS", raising=False)
     importlib.reload(default_config_module)
 
 
 @pytest.mark.parametrize("bad", ["treu", "flase", "maybe", "2", "enabled"])
 def test_invalid_bool_raises(monkeypatch, bad):
-    """A misspelled boolean must fail loudly (like ints) instead of silently False."""
+    """철자가 틀린 불리언 값은 조용히 False가 되는 대신 (정수처럼) 요란하게 실패하는지 검증하는 테스트."""
     monkeypatch.setenv("TRADINGAGENTS_CHECKPOINT_ENABLED", bad)
     with pytest.raises(ValueError, match="TRADINGAGENTS_CHECKPOINT_ENABLED"):
         importlib.reload(default_config_module)
@@ -121,7 +128,7 @@ def test_invalid_bool_raises(monkeypatch, bad):
 
 
 def test_unknown_env_var_is_ignored(monkeypatch):
-    """Env vars outside _ENV_OVERRIDES must not bleed into DEFAULT_CONFIG."""
+    """_ENV_OVERRIDES에 없는 환경 변수는 DEFAULT_CONFIG에 스며들지 않는지 검증하는 테스트."""
     dc = _reload_with_env(
         monkeypatch,
         TRADINGAGENTS_NONEXISTENT_KEY="oops",

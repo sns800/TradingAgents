@@ -1,21 +1,30 @@
-"""Shared model catalog for CLI selections and validation."""
+# =============================================================================
+# [모듈 개요 - 초보자용]
+# 이 파일은 CLI의 모델 선택 화면과 모델 이름 검증에 함께 쓰이는
+# "공용 모델 카탈로그"입니다. 프로바이더(provider)별 x 모드(quick/deep)별로
+# (표시 이름, 실제 모델 ID) 쌍의 목록을 정의합니다.
+# CLI는 get_model_options()로 선택지 목록을 가져오고,
+# validators.py는 get_known_models()로 "알려진 모델 ID 집합"을 만들어
+# 오타 검증(경고 표시)에 사용합니다.
+# =============================================================================
+"""CLI 선택 화면과 검증에 함께 쓰이는 공용 모델 카탈로그."""
 
 from __future__ import annotations
 
 ModelOption = tuple[str, str]
 ProviderModeOptions = dict[str, dict[str, list[ModelOption]]]
 
-# Providers that serve many / frequently-changing models: offer only "Custom
-# model ID" rather than a list that goes stale.
+# 모델 수가 많거나 자주 바뀌는 프로바이더: 금방 낡아버릴 목록 대신
+# "Custom model ID"(직접 입력)만 제공한다.
 _CUSTOM_ONLY: dict[str, list[ModelOption]] = {
     "quick": [("Custom model ID", "custom")],
     "deep": [("Custom model ID", "custom")],
 }
 
 
-# Shared model list for GLM via Z.AI (international) and BigModel (China).
-# Source: docs.z.ai (GLM Coding Plan supported models + LLM guides).
-# All GLM 4.7+ entries support thinking mode via thinking={"type":"enabled"}.
+# Z.AI(국제)와 BigModel(중국)을 통한 GLM 공용 모델 목록.
+# 출처: docs.z.ai (GLM Coding Plan 지원 모델 + LLM 가이드).
+# GLM 4.7 이상 항목은 모두 thinking={"type":"enabled"}로 사고 모드(thinking mode)를 지원한다.
 _GLM_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("GLM-5-Turbo - Fast, switchable thinking modes", "glm-5-turbo"),
@@ -33,16 +42,15 @@ _GLM_MODELS: dict[str, list[ModelOption]] = {
 }
 
 
-# Shared model list for Qwen's global (dashscope-intl) and CN (dashscope) endpoints.
-# Source: modelstudio.console.alibabacloud.com (Featured Models — Flagship + Cost-optimized).
+# Qwen의 글로벌(dashscope-intl) / 중국(dashscope) 엔드포인트 공용 모델 목록.
+# 출처: modelstudio.console.alibabacloud.com (Featured Models — Flagship + Cost-optimized).
 #
-# Only versioned IDs are exposed in the dropdown. The version-less aliases
-# (qwen-plus, qwen-flash) are documented by Alibaba as auto-upgrading
-# pointers ("backbone, latest, and snapshot ... have been upgraded to the
-# Qwen3 series"), which means their behavior shifts when Alibaba rotates
-# the backing model. Users who want a specific generation pick it
-# explicitly; users who really want auto-latest can enter the alias via
-# "Custom model ID".
+# 드롭다운에는 버전이 명시된 ID만 노출한다. 버전 없는 별칭(alias)인
+# qwen-plus, qwen-flash는 Alibaba 문서상 자동 업그레이드되는 포인터
+# ("backbone, latest, and snapshot ... have been upgraded to the Qwen3
+# series")이므로, Alibaba가 뒷단 모델을 교체하면 동작이 달라진다.
+# 특정 세대를 원하는 사용자는 명시적으로 선택하고, 정말 자동 최신을
+# 원하는 사용자는 "Custom model ID"로 별칭을 직접 입력하면 된다.
 _QWEN_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("Qwen 3.7 Plus - Latest, balanced speed/cost", "qwen3.7-plus"),
@@ -58,9 +66,9 @@ _QWEN_MODELS: dict[str, list[ModelOption]] = {
 }
 
 
-# Shared model list for MiniMax's global and CN endpoints (same IDs).
-# Full official lineup per platform.minimax.io/docs/api-reference/text-openai-api.
-# M3 carries a 1M-token context window; the M2.x line is 204,800 tokens.
+# MiniMax의 글로벌 / 중국 엔드포인트 공용 모델 목록 (모델 ID는 동일).
+# 공식 전체 라인업 출처: platform.minimax.io/docs/api-reference/text-openai-api.
+# M3는 100만(1M) 토큰 컨텍스트 윈도우를 가지며, M2.x 라인은 204,800 토큰이다.
 _MINIMAX_MODELS: dict[str, list[ModelOption]] = {
     "quick": [
         ("MiniMax-M3 - Latest, 1M ctx, native multimodal", "MiniMax-M3"),
@@ -126,10 +134,10 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Grok 4.20 Multi-Agent - Multi-agent reasoning", "grok-4.20-multi-agent-0309"),
         ],
     },
-    # DeepSeek: the deepseek-chat / deepseek-reasoner aliases are deprecated
-    # (2026-07-24) and now map to V4 Flash; expose the V4 IDs directly. V4 Flash
-    # serves both non-thinking and thinking modes (the DeepSeekChatOpenAI client
-    # handles the reasoning_content round-trip).
+    # DeepSeek: deepseek-chat / deepseek-reasoner 별칭은 폐기 예정(deprecated,
+    # 2026-07-24)이며 현재 V4 Flash로 매핑된다; V4 ID를 직접 노출한다. V4 Flash는
+    # 비사고(non-thinking)와 사고(thinking) 모드를 모두 제공한다
+    # (reasoning_content 왕복 처리는 DeepSeekChatOpenAI 클라이언트가 담당).
     "deepseek": {
         "quick": [
             ("DeepSeek V4 Flash - Latest fast model, thinking + non-thinking", "deepseek-v4-flash"),
@@ -141,26 +149,26 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
-    # Qwen: same model IDs across global (dashscope-intl) and China
-    # (dashscope) endpoints, so the two provider keys share one model list.
+    # Qwen: 글로벌(dashscope-intl)과 중국(dashscope) 엔드포인트에서 모델 ID가
+    # 같으므로, 두 프로바이더 키가 하나의 모델 목록을 공유한다.
     "qwen": _QWEN_MODELS,
     "qwen-cn": _QWEN_MODELS,
-    # GLM: Z.AI (international) and BigModel (China) host the same model
-    # IDs; the two provider keys share one model list.
+    # GLM: Z.AI(국제)와 BigModel(중국)이 같은 모델 ID를 호스팅하므로,
+    # 두 프로바이더 키가 하나의 모델 목록을 공유한다.
     "glm": _GLM_MODELS,
     "glm-cn": _GLM_MODELS,
-    # MiniMax: same model IDs across global (.io) and China (.com) regions,
-    # so the two provider keys share one model list.
+    # MiniMax: 글로벌(.io)과 중국(.com) 리전에서 모델 ID가 같으므로,
+    # 두 프로바이더 키가 하나의 모델 목록을 공유한다.
     "minimax": _MINIMAX_MODELS,
     "minimax-cn": _MINIMAX_MODELS,
-    # OpenRouter: fetched dynamically. Azure: any deployed model name.
-    # Ollama display labels intentionally omit a "local" marker — the
-    # endpoint is now configurable via OLLAMA_BASE_URL, so the same labels
-    # apply whether the user runs ollama-serve on localhost or against a
-    # remote host. The actual resolved endpoint is surfaced separately by
-    # cli.utils.confirm_ollama_endpoint() right after provider selection.
-    # "Custom model ID" lets users pick any model they have pulled via
-    # `ollama pull` beyond the three suggested defaults.
+    # OpenRouter: 동적으로 가져온다. Azure: 배포된 어떤 모델 이름이든 허용.
+    # Ollama 표시 라벨에는 의도적으로 "local" 표기를 넣지 않았다 —
+    # 엔드포인트가 OLLAMA_BASE_URL로 설정 가능해졌으므로, 사용자가
+    # ollama-serve를 localhost에서 돌리든 원격 호스트를 쓰든 같은 라벨이
+    # 적용된다. 실제로 결정된 엔드포인트는 프로바이더 선택 직후
+    # cli.utils.confirm_ollama_endpoint()가 별도로 보여준다.
+    # "Custom model ID"를 통해 사용자는 제안된 세 가지 기본값 외에
+    # `ollama pull`로 받아 둔 어떤 모델이든 선택할 수 있다.
     "ollama": {
         "quick": [
             ("Qwen3:latest (8B)", "qwen3:latest"),
@@ -175,29 +183,34 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
-    # Generic OpenAI-compatible endpoint: the model is whatever the user's
-    # server serves, so only "Custom model ID" is offered.
+    # 범용 OpenAI 호환(OpenAI-compatible) 엔드포인트: 모델은 사용자의 서버가
+    # 제공하는 것이므로 "Custom model ID"만 제공한다.
     "openai_compatible": _CUSTOM_ONLY,
-    # Hosted OpenAI-compatible providers that serve many (and frequently
-    # changing) models — offer "Custom model ID" rather than a list that goes
-    # stale. The endpoint + key are wired by the provider; the user picks the
-    # model their account has access to.
+    # 많은 (그리고 자주 바뀌는) 모델을 제공하는 호스팅형 OpenAI 호환
+    # 프로바이더들 — 금방 낡아버릴 목록 대신 "Custom model ID"를 제공한다.
+    # 엔드포인트와 키는 프로바이더 설정이 연결하고, 모델은 사용자가 자기
+    # 계정에서 접근 가능한 것을 고른다.
     "mistral": _CUSTOM_ONLY,
     "kimi": _CUSTOM_ONLY,
     "groq": _CUSTOM_ONLY,
     "nvidia": _CUSTOM_ONLY,
-    # Bedrock model IDs / cross-region inference profile IDs are user-specified.
+    # Bedrock 모델 ID / 교차 리전 추론 프로필(cross-region inference profile) ID는 사용자가 지정한다.
     "bedrock": _CUSTOM_ONLY,
 }
 
 
 def get_model_options(provider: str, mode: str) -> list[ModelOption]:
-    """Return shared model options for a provider and selection mode."""
+    """프로바이더와 선택 모드에 대한 공용 모델 옵션 목록을 반환한다."""
     return MODEL_OPTIONS[provider.lower()][mode]
 
 
 def get_known_models() -> dict[str, list[str]]:
-    """Build known model names from the shared CLI catalog."""
+    """공용 CLI 카탈로그로부터 알려진 모델 이름 목록을 만든다.
+
+    [초보자용 설명] MODEL_OPTIONS의 (표시 이름, 모델 ID) 쌍들에서 모델 ID만
+    추려 프로바이더별로 정렬된 리스트를 만든다. validators.py가 이 결과로
+    "알려진 모델인지" 검사한다.
+    """
     return {
         provider: sorted(
             {

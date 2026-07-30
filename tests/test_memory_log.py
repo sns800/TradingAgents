@@ -1,4 +1,7 @@
-"""Tests for TradingMemoryLog — storage, deferred reflection, PM injection, legacy removal."""
+# 이 파일은 거래 기억 로그(TradingMemoryLog)를 검증하는 테스트 모음입니다.
+# 결정 저장, 결과 확정 후의 지연 회고(deferred reflection), 포트폴리오 매니저(PM)
+# 프롬프트 주입, 구식 메모리 코드 제거를 확인합니다.
+"""TradingMemoryLog 테스트 — 저장, 지연 회고(deferred reflection), PM 주입, 레거시 제거."""
 
 from unittest.mock import MagicMock, patch
 
@@ -28,7 +31,7 @@ DECISION_NO_RATING = (
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# 공용 헬퍼
 # ---------------------------------------------------------------------------
 
 def make_log(tmp_path, filename="trading_memory.md"):
@@ -37,7 +40,7 @@ def make_log(tmp_path, filename="trading_memory.md"):
 
 
 def _seed_completed(tmp_path, ticker, date, decision_text, reflection_text, filename="trading_memory.md"):
-    """Write a completed entry directly to file, bypassing the API."""
+    """API를 거치지 않고 완료된 항목을 파일에 직접 기록하는 헬퍼."""
     entry = (
         f"[{date} | {ticker} | Buy | +1.0% | +0.5% | 5d]\n\n"
         f"DECISION:\n{decision_text}\n\n"
@@ -49,18 +52,18 @@ def _seed_completed(tmp_path, ticker, date, decision_text, reflection_text, file
 
 
 def _resolve_entry(log, ticker, date, decision, reflection="Good call."):
-    """Store a decision then immediately resolve it via the API."""
+    """결정을 저장한 뒤 API를 통해 즉시 결과를 확정(resolve)하는 헬퍼."""
     log.store_decision(ticker, date, decision)
     log.update_with_outcome(ticker, date, 0.05, 0.02, 5, reflection)
 
 
 def _price_df(prices):
-    """Minimal DataFrame matching yfinance .history() output shape."""
+    """yfinance .history() 출력 형태에 맞춘 최소한의 DataFrame을 만드는 헬퍼."""
     return pd.DataFrame({"Close": prices})
 
 
 def _make_pm_state(past_context=""):
-    """Minimal AgentState dict for portfolio_manager_node."""
+    """portfolio_manager_node용 최소한의 AgentState dict를 만드는 헬퍼."""
     return {
         "company_of_interest": "NVDA",
         "past_context": past_context,
@@ -85,8 +88,8 @@ def _make_pm_state(past_context=""):
 
 
 def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None):
-    """Build a MagicMock LLM whose with_structured_output binding captures the
-    prompt and returns a real PortfolioDecision (so render_pm_decision works).
+    """with_structured_output 바인딩이 프롬프트를 캡처하고 실제 PortfolioDecision을
+    반환하는 MagicMock LLM을 만드는 헬퍼 (render_pm_decision이 동작하도록).
     """
     if decision is None:
         decision = PortfolioDecision(
@@ -104,18 +107,21 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
 
 
 # ---------------------------------------------------------------------------
-# Core: storage and read path
+# 핵심: 저장과 읽기 경로
 # ---------------------------------------------------------------------------
 
 class TestTradingMemoryLogCore:
+    """기억 로그의 저장·파싱·조회 등 핵심 동작을 검증하는 테스트 묶음."""
 
     def test_store_creates_file(self, tmp_path):
+        """첫 결정 저장 시 로그 파일이 생성되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         assert not (tmp_path / "trading_memory.md").exists()
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert (tmp_path / "trading_memory.md").exists()
 
     def test_store_appends_not_overwrites(self, tmp_path):
+        """새 결정이 기존 항목을 덮어쓰지 않고 뒤에 추가되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.store_decision("AAPL", "2026-01-11", DECISION_OVERWEIGHT)
@@ -125,14 +131,14 @@ class TestTradingMemoryLogCore:
         assert entries[1]["ticker"] == "AAPL"
 
     def test_store_decision_idempotent(self, tmp_path):
-        """Calling store_decision twice with same (ticker, date) stores only one entry."""
+        """같은 (티커, 날짜)로 store_decision을 두 번 호출해도 항목이 하나만 저장되는지 검증하는 테스트 (멱등성)."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert len(log.load_entries()) == 1
 
     def test_batch_update_resolves_multiple_entries(self, tmp_path):
-        """batch_update_with_outcomes resolves multiple pending entries in one write."""
+        """batch_update_with_outcomes가 여러 대기(pending) 항목을 한 번의 쓰기로 확정하는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         log.store_decision("NVDA", "2026-01-12", DECISION_SELL)
@@ -154,30 +160,34 @@ class TestTradingMemoryLogCore:
         assert entries[1]["reflection"] == "Second correct."
 
     def test_pending_tag_format(self, tmp_path):
+        """대기 중인 항목의 태그 형식이 올바른지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         text = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
         assert "[2026-01-10 | NVDA | Buy | pending]" in text
 
-    # Rating parsing
+    # 등급(rating) 파싱
 
     def test_rating_parsed_buy(self, tmp_path):
+        """결정 텍스트에서 Buy 등급이 파싱되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert log.load_entries()[0]["rating"] == "Buy"
 
     def test_rating_parsed_overweight(self, tmp_path):
+        """Overweight(비중 확대) 등급이 파싱되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("AAPL", "2026-01-11", DECISION_OVERWEIGHT)
         assert log.load_entries()[0]["rating"] == "Overweight"
 
     def test_rating_fallback_hold(self, tmp_path):
+        """등급 표기가 없으면 기본값인 Hold로 처리되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("MSFT", "2026-01-12", DECISION_NO_RATING)
         assert log.load_entries()[0]["rating"] == "Hold"
 
     def test_rating_priority_over_prose(self, tmp_path):
-        """'Rating: X' label wins even when an opposing rating word appears earlier in prose."""
+        """본문에 상반된 등급 단어가 먼저 나와도 'Rating: X' 라벨이 우선하는지 검증하는 테스트."""
         decision = (
             "The sell thesis is weak. The hold case is marginal.\n\n"
             "Rating: Buy\n\n"
@@ -187,10 +197,10 @@ class TestTradingMemoryLogCore:
         log.store_decision("NVDA", "2026-01-10", decision)
         assert log.load_entries()[0]["rating"] == "Buy"
 
-    # Delimiter robustness
+    # 구분자(delimiter) 견고성
 
     def test_decision_with_markdown_separator(self, tmp_path):
-        """LLM decision containing '---' must not corrupt the entry."""
+        """LLM 결정문에 '---'가 포함되어도 항목이 손상되지 않는지 검증하는 테스트."""
         decision = "Rating: Buy\n\n---\n\nRisk: elevated volatility."
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", decision)
@@ -201,10 +211,12 @@ class TestTradingMemoryLogCore:
     # load_entries
 
     def test_load_entries_empty_file(self, tmp_path):
+        """로그 파일이 없으면 빈 목록을 반환하는지 검증하는 테스트."""
         log = make_log(tmp_path)
         assert log.load_entries() == []
 
     def test_load_entries_single(self, tmp_path):
+        """단일 항목이 모든 필드와 함께 올바르게 파싱되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         entries = log.load_entries()
@@ -217,6 +229,7 @@ class TestTradingMemoryLogCore:
         assert e["raw"] is None
 
     def test_load_entries_multiple(self, tmp_path):
+        """여러 항목이 저장 순서대로 로드되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.store_decision("AAPL", "2026-01-11", DECISION_OVERWEIGHT)
@@ -226,6 +239,7 @@ class TestTradingMemoryLogCore:
         assert [e["ticker"] for e in entries] == ["NVDA", "AAPL", "MSFT"]
 
     def test_decision_content_preserved(self, tmp_path):
+        """결정 본문이 손실 없이 그대로 보존되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert log.load_entries()[0]["decision"] == DECISION_BUY.strip()
@@ -233,6 +247,7 @@ class TestTradingMemoryLogCore:
     # get_pending_entries
 
     def test_get_pending_returns_pending_only(self, tmp_path):
+        """완료된 항목은 제외하고 대기 중인 항목만 반환하는지 검증하는 테스트."""
         log = make_log(tmp_path)
         _seed_completed(tmp_path, "NVDA", "2026-01-05", "Buy NVDA.", "Correct.")
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
@@ -244,15 +259,18 @@ class TestTradingMemoryLogCore:
     # get_past_context
 
     def test_get_past_context_empty(self, tmp_path):
+        """로그가 비어 있으면 과거 컨텍스트도 빈 문자열인지 검증하는 테스트."""
         log = make_log(tmp_path)
         assert log.get_past_context("NVDA") == ""
 
     def test_get_past_context_pending_excluded(self, tmp_path):
+        """아직 결과가 없는 대기 항목은 과거 컨텍스트에서 제외되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert log.get_past_context("NVDA") == ""
 
     def test_get_past_context_same_ticker(self, tmp_path):
+        """같은 티커의 완료 항목이 과거 분석 섹션에 포함되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         _seed_completed(tmp_path, "NVDA", "2026-01-05", "Buy NVDA — AI capex thesis intact.", "Directionally correct.")
         ctx = log.get_past_context("NVDA")
@@ -260,6 +278,7 @@ class TestTradingMemoryLogCore:
         assert "Buy NVDA" in ctx
 
     def test_get_past_context_cross_ticker(self, tmp_path):
+        """다른 티커의 교훈은 교차 티커(cross-ticker) 섹션에 들어가는지 검증하는 테스트."""
         log = make_log(tmp_path)
         _seed_completed(tmp_path, "AAPL", "2026-01-05", "Buy AAPL — Services growth.", "Correct.")
         ctx = log.get_past_context("NVDA")
@@ -267,7 +286,7 @@ class TestTradingMemoryLogCore:
         assert "Past analyses of NVDA" not in ctx
 
     def test_n_same_limit_respected(self, tmp_path):
-        """Only the n_same most recent same-ticker entries are included."""
+        """같은 티커 항목은 최근 n_same개까지만 포함되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         for i in range(6):
             _seed_completed(tmp_path, "NVDA", f"2026-01-{i+1:02d}", f"Buy entry {i}.", "Correct.")
@@ -276,7 +295,7 @@ class TestTradingMemoryLogCore:
         assert "Buy entry 5" in ctx
 
     def test_n_cross_limit_respected(self, tmp_path):
-        """Only the n_cross most recent cross-ticker entries are included."""
+        """교차 티커 항목은 최근 n_cross개까지만 포함되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         for i, ticker in enumerate(["AAPL", "MSFT", "GOOG", "META"]):
             _seed_completed(tmp_path, ticker, f"2026-01-{i+1:02d}", f"Buy {ticker}.", "Correct.")
@@ -284,50 +303,51 @@ class TestTradingMemoryLogCore:
         assert "AAPL" not in ctx
         assert "META" in ctx
 
-    # No-op when config is None
+    # 설정이 None이면 아무 동작도 하지 않음
 
     def test_no_log_path_is_noop(self):
+        """로그 경로 설정이 없으면 모든 연산이 무해한 no-op이 되는지 검증하는 테스트."""
         log = TradingMemoryLog(config=None)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         assert log.load_entries() == []
         assert log.get_past_context("NVDA") == ""
 
-    # Rotation: opt-in cap on resolved entries
+    # 회전(rotation): 확정된 항목 수에 대한 선택적 상한
 
     def test_rotation_disabled_by_default(self, tmp_path):
-        """Without max_entries, all resolved entries are kept."""
+        """max_entries가 없으면 확정된 항목이 모두 보존되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         for i in range(7):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         assert len(log.load_entries()) == 7
 
     def test_rotation_prunes_oldest_resolved(self, tmp_path):
-        """When max_entries is set and exceeded, oldest resolved entries are pruned."""
+        """max_entries를 초과하면 가장 오래된 확정 항목부터 정리(prune)되는지 검증하는 테스트."""
         log = TradingMemoryLog({
             "memory_log_path": str(tmp_path / "trading_memory.md"),
             "memory_log_max_entries": 3,
         })
-        # Resolve 5 entries; rotation should keep only the 3 most recent.
+        # 5개 항목을 확정하면, 회전에 의해 최근 3개만 남아야 합니다.
         for i in range(5):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         entries = log.load_entries()
         assert len(entries) == 3
-        # Confirm the OLDEST were dropped, not the newest.
+        # 최신이 아닌 가장 오래된 항목이 삭제되었는지 확인.
         dates = [e["date"] for e in entries]
         assert dates == ["2026-01-03", "2026-01-04", "2026-01-05"]
 
     def test_rotation_never_prunes_pending(self, tmp_path):
-        """Pending entries (unresolved) are kept regardless of the cap."""
+        """대기(미확정) 항목은 상한과 무관하게 절대 삭제되지 않는지 검증하는 테스트."""
         log = TradingMemoryLog({
             "memory_log_path": str(tmp_path / "trading_memory.md"),
             "memory_log_max_entries": 2,
         })
-        # 3 resolved + 2 pending. With cap=2, only 2 resolved survive; both pending stay.
+        # 확정 3개 + 대기 2개. 상한=2이면 확정 2개만 남고, 대기 2개는 모두 유지됩니다.
         for i in range(3):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Resolved {i}.")
         log.store_decision("NVDA", "2026-02-01", DECISION_BUY)
         log.store_decision("NVDA", "2026-02-02", DECISION_OVERWEIGHT)
-        # Trigger rotation by resolving one more entry — pending entries must stay.
+        # 항목을 하나 더 확정해 회전을 유발 — 대기 항목은 그대로 남아야 합니다.
         _resolve_entry(log, "NVDA", "2026-01-04", DECISION_BUY, "Resolved 3.")
         entries = log.load_entries()
         pending = [e for e in entries if e["pending"]]
@@ -336,7 +356,7 @@ class TestTradingMemoryLogCore:
         assert len(resolved) == 2, f"expected 2 resolved after rotation, got {len(resolved)}"
 
     def test_rotation_under_cap_is_noop(self, tmp_path):
-        """No rotation when resolved count <= max_entries."""
+        """확정 항목 수가 max_entries 이하면 회전이 일어나지 않는지 검증하는 테스트."""
         log = TradingMemoryLog({
             "memory_log_path": str(tmp_path / "trading_memory.md"),
             "memory_log_max_entries": 10,
@@ -345,24 +365,24 @@ class TestTradingMemoryLogCore:
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
         assert len(log.load_entries()) == 3
 
-    # Rating parsing: markdown bold and numbered list formats
+    # 등급 파싱: 마크다운 굵게 표시와 번호 목록 형식
 
     def test_rating_parsed_from_bold_markdown(self, tmp_path):
-        """**Rating**: Buy — markdown bold around the label must not prevent parsing."""
+        """**Rating**: Buy — 라벨을 감싼 마크다운 굵게 표시가 파싱을 막지 않는지 검증하는 테스트."""
         decision = "**Rating**: Buy\nEnter at $190."
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", decision)
         assert log.load_entries()[0]["rating"] == "Buy"
 
     def test_rating_parsed_from_bold_value(self, tmp_path):
-        """Rating: **Sell** — markdown bold around the value must not prevent parsing."""
+        """Rating: **Sell** — 값을 감싼 마크다운 굵게 표시가 파싱을 막지 않는지 검증하는 테스트."""
         decision = "Rating: **Sell**\nExit immediately."
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", decision)
         assert log.load_entries()[0]["rating"] == "Sell"
 
     def test_rating_label_wins_over_prose_with_markdown(self, tmp_path):
-        """Rating: **Sell** must win even when prose contains a conflicting rating word."""
+        """본문에 상충하는 등급 단어가 있어도 Rating: **Sell** 라벨이 우선하는지 검증하는 테스트."""
         decision = (
             "The buy thesis is weakened by guidance.\n"
             "Rating: **Sell**\n"
@@ -373,7 +393,7 @@ class TestTradingMemoryLogCore:
         assert log.load_entries()[0]["rating"] == "Sell"
 
     def test_rating_parsed_from_numbered_list(self, tmp_path):
-        """1. Rating: Buy — numbered list prefix must not prevent parsing."""
+        """1. Rating: Buy — 번호 목록 접두사가 파싱을 막지 않는지 검증하는 테스트."""
         decision = "1. Rating: Buy\nEnter at $190."
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", decision)
@@ -381,14 +401,16 @@ class TestTradingMemoryLogCore:
 
 
 # ---------------------------------------------------------------------------
-# Deferred reflection: update_with_outcome, Reflector, _fetch_returns
+# 지연 회고(deferred reflection): update_with_outcome, Reflector, _fetch_returns
 # ---------------------------------------------------------------------------
 
 class TestDeferredReflection:
+    """실제 수익률이 확정된 뒤 항목을 갱신하는 지연 회고 흐름을 검증하는 테스트 묶음."""
 
     # update_with_outcome
 
     def test_update_replaces_pending_tag(self, tmp_path):
+        """결과 갱신 시 pending 태그가 수익률 정보로 교체되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.update_with_outcome("NVDA", "2026-01-10", 0.042, 0.021, 5, "Momentum confirmed.")
@@ -399,6 +421,7 @@ class TestDeferredReflection:
         assert "5d" in text
 
     def test_update_appends_reflection(self, tmp_path):
+        """결과 갱신 시 회고(reflection) 텍스트가 항목에 추가되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.update_with_outcome("NVDA", "2026-01-10", 0.042, 0.021, 5, "Momentum confirmed.")
@@ -410,7 +433,7 @@ class TestDeferredReflection:
         assert e["decision"] == DECISION_BUY.strip()
 
     def test_update_preserves_other_entries(self, tmp_path):
-        """Only the matching entry is modified; all other entries remain unchanged."""
+        """일치하는 항목만 수정되고 나머지 항목들은 그대로 유지되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.store_decision("AAPL", "2026-01-11", "Rating: Hold\nHold AAPL.")
@@ -425,7 +448,7 @@ class TestDeferredReflection:
         assert msft["ticker"] == "MSFT" and msft["pending"] is True
 
     def test_update_atomic_write(self, tmp_path):
-        """A pre-existing .tmp file is overwritten; the log is correctly updated."""
+        """기존에 남아 있던 .tmp 파일이 덮어써지고 로그가 올바르게 갱신되는지 검증하는 테스트 (원자적 쓰기)."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         stale_tmp = tmp_path / "trading_memory.tmp"
@@ -438,11 +461,12 @@ class TestDeferredReflection:
         assert entries[0]["pending"] is False
 
     def test_update_noop_when_no_log_path(self):
+        """로그 경로가 없으면 결과 갱신도 오류 없이 무시되는지 검증하는 테스트."""
         log = TradingMemoryLog(config=None)
         log.update_with_outcome("NVDA", "2026-01-10", 0.05, 0.02, 5, "Reflection")
 
     def test_formatting_roundtrip_after_update(self, tmp_path):
-        """All fields intact and blank line between tag and DECISION preserved after update."""
+        """갱신 후에도 모든 필드가 온전하고 태그와 DECISION 사이 빈 줄이 보존되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-10", DECISION_BUY)
         log.update_with_outcome("NVDA", "2026-01-10", 0.042, 0.021, 5, "Momentum confirmed.")
@@ -461,6 +485,7 @@ class TestDeferredReflection:
     # Reflector.reflect_on_final_decision
 
     def test_reflect_on_final_decision_returns_llm_output(self):
+        """Reflector가 LLM의 회고 출력을 그대로 반환하는지 검증하는 테스트."""
         mock_llm = MagicMock()
         mock_llm.invoke.return_value.content = "Directionally correct. Thesis confirmed."
         reflector = Reflector(mock_llm)
@@ -471,7 +496,7 @@ class TestDeferredReflection:
         mock_llm.invoke.assert_called_once()
 
     def test_reflect_on_final_decision_includes_returns_in_prompt(self):
-        """Return figures are present in the human message sent to the LLM."""
+        """LLM에 보내는 사용자 메시지에 수익률 수치가 포함되는지 검증하는 테스트."""
         mock_llm = MagicMock()
         mock_llm.invoke.return_value.content = "Incorrect call."
         reflector = Reflector(mock_llm)
@@ -487,6 +512,7 @@ class TestDeferredReflection:
     # TradingAgentsGraph._fetch_returns
 
     def test_fetch_returns_valid_ticker(self):
+        """정상 티커에 대해 수익률·알파(alpha)·보유일이 계산되는지 검증하는 테스트."""
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
@@ -502,7 +528,7 @@ class TestDeferredReflection:
         assert days == 5
 
     def test_fetch_returns_too_recent(self):
-        """Only 1 data point available → returns (None, None, None), no crash."""
+        """데이터가 1개뿐이면 크래시 없이 (None, None, None)을 반환하는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
@@ -512,7 +538,7 @@ class TestDeferredReflection:
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_delisted(self):
-        """Empty DataFrame → returns (None, None, None), no crash."""
+        """상장 폐지 등으로 빈 DataFrame이면 크래시 없이 (None, None, None)을 반환하는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         with patch("yfinance.Ticker") as mock_ticker_cls:
             m = MagicMock()
@@ -522,7 +548,7 @@ class TestDeferredReflection:
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_spy_shorter_than_stock(self):
-        """SPY having fewer rows than the stock must not raise IndexError."""
+        """벤치마크(SPY) 데이터가 종목보다 짧아도 IndexError가 나지 않는지 검증하는 테스트."""
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
@@ -536,10 +562,10 @@ class TestDeferredReflection:
         assert raw is not None and alpha is not None and days is not None
         assert days == 2
 
-    # TradingAgentsGraph._resolve_benchmark — picks index for alpha calc
+    # TradingAgentsGraph._resolve_benchmark — 알파 계산용 지수를 선택
 
     def test_resolve_benchmark_explicit_override(self):
-        """config['benchmark_ticker'] wins for every ticker."""
+        """config['benchmark_ticker']가 지정되면 모든 티커에 대해 우선하는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {
             "benchmark_ticker": "QQQ",
@@ -549,7 +575,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "NVDA") == "QQQ"
 
     def test_resolve_benchmark_suffix_map(self):
-        """Known suffixes route to their regional index."""
+        """알려진 거래소 접미사가 해당 지역 지수로 매핑되는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {
             "benchmark_ticker": None,
@@ -565,8 +591,8 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "AZN.L") == "^FTSE"
 
     def test_resolve_benchmark_china_a_shares(self):
-        """A-share tickers route to their exchange composite (uses the real
-        default benchmark_map, since A-share support relies on it)."""
+        """중국 A주 티커가 해당 거래소 종합지수로 매핑되는지 검증하는 테스트
+        (A주 지원은 실제 기본 benchmark_map에 의존하므로 그것을 사용)."""
         from tradingagents.default_config import DEFAULT_CONFIG
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {"benchmark_ticker": None,
@@ -575,7 +601,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "000001.SZ") == "399001.SZ"
 
     def test_resolve_benchmark_us_ticker_defaults_to_spy(self):
-        """US tickers (no dotted suffix) take the empty-suffix entry."""
+        """접미사 없는 미국 티커는 빈 접미사 항목(SPY)을 사용하는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {
             "benchmark_ticker": None,
@@ -585,7 +611,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "AAPL") == "SPY"
 
     def test_resolve_benchmark_unknown_suffix_falls_back(self):
-        """Unrecognised suffix (BRK.B, FAKE.XX) falls back to SPY."""
+        """모르는 접미사(BRK.B, FAKE.XX)는 SPY로 대체되는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {
             "benchmark_ticker": None,
@@ -595,7 +621,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "BRK.B") == "SPY"
 
     def test_resolve_benchmark_case_insensitive(self):
-        """Suffix matching is case-insensitive so 7203.t resolves like 7203.T."""
+        """접미사 매칭이 대소문자를 구분하지 않아 7203.t도 7203.T처럼 해석되는지 검증하는 테스트."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.config = {
             "benchmark_ticker": None,
@@ -604,7 +630,7 @@ class TestDeferredReflection:
         assert TradingAgentsGraph._resolve_benchmark(mock_graph, "7203.t") == "^N225"
 
     def test_reflector_includes_benchmark_in_label(self):
-        """benchmark_name appears in the prompt label, not 'SPY' hardcoded."""
+        """프롬프트 라벨에 하드코딩된 'SPY' 대신 benchmark_name이 나타나는지 검증하는 테스트."""
         mock_llm = MagicMock()
         mock_llm.invoke.return_value.content = "Directionally correct."
         reflector = Reflector(mock_llm)
@@ -620,7 +646,7 @@ class TestDeferredReflection:
         assert "Alpha vs SPY:" not in human_content
 
     def test_reflector_defaults_to_spy_for_unupdated_callers(self):
-        """Default benchmark_name keeps the SPY label for legacy callers."""
+        """benchmark_name을 넘기지 않는 기존 호출자에게는 SPY 라벨이 유지되는지 검증하는 테스트."""
         mock_llm = MagicMock()
         mock_llm.invoke.return_value.content = "ok"
         reflector = Reflector(mock_llm)
@@ -636,7 +662,7 @@ class TestDeferredReflection:
     # TradingAgentsGraph._resolve_pending_entries
 
     def test_resolve_skips_other_tickers(self, tmp_path):
-        """Pending AAPL entry is not resolved when the run is for NVDA."""
+        """NVDA 실행에서는 대기 중인 AAPL 항목이 확정되지 않는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("AAPL", "2026-01-10", DECISION_BUY)
         mock_graph = MagicMock(spec=TradingAgentsGraph)
@@ -647,7 +673,7 @@ class TestDeferredReflection:
         assert len(log.get_pending_entries()) == 1
 
     def test_resolve_marks_entry_completed(self, tmp_path):
-        """After resolve, get_pending_entries() is empty and the entry has a REFLECTION."""
+        """확정 후 대기 목록이 비고 항목에 REFLECTION이 채워지는지 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         mock_reflector = MagicMock()
@@ -667,27 +693,31 @@ class TestDeferredReflection:
 
 
 # ---------------------------------------------------------------------------
-# Portfolio Manager injection: past_context in state and prompt
+# 포트폴리오 매니저(PM) 주입: 상태와 프롬프트의 past_context
 # ---------------------------------------------------------------------------
 
 class TestPortfolioManagerInjection:
+    """과거 교훈(past_context)이 상태와 PM 프롬프트에 주입되는지 검증하는 테스트 묶음."""
 
-    # past_context in initial state
+    # 초기 상태의 past_context
 
     def test_past_context_in_initial_state(self):
+        """전달한 past_context가 초기 상태에 담기는지 검증하는 테스트."""
         propagator = Propagator()
         state = propagator.create_initial_state("NVDA", "2026-01-10", past_context="some context")
         assert "past_context" in state
         assert state["past_context"] == "some context"
 
     def test_past_context_defaults_to_empty(self):
+        """past_context를 넘기지 않으면 빈 문자열이 기본값인지 검증하는 테스트."""
         propagator = Propagator()
         state = propagator.create_initial_state("NVDA", "2026-01-10")
         assert state["past_context"] == ""
 
-    # PM prompt
+    # PM 프롬프트
 
     def test_pm_prompt_includes_past_context(self):
+        """past_context가 있으면 PM 프롬프트에 과거 교훈 섹션이 포함되는지 검증하는 테스트."""
         captured = {}
         llm = _structured_pm_llm(captured)
         pm_node = create_portfolio_manager(llm)
@@ -697,7 +727,7 @@ class TestPortfolioManagerInjection:
         assert "Great call." in captured["prompt"]
 
     def test_pm_no_past_context_no_section(self):
-        """PM prompt omits the lessons section entirely when past_context is empty."""
+        """past_context가 비어 있으면 PM 프롬프트에서 교훈 섹션이 완전히 생략되는지 검증하는 테스트."""
         captured = {}
         llm = _structured_pm_llm(captured)
         pm_node = create_portfolio_manager(llm)
@@ -706,9 +736,9 @@ class TestPortfolioManagerInjection:
         assert "Lessons from prior decisions" not in captured["prompt"]
 
     def test_pm_returns_rendered_markdown_with_rating(self):
-        """The structured PortfolioDecision is rendered to markdown that
-        downstream consumers (memory log, signal processor, CLI display)
-        can parse without any extra LLM call."""
+        """구조화된 PortfolioDecision이 마크다운으로 렌더링되어, 이후 소비자
+        (기억 로그, 신호 처리기, CLI 표시)가 추가 LLM 호출 없이 파싱할 수
+        있는지 검증하는 테스트."""
         captured = {}
         decision = PortfolioDecision(
             rating=PortfolioRating.OVERWEIGHT,
@@ -728,9 +758,9 @@ class TestPortfolioManagerInjection:
         assert "**Time Horizon**: 3-6 months" in md
 
     def test_pm_falls_back_to_freetext_when_structured_unavailable(self):
-        """If a provider does not support with_structured_output, the agent
-        falls back to a plain invoke and returns whatever prose the model
-        produced, so the pipeline never blocks."""
+        """제공자가 with_structured_output을 지원하지 않으면 일반 invoke로
+        대체해 모델이 생성한 텍스트를 그대로 반환하여, 파이프라인이 절대
+        멈추지 않는지 검증하는 테스트."""
         plain_response = "**Rating**: Sell\n\nExit ahead of guidance."
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
@@ -739,10 +769,10 @@ class TestPortfolioManagerInjection:
         result = pm_node(_make_pm_state())
         assert result["final_trade_decision"] == plain_response
 
-    # get_past_context ordering and limits
+    # get_past_context의 정렬과 개수 제한
 
     def test_same_ticker_prioritised(self, tmp_path):
-        """Same-ticker entries in same-ticker section; cross-ticker entries in cross-ticker section."""
+        """같은 티커 항목과 교차 티커 항목이 각자의 섹션에 배치되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         _resolve_entry(log, "NVDA", "2026-01-05", DECISION_BUY, "Momentum confirmed.")
         _resolve_entry(log, "AAPL", "2026-01-06", DECISION_SELL, "Overvalued.")
@@ -754,7 +784,7 @@ class TestPortfolioManagerInjection:
         assert "AAPL" in cross_block
 
     def test_cross_ticker_reflection_only(self, tmp_path):
-        """Cross-ticker entries show only the REFLECTION text, not the full DECISION."""
+        """교차 티커 항목은 전체 DECISION이 아닌 REFLECTION 텍스트만 노출되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         _resolve_entry(log, "AAPL", "2026-01-06", DECISION_SELL, "Overvalued correction.")
         result = log.get_past_context("NVDA")
@@ -762,7 +792,7 @@ class TestPortfolioManagerInjection:
         assert "Exit position immediately." not in result
 
     def test_n_same_limit_respected(self, tmp_path):
-        """More than 5 same-ticker completed entries → only 5 injected."""
+        """같은 티커의 완료 항목이 5개를 넘으면 5개만 주입되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         for i in range(7):
             _resolve_entry(log, "NVDA", f"2026-01-{i+1:02d}", DECISION_BUY, f"Lesson {i}.")
@@ -771,7 +801,7 @@ class TestPortfolioManagerInjection:
         assert lessons_present == 5
 
     def test_n_cross_limit_respected(self, tmp_path):
-        """More than 3 cross-ticker completed entries → only 3 injected."""
+        """교차 티커의 완료 항목이 3개를 넘으면 3개만 주입되는지 검증하는 테스트."""
         log = make_log(tmp_path)
         tickers = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOG"]
         for i, ticker in enumerate(tickers):
@@ -780,10 +810,10 @@ class TestPortfolioManagerInjection:
         cross_count = sum(result.count(f"{t} lesson.") for t in tickers)
         assert cross_count == 3
 
-    # Full A→B→C integration cycle
+    # A→B→C 전체 통합 사이클
 
     def test_full_cycle_store_resolve_inject(self, tmp_path):
-        """store pending → resolve with outcome → past_context non-empty for PM."""
+        """대기 저장 → 결과 확정 → PM용 past_context 생성까지 전체 사이클을 검증하는 테스트."""
         log = make_log(tmp_path)
         log.store_decision("NVDA", "2026-01-05", DECISION_BUY)
         assert len(log.get_pending_entries()) == 1
@@ -799,34 +829,35 @@ class TestPortfolioManagerInjection:
 
 
 # ---------------------------------------------------------------------------
-# Legacy removal: BM25 / FinancialSituationMemory fully gone
+# 레거시 제거: BM25 / FinancialSituationMemory가 완전히 삭제되었는지 확인
 # ---------------------------------------------------------------------------
 
 class TestLegacyRemoval:
+    """구식 메모리 구현이 코드베이스에서 완전히 제거되었는지 검증하는 테스트 묶음."""
 
     def test_financial_situation_memory_removed(self):
-        """FinancialSituationMemory must not be importable from the memory module."""
+        """memory 모듈에서 FinancialSituationMemory를 임포트할 수 없어야 함을 검증하는 테스트."""
         import tradingagents.agents.utils.memory as m
         assert not hasattr(m, "FinancialSituationMemory")
 
     def test_bm25_not_imported(self):
-        """rank_bm25 must not be present in the memory module namespace."""
+        """memory 모듈 네임스페이스에 rank_bm25가 없어야 함을 검증하는 테스트."""
         import tradingagents.agents.utils.memory as m
         assert not hasattr(m, "BM25Okapi")
 
     def test_reflect_and_remember_removed(self):
-        """TradingAgentsGraph must not expose reflect_and_remember."""
+        """TradingAgentsGraph가 reflect_and_remember를 더 이상 노출하지 않는지 검증하는 테스트."""
         assert not hasattr(TradingAgentsGraph, "reflect_and_remember")
 
     def test_portfolio_manager_no_memory_param(self):
-        """create_portfolio_manager accepts only llm; passing memory= raises TypeError."""
+        """create_portfolio_manager는 llm만 받으며 memory=를 넘기면 TypeError가 나는지 검증하는 테스트."""
         mock_llm = MagicMock()
         create_portfolio_manager(mock_llm)
         with pytest.raises(TypeError):
             create_portfolio_manager(mock_llm, memory=MagicMock())
 
     def test_full_pipeline_no_regression(self, tmp_path):
-        """propagate() completes and stores the decision after the redesign."""
+        """재설계 이후에도 propagate()가 완료되고 결정이 저장되는지 검증하는 테스트."""
         import functools
 
         fake_state = {
@@ -859,8 +890,8 @@ class TestLegacyRemoval:
         mock_graph.propagator.create_initial_state.return_value = fake_state
         mock_graph.propagator.get_graph_args.return_value = {}
         mock_graph.signal_processor.process_signal.return_value = "Buy"
-        # Bind the real _run_graph so propagate's call to self._run_graph executes
-        # the actual write path instead of the auto-MagicMock.
+        # 실제 _run_graph를 바인딩하여 propagate의 self._run_graph 호출이
+        # 자동 MagicMock 대신 실제 쓰기 경로를 실행하게 합니다.
         mock_graph._run_graph = functools.partial(
             TradingAgentsGraph._run_graph, mock_graph
         )
