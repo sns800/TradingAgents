@@ -21,16 +21,6 @@ SKIP_IMAGE="${1:-}"
 
 cd "$ROOT"
 
-# ---------- 0. Basic 인증 자격 증명 (최초 1회 생성, .auth에 보관) ----------
-AUTH_FILE="$INFRA/.auth"
-if [[ ! -f "$AUTH_FILE" ]]; then
-  PASSWORD="$(openssl rand -base64 12 | tr -d '/+=' | head -c 16)"
-  echo "trading:$PASSWORD" > "$AUTH_FILE"
-  echo "새 Basic 인증 자격 증명을 생성했습니다: $AUTH_FILE"
-fi
-CREDS="$(cat "$AUTH_FILE")"
-TOKEN="$(printf '%s' "$CREDS" | base64)"
-
 # ---------- 1. 기본 VPC/서브넷 조회 ----------
 VPC_ID="$(aws ec2 describe-vpcs --region "$REGION" \
   --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)"
@@ -49,8 +39,7 @@ aws cloudformation deploy \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     "VpcId=$VPC_ID" \
-    "SubnetIds=$SUBNET_IDS" \
-    "BasicAuthToken=$TOKEN"
+    "SubnetIds=$SUBNET_IDS"
 
 outputs() {
   aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
@@ -106,6 +95,6 @@ aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
 echo ""
 echo "======================================================"
 echo " 배포 완료!"
-echo " URL      : $URL"
-echo " 접속 계정 : $CREDS  (Basic 인증)"
+echo " URL   : $URL"
+echo " 로그인 : Cognito 가족 계정 (가계부와 동일한 이메일/비밀번호)"
 echo "======================================================"

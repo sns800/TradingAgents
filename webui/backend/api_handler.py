@@ -9,9 +9,11 @@
 #
 # 의존성은 boto3(런타임 내장)뿐이라 별도 패키징 없이 zip 한 장으로 배포됩니다.
 # ============================================================
+import base64
 import json
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -27,11 +29,60 @@ SECURITY_GROUP = os.environ["SECURITY_GROUP"]
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "worker")
 # 동시 실행 상한: Fargate/Bedrock 비용 폭주 방지용 안전장치
 MAX_ACTIVE_RUNS = int(os.environ.get("MAX_ACTIVE_RUNS", "3"))
+# Cognito 인증: 이 앱 클라이언트로 발급된 액세스 토큰만 허용
+COGNITO_CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 s3 = boto3.client("s3")
 ecs = boto3.client("ecs")
+cognito = boto3.client("cognito-idp")
+
+# 검증된 토큰의 짧은 캐시 (토큰 해시 -> 만료 시각). Lambda 컨테이너 재사용 시
+# 폴링 요청마다 Cognito를 호출하지 않기 위한 것으로, 5분이면 충분히 짧다.
+_token_cache: dict[str, float] = {}
+_TOKEN_CACHE_TTL = 300
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """서명 검증 없이 JWT 페이로드만 디코드한다 (클레임 사전 검사용).
+
+    실제 유효성(서명/폐기 여부)은 Cognito GetUser 호출이 보증하므로,
+    여기서는 client_id/token_use 클레임 확인에만 사용한다.
+    """
+    part = token.split(".")[1]
+    part += "=" * (-len(part) % 4)
+    return json.loads(base64.urlsafe_b64decode(part))
+
+
+def check_auth(event) -> bool:
+    """x-access-token 헤더의 Cognito 액세스 토큰을 검증한다."""
+    headers = event.get("headers") or {}
+    token = headers.get("x-access-token", "")
+    if not token:
+        return False
+
+    now = time.time()
+    cached = _token_cache.get(token)
+    if cached and cached > now:
+        return True
+
+    try:
+        claims = _decode_jwt_payload(token)
+        if claims.get("token_use") != "access":
+            return False
+        if claims.get("client_id") != COGNITO_CLIENT_ID:
+            return False
+        # 서명·폐기 검증은 Cognito에 위임 (유효하지 않으면 예외 발생)
+        cognito.get_user(AccessToken=token)
+    except Exception:
+        return False
+
+    # 토큰 자체 만료와 캐시 TTL 중 이른 쪽까지만 캐시
+    _token_cache[token] = min(now + _TOKEN_CACHE_TTL, float(claims.get("exp", 0)))
+    if len(_token_cache) > 100:  # 캐시 크기 억제
+        _token_cache.clear()
+    return True
 
 TICKER_RE = re.compile(r"^[A-Za-z0-9._\-^=]{1,32}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -185,6 +236,9 @@ def handler(event, _context):
     method = http.get("method", "GET")
     path = event.get("rawPath", "/")
     query = event.get("queryStringParameters") or {}
+
+    if not check_auth(event):
+        return _err(401, "로그인이 필요합니다.")
 
     try:
         if method == "POST" and path == "/api/runs":

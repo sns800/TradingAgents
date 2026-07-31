@@ -11,10 +11,10 @@ Parameters:
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: 워커 태스크용 서브넷 (퍼블릭, 아웃바운드 전용)
-  BasicAuthToken:
+  CognitoClientId:
     Type: String
-    NoEcho: true
-    Description: "Basic 인증 토큰: base64(사용자명:비밀번호)"
+    Default: 11ikj0bqsifr90tf4b37h4t14p
+    Description: "인증에 사용할 Cognito User Pool 앱 클라이언트 ID (household-ledger-users 풀의 tradingagents-web 클라이언트)"
   BedrockDeepModel:
     Type: String
     Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -213,6 +213,7 @@ Resources:
           SECURITY_GROUP: !Ref WorkerSecurityGroup
           CONTAINER_NAME: worker
           MAX_ACTIVE_RUNS: "3"
+          COGNITO_CLIENT_ID: !Ref CognitoClientId
       Code:
         # 자리표시자 - 실제 코드는 deploy.sh가 update-function-code로 배포
         ZipFile: |
@@ -263,33 +264,6 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  BasicAuthFunction:
-    Type: AWS::CloudFront::Function
-    Properties:
-      Name: tradingagents-webui-basic-auth
-      AutoPublish: true
-      FunctionConfig:
-        Comment: Basic auth gate for the whole distribution
-        Runtime: cloudfront-js-2.0
-      FunctionCode: !Sub |
-        function handler(event) {
-          var request = event.request;
-          var expected = 'Basic ${BasicAuthToken}';
-          var auth = request.headers.authorization && request.headers.authorization.value;
-          if (auth === expected) {
-            // 검증 후 제거: Authorization을 오리진으로 넘기면 OAC SigV4 서명과 충돌한다
-            delete request.headers.authorization;
-            return request;
-          }
-          return {
-            statusCode: 401,
-            statusDescription: 'Unauthorized',
-            headers: {
-              'www-authenticate': { value: 'Basic realm="TradingAgents", charset="UTF-8"' }
-            }
-          };
-        }
-
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
@@ -315,22 +289,16 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           # 관리형 정책 CachingOptimized
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
-          FunctionAssociations:
-            - EventType: viewer-request
-              FunctionARN: !GetAtt BasicAuthFunction.FunctionMetadata.FunctionARN
         CacheBehaviors:
           - PathPattern: "/api/*"
             TargetOriginId: api
             ViewerProtocolPolicy: https-only
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
             # 관리형 정책 CachingDisabled / AllViewerExceptHostHeader
-            # (Lambda URL 오리진용 AWS 권장 조합. Basic 인증의 Authorization 헤더는
-            #  뷰어 요청 함수에서 제거되어 OAC 서명과 충돌하지 않는다)
+            # (Lambda URL 오리진용 AWS 권장 조합. 인증 토큰은 Authorization이 아닌
+            #  x-access-token 헤더로 전달해 OAC SigV4 서명과 충돌하지 않는다)
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-            FunctionAssociations:
-              - EventType: viewer-request
-                FunctionARN: !GetAtt BasicAuthFunction.FunctionMetadata.FunctionARN
         # 참고: 403->index.html 매핑은 API 오리진의 인증 오류까지 가려버려 제거함.
         # (해시 라우팅 SPA라 별도 오류 페이지 매핑이 없어도 동작에 지장 없음)
 

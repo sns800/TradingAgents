@@ -159,6 +159,8 @@ body {
 
 input[type="text"],
 input[type="date"],
+input[type="email"],
+input[type="password"],
 select {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -216,6 +218,58 @@ input:focus, select:focus {
   color: var(--red);
   font-size: 0.88rem;
   margin: 12px 0 0;
+}
+
+/* ---------- 로그인 ---------- */
+.login-card {
+  max-width: 400px;
+  margin: 10vh auto 0;
+}
+
+.login-card h2 {
+  margin-bottom: 4px;
+  font-size: 1.25rem;
+}
+
+.login-desc {
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+#login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.btn-login {
+  width: 100%;
+  margin-top: 4px;
+}
+
+#login-form .form-error {
+  margin: 0;
+}
+
+/* ---------- 헤더 사용자 영역 ---------- */
+.header-user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-email {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.btn-logout {
+  margin-bottom: 0;
+  padding: 6px 14px;
+  font-size: 0.85rem;
 }
 
 /* ---------- 실행 목록 ---------- */
@@ -522,6 +576,16 @@ input:focus, select:focus {
   .run-meta {
     margin-left: 0;
     width: 100%;
+  }
+
+  .header-user {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .login-card {
+    margin-top: 6vh;
   }
 
   .report-content {

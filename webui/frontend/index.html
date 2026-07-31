@@ -12,14 +12,38 @@
       <div class="header-title-row">
         <h1>📈 TradingAgents 분석 대시보드</h1>
         <span class="badge badge-warning">⚠️ 연구용 도구로 투자 조언이 아님</span>
+        <div id="header-user" class="header-user" hidden>
+          <span id="user-email" class="user-email"></span>
+          <button type="button" id="btn-logout" class="btn btn-ghost btn-logout">로그아웃</button>
+        </div>
       </div>
       <p class="header-desc">여러 LLM 에이전트가 협업하여 주식 매매 결정(BUY/SELL/HOLD)을 분석합니다. 분석을 실행하고 결과 보고서를 확인하세요.</p>
     </div>
   </header>
 
   <main id="app" class="container">
+    <!-- 로그인 화면 -->
+    <section id="view-login" hidden>
+      <div class="card login-card">
+        <h2>로그인</h2>
+        <p class="login-desc">가족 계정(가계부와 동일)으로 로그인하세요</p>
+        <form id="login-form">
+          <div class="form-field">
+            <label for="login-email">이메일</label>
+            <input type="email" id="login-email" autocomplete="username" required>
+          </div>
+          <div class="form-field">
+            <label for="login-password">비밀번호</label>
+            <input type="password" id="login-password" autocomplete="current-password" required>
+          </div>
+          <button type="submit" id="btn-login" class="btn btn-primary btn-login">로그인</button>
+          <p id="login-error" class="form-error" hidden></p>
+        </form>
+      </div>
+    </section>
+
     <!-- 목록 화면 -->
-    <section id="view-list">
+    <section id="view-list" hidden>
       <section class="card form-card">
         <h2>새 분석 시작</h2>
         <form id="new-run-form">
@@ -78,6 +102,7 @@
   </footer>
 
   <script src="vendor/marked.min.js"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

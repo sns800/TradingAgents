@@ -5,6 +5,14 @@
   var API_BASE = '/api';
   var POLL_INTERVAL = 10000;
 
+  var CONFIG = window.APP_CONFIG || {};
+  var COGNITO_URL = 'https://cognito-idp.' + (CONFIG.cognitoRegion || 'ap-northeast-2') + '.amazonaws.com/';
+  var KEY_ACCESS = 'ta_access_token';
+  var KEY_ID = 'ta_id_token';
+  var KEY_REFRESH = 'ta_refresh_token';
+  var KEY_EXPIRES = 'ta_token_expires';
+  var EXPIRY_MARGIN_MS = 60000; // 만료 1분 전부터 갱신 시도
+
   // ---------- 상수 ----------
 
   var STATUS_LABEL = {
@@ -66,12 +74,22 @@
     detailSummary: document.getElementById('detail-summary'),
     detailReports: document.getElementById('detail-reports'),
     reportNav: document.getElementById('report-nav'),
-    reportContent: document.getElementById('report-content')
+    reportContent: document.getElementById('report-content'),
+    viewLogin: document.getElementById('view-login'),
+    loginForm: document.getElementById('login-form'),
+    loginEmail: document.getElementById('login-email'),
+    loginPassword: document.getElementById('login-password'),
+    btnLogin: document.getElementById('btn-login'),
+    loginError: document.getElementById('login-error'),
+    headerUser: document.getElementById('header-user'),
+    userEmail: document.getElementById('user-email'),
+    btnLogout: document.getElementById('btn-logout')
   };
 
   // ---------- 상태 ----------
 
   var state = {
+    authed: false,
     route: { view: 'list', runId: null },
     pollTimer: null,
     tickTimer: null,
@@ -143,6 +161,124 @@
     return elem('span', 'badge ' + (DECISION_BADGE[key] || 'badge-gray'), String(decision));
   }
 
+  // ---------- 인증 (Cognito) ----------
+
+  function decodeJwtPayload(token) {
+    try {
+      var part = String(token).split('.')[1];
+      var b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4 !== 0) b64 += '=';
+      var raw = atob(b64);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveTokens(result) {
+    localStorage.setItem(KEY_ACCESS, result.AccessToken);
+    if (result.IdToken) localStorage.setItem(KEY_ID, result.IdToken);
+    if (result.RefreshToken) localStorage.setItem(KEY_REFRESH, result.RefreshToken);
+    var expiresIn = typeof result.ExpiresIn === 'number' ? result.ExpiresIn : 3600;
+    localStorage.setItem(KEY_EXPIRES, String(Date.now() + expiresIn * 1000));
+  }
+
+  function clearTokens() {
+    localStorage.removeItem(KEY_ACCESS);
+    localStorage.removeItem(KEY_ID);
+    localStorage.removeItem(KEY_REFRESH);
+    localStorage.removeItem(KEY_EXPIRES);
+  }
+
+  function hasTokens() {
+    return !!(localStorage.getItem(KEY_ACCESS) && localStorage.getItem(KEY_REFRESH));
+  }
+
+  function isTokenExpired() {
+    var expires = Number(localStorage.getItem(KEY_EXPIRES));
+    if (!expires) return true;
+    return Date.now() >= expires - EXPIRY_MARGIN_MS;
+  }
+
+  function cognitoRequest(target, payload) {
+    return fetch(COGNITO_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-amz-json-1.1',
+        'X-Amz-Target': 'AWSCognitoIdentityProviderService.' + target
+      },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          data = {};
+        }
+        if (!res.ok) {
+          var err = new Error(data.message || data.__type || ('인증 요청 실패 (HTTP ' + res.status + ')'));
+          err.cognitoType = data.__type || '';
+          throw err;
+        }
+        return data;
+      });
+    }, function () {
+      throw new Error('네트워크 오류: 인증 서버에 연결할 수 없습니다.');
+    });
+  }
+
+  function login(email, password) {
+    return cognitoRequest('InitiateAuth', {
+      AuthFlow: 'USER_PASSWORD_AUTH',
+      ClientId: CONFIG.cognitoClientId,
+      AuthParameters: { USERNAME: email, PASSWORD: password }
+    }).then(function (data) {
+      if (data.ChallengeName) {
+        throw new Error('비밀번호 재설정이 필요한 계정입니다.');
+      }
+      if (!data.AuthenticationResult || !data.AuthenticationResult.AccessToken) {
+        throw new Error('로그인 응답을 해석할 수 없습니다.');
+      }
+      saveTokens(data.AuthenticationResult);
+    }, function (err) {
+      if (err.cognitoType === 'NotAuthorizedException' ||
+          err.cognitoType === 'UserNotFoundException') {
+        throw new Error('이메일 또는 비밀번호가 올바르지 않습니다.');
+      }
+      throw err;
+    });
+  }
+
+  var refreshPromise = null;
+
+  function refreshTokens() {
+    if (refreshPromise) return refreshPromise;
+    var refreshToken = localStorage.getItem(KEY_REFRESH);
+    if (!refreshToken) return Promise.reject(new Error('저장된 로그인 정보가 없습니다.'));
+    refreshPromise = cognitoRequest('InitiateAuth', {
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: CONFIG.cognitoClientId,
+      AuthParameters: { REFRESH_TOKEN: refreshToken }
+    }).then(function (data) {
+      var result = data.AuthenticationResult;
+      if (!result || !result.AccessToken) {
+        throw new Error('토큰 갱신 응답을 해석할 수 없습니다.');
+      }
+      saveTokens(result); // RefreshToken은 응답에 없으면 기존 값 유지
+    }).finally(function () {
+      refreshPromise = null;
+    });
+    return refreshPromise;
+  }
+
+  function handleAuthFailure() {
+    clearTokens();
+    showLogin();
+  }
+
   // ---------- API ----------
 
   function sha256Hex(text) {
@@ -168,12 +304,50 @@
       prepared = Promise.resolve(options);
     }
     return prepared.then(function (opts) {
-      return doFetch(path, opts);
+      // 만료된 토큰이면 먼저 갱신 후 요청
+      var ensure = isTokenExpired()
+        ? refreshTokens().catch(function () {
+            handleAuthFailure();
+            throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+          })
+        : Promise.resolve();
+      return ensure.then(function () {
+        return doFetch(path, opts).catch(function (err) {
+          if (!err || err.status !== 401) throw err;
+          // 401: 토큰 갱신 1회 시도 후 재요청
+          return refreshTokens().then(function () {
+            return doFetch(path, opts);
+          }, function () {
+            handleAuthFailure();
+            throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+          }).catch(function (err2) {
+            if (err2 && err2.status === 401) {
+              handleAuthFailure();
+              throw new Error('로그인이 만료되었습니다. 다시 로그인해 주세요.');
+            }
+            throw err2;
+          });
+        });
+      });
     });
   }
 
   function doFetch(path, options) {
-    return fetch(API_BASE + path, options).then(function (res) {
+    options = options || {};
+    var headers = {};
+    if (options.headers) {
+      Object.keys(options.headers).forEach(function (k) {
+        headers[k] = options.headers[k];
+      });
+    }
+    // Authorization 헤더는 CloudFront OAC 서명과 충돌하므로 커스텀 헤더 사용
+    var access = localStorage.getItem(KEY_ACCESS);
+    if (access) headers['x-access-token'] = access;
+
+    var opts = { method: options.method || 'GET', headers: headers };
+    if (options.body) opts.body = options.body;
+
+    return fetch(API_BASE + path, opts).then(function (res) {
       return res.text().then(function (text) {
         var data = null;
         try {
@@ -183,7 +357,9 @@
         }
         if (!res.ok) {
           var msg = (data && data.error) ? data.error : ('서버 오류 (HTTP ' + res.status + ')');
-          throw new Error(msg);
+          var err = new Error(msg);
+          err.status = res.status;
+          throw err;
         }
         if (data === null) {
           throw new Error('서버 응답을 해석할 수 없습니다.');
@@ -486,6 +662,7 @@
   }
 
   function applyRoute() {
+    if (!state.authed) return;
     stopPolling();
     state.route = parseHash();
 
@@ -512,6 +689,72 @@
 
   window.addEventListener('hashchange', applyRoute);
 
+  // ---------- 로그인 화면 ----------
+
+  function setLoginError(msg) {
+    if (msg) {
+      el.loginError.textContent = msg;
+      el.loginError.hidden = false;
+    } else {
+      el.loginError.textContent = '';
+      el.loginError.hidden = true;
+    }
+  }
+
+  function showLogin() {
+    state.authed = false;
+    stopPolling();
+    el.viewList.hidden = true;
+    el.viewDetail.hidden = true;
+    el.headerUser.hidden = true;
+    el.userEmail.textContent = '';
+    el.viewLogin.hidden = false;
+    el.loginPassword.value = '';
+    el.loginEmail.focus();
+  }
+
+  function showApp() {
+    state.authed = true;
+    setLoginError(null);
+    el.viewLogin.hidden = true;
+
+    var payload = decodeJwtPayload(localStorage.getItem(KEY_ID));
+    el.userEmail.textContent = (payload && payload.email) ? payload.email : '';
+    el.headerUser.hidden = false;
+
+    applyRoute();
+  }
+
+  el.loginForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    setLoginError(null);
+
+    var email = el.loginEmail.value.trim();
+    var password = el.loginPassword.value;
+    if (!email || !password) {
+      setLoginError('이메일과 비밀번호를 입력해 주세요.');
+      return;
+    }
+
+    el.btnLogin.disabled = true;
+    el.btnLogin.textContent = '로그인 중…';
+
+    login(email, password).then(function () {
+      el.loginPassword.value = '';
+      showApp();
+    }).catch(function (err) {
+      setLoginError(err.message);
+    }).finally(function () {
+      el.btnLogin.disabled = false;
+      el.btnLogin.textContent = '로그인';
+    });
+  });
+
+  el.btnLogout.addEventListener('click', function () {
+    clearTokens();
+    showLogin();
+  });
+
   // ---------- 초기화 ----------
 
   var today = todayStr();
@@ -519,5 +762,12 @@
   el.inputDate.max = today;
 
   startTicker();
-  applyRoute();
+
+  if (hasTokens()) {
+    // 토큰 만료/무효 여부는 첫 API 호출에서 갱신 시도로 처리된다.
+    showApp();
+  } else {
+    clearTokens();
+    showLogin();
+  }
 })();
