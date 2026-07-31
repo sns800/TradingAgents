@@ -1,13 +1,17 @@
 services:
+  # 기본 서비스: .env의 API 키를 읽어 대화형 CLI를 실행합니다.
+  # 사용법: docker compose run --rm tradingagents
   tradingagents:
     build: .
     env_file:
       - .env
     volumes:
+      # 분석 결과와 캐시가 컨테이너 재시작 후에도 유지되도록 볼륨에 저장
       - tradingagents_data:/home/appuser/.tradingagents
     tty: true
     stdin_open: true
 
+  # 선택: 로컬 LLM용 Ollama 서버 (--profile ollama 로 활성화)
   ollama:
     image: ollama/ollama:latest
     volumes:
@@ -15,6 +19,8 @@ services:
     profiles:
       - ollama
 
+  # 선택: Ollama를 LLM 제공자로 사용하는 TradingAgents
+  # 사용법: docker compose --profile ollama run --rm tradingagents-ollama
   tradingagents-ollama:
     build: .
     env_file:
