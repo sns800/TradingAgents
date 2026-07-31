@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradingAgents 분석 대시보드</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-title-row">
+        <h1>📈 TradingAgents 분석 대시보드</h1>
+        <span class="badge badge-warning">⚠️ 연구용 도구로 투자 조언이 아님</span>
+      </div>
+      <p class="header-desc">여러 LLM 에이전트가 협업하여 주식 매매 결정(BUY/SELL/HOLD)을 분석합니다. 분석을 실행하고 결과 보고서를 확인하세요.</p>
+    </div>
+  </header>
+
+  <main id="app" class="container">
+    <!-- 목록 화면 -->
+    <section id="view-list">
+      <section class="card form-card">
+        <h2>새 분석 시작</h2>
+        <form id="new-run-form">
+          <div class="form-grid">
+            <div class="form-field">
+              <label for="input-ticker">종목 코드</label>
+              <input type="text" id="input-ticker" placeholder="AAPL, 005930.KS, BTC-USD" autocomplete="off" required>
+            </div>
+            <div class="form-field">
+              <label for="input-date">분석 날짜</label>
+              <input type="date" id="input-date" required>
+            </div>
+            <div class="form-field">
+              <label for="input-depth">분석 깊이</label>
+              <select id="input-depth">
+                <option value="1">얕게 (빠름·저비용)</option>
+                <option value="3">중간 (균형)</option>
+                <option value="5">깊게 (느림·고비용)</option>
+              </select>
+            </div>
+            <div class="form-field form-field-submit">
+              <button type="submit" id="btn-submit" class="btn btn-primary">분석 시작</button>
+            </div>
+          </div>
+          <p id="form-error" class="form-error" hidden></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="list-header">
+          <h2>실행 목록</h2>
+          <span id="list-status" class="list-status"></span>
+        </div>
+        <div id="runs-list" class="runs-list">
+          <p class="empty-msg">불러오는 중…</p>
+        </div>
+      </section>
+    </section>
+
+    <!-- 상세 화면 -->
+    <section id="view-detail" hidden>
+      <button id="btn-back" class="btn btn-ghost">← 목록으로 돌아가기</button>
+      <section class="card" id="detail-summary"></section>
+      <section class="card" id="detail-reports" hidden>
+        <h2>보고서</h2>
+        <div class="report-layout">
+          <nav id="report-nav" class="report-nav"></nav>
+          <article id="report-content" class="report-content markdown-body"></article>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>TradingAgents — 멀티 에이전트 LLM 트레이딩 연구 프레임워크</p>
+  </footer>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# CodeBuild 빌드 명세: 워커 Docker 이미지를 빌드해 ECR에 푸시합니다.
+# (로컬에 Docker가 없어도 클라우드에서 이미지를 만들 수 있게 함)
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+  build:
+    commands:
+      - docker build -f webui/worker/Dockerfile -t "$ECR_URI:latest" .
+  post_build:
+    commands:
+      - docker push "$ECR_URI:latest"

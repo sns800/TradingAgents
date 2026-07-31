@@ -1,0 +1,414 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  TradingAgents Web UI - CloudFront(유일한 진입점) + S3 정적 사이트 + Lambda API
+  + ECS Fargate 분석 워커 + DynamoDB/S3. 서울 리전(ap-northeast-2)에 배포하며,
+  LLM은 Bedrock us-east-1을 호출합니다.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 워커 태스크가 사용할 VPC (기본 VPC)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: 워커 태스크용 서브넷 (퍼블릭, 아웃바운드 전용)
+  BasicAuthToken:
+    Type: String
+    NoEcho: true
+    Description: "Basic 인증 토큰: base64(사용자명:비밀번호)"
+  BedrockDeepModel:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  BedrockQuickModel:
+    Type: String
+    Default: us.anthropic.claude-haiku-4-5-20251001-v1:0
+
+Resources:
+  # ---------- 저장소 ----------
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "tradingagents-webui-site-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "tradingagents-webui-data-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  RunsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: tradingagents-webui-runs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: run_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: run_id
+          KeyType: HASH
+
+  EcrRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: tradingagents-webui-worker
+      EmptyOnDelete: true
+
+  # ---------- ECS 워커 ----------
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: tradingagents-webui
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/tradingagents-webui-worker
+      RetentionInDays: 30
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TradingAgents worker - outbound only, no ingress
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: worker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt RunsTable.Arn
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${DataBucket.Arn}/runs/*"
+
+  WorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: tradingagents-webui-worker
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "4096"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Sub "${EcrRepo.RepositoryUri}:latest"
+          Essential: true
+          Environment:
+            # Bedrock LLM은 us-east-1에서 호출 (bedrock 클라이언트가 이 env를 읽음)
+            - { Name: AWS_REGION, Value: us-east-1 }
+            - { Name: AWS_DEFAULT_REGION, Value: us-east-1 }
+            # 시스템 리소스(DynamoDB/S3)는 서울 리전 - worker.py가 명시적으로 사용
+            - { Name: HOME_REGION, Value: !Ref "AWS::Region" }
+            - { Name: TABLE_NAME, Value: !Ref RunsTable }
+            - { Name: DATA_BUCKET, Value: !Ref DataBucket }
+            - { Name: BEDROCK_DEEP_MODEL, Value: !Ref BedrockDeepModel }
+            - { Name: BEDROCK_QUICK_MODEL, Value: !Ref BedrockQuickModel }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WorkerLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: worker
+
+  # ---------- Lambda API ----------
+  ApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: api
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Scan
+                Resource: !GetAtt RunsTable.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${DataBucket.Arn}/runs/*"
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref WorkerTaskDefinition
+                Condition:
+                  ArnEquals: { "ecs:cluster": !GetAtt EcsCluster.Arn }
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt TaskRole.Arn
+                  - !GetAtt TaskExecutionRole.Arn
+                Condition:
+                  StringEquals: { "iam:PassedToService": ecs-tasks.amazonaws.com }
+
+  ApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: tradingagents-webui-api
+      Runtime: python3.12
+      Handler: api_handler.handler
+      Role: !GetAtt ApiLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref RunsTable
+          DATA_BUCKET: !Ref DataBucket
+          CLUSTER_ARN: !GetAtt EcsCluster.Arn
+          TASK_DEF: !Ref WorkerTaskDefinition
+          SUBNET_IDS: !Join [",", !Ref SubnetIds]
+          SECURITY_GROUP: !Ref WorkerSecurityGroup
+          CONTAINER_NAME: worker
+          MAX_ACTIVE_RUNS: "3"
+      Code:
+        # 자리표시자 - 실제 코드는 deploy.sh가 update-function-code로 배포
+        ZipFile: |
+          def handler(event, context):
+              return {"statusCode": 503, "body": '{"error": "API not deployed yet"}'}
+
+  ApiFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt ApiFunction.Arn
+      AuthType: AWS_IAM
+
+  ApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ApiFunction.Arn
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      FunctionUrlAuthType: AWS_IAM
+      SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  # ---------- CloudFront ----------
+  SiteOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: tradingagents-webui-site-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  LambdaOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: tradingagents-webui-lambda-oac
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  BasicAuthFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: tradingagents-webui-basic-auth
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Basic auth gate for the whole distribution
+        Runtime: cloudfront-js-2.0
+      FunctionCode: !Sub |
+        function handler(event) {
+          var request = event.request;
+          var expected = 'Basic ${BasicAuthToken}';
+          var auth = request.headers.authorization && request.headers.authorization.value;
+          if (auth === expected) {
+            // 검증 후 제거: Authorization을 오리진으로 넘기면 OAC SigV4 서명과 충돌한다
+            delete request.headers.authorization;
+            return request;
+          }
+          return {
+            statusCode: 401,
+            statusDescription: 'Unauthorized',
+            headers: {
+              'www-authenticate': { value: 'Basic realm="TradingAgents", charset="UTF-8"' }
+            }
+          };
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: TradingAgents Web UI
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200
+        HttpVersion: http2and3
+        Origins:
+          - Id: site
+            DomainName: !GetAtt SiteBucket.RegionalDomainName
+            OriginAccessControlId: !Ref SiteOAC
+            S3OriginConfig: { OriginAccessIdentity: "" }
+          - Id: api
+            DomainName: !Select [2, !Split ["/", !GetAtt ApiFunctionUrl.FunctionUrl]]
+            OriginAccessControlId: !Ref LambdaOAC
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          # 관리형 정책 CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt BasicAuthFunction.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: "/api/*"
+            TargetOriginId: api
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+            # 관리형 정책 CachingDisabled / AllViewerExceptHostHeader
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt BasicAuthFunction.FunctionMetadata.FunctionARN
+        # 참고: 403->index.html 매핑은 API 오리진의 인증 오류까지 가려버려 제거함.
+        # (해시 라우팅 SPA라 별도 오류 페이지 매핑이 없어도 동작에 지장 없음)
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${SiteBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  # ---------- CodeBuild (로컬 Docker 없이 워커 이미지 빌드) ----------
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: build
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !GetAtt EcrRepo.Arn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${DataBucket.Arn}/source/*"
+
+  ImageBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: tradingagents-webui-image
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      TimeoutInMinutes: 30
+      Source:
+        Type: S3
+        Location: !Sub "${DataBucket}/source/source.zip"
+        BuildSpec: webui/infra/buildspec.yml
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - { Name: ECR_URI, Value: !GetAtt EcrRepo.RepositoryUri }
+          - { Name: AWS_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }
+
+Outputs:
+  CloudFrontURL:
+    Value: !Sub "https://${Distribution.DomainName}"
+  DistributionId:
+    Value: !Ref Distribution
+  SiteBucketName:
+    Value: !Ref SiteBucket
+  DataBucketName:
+    Value: !Ref DataBucket
+  EcrRepoUri:
+    Value: !GetAtt EcrRepo.RepositoryUri
+  ApiFunctionName:
+    Value: !Ref ApiFunction
+  ClusterName:
+    Value: !Ref EcsCluster
+  CodeBuildProject:
+    Value: !Ref ImageBuildProject
