@@ -10,10 +10,10 @@
 #  - DynamoDB/S3 등 시스템 리소스: 서울(ap-northeast-2), HOME_REGION 환경변수로
 #    명시해 boto3 클라이언트에 직접 넘긴다 (Bedrock용 리전 env와 분리).
 # ============================================================
+import contextlib
 import os
 import sys
 import threading
-import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,10 +58,9 @@ def update_run(**fields):
 def heartbeat_loop(stop_event: threading.Event):
     """실행 중임을 알리는 하트비트. UI가 '아직 살아있음'을 알 수 있게 한다."""
     while not stop_event.wait(30):
-        try:
+        # 하트비트 실패는 치명적이지 않으므로 조용히 넘어간다
+        with contextlib.suppress(Exception):
             update_run(status="running")
-        except Exception:
-            pass  # 하트비트 실패는 치명적이지 않음
 
 
 def upload_reports(report_dir: Path) -> list[str]:

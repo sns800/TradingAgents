@@ -5,6 +5,7 @@ CLI와 클라이언트 경로 양쪽에서 올바르게 동작하는지 검증�
 from __future__ import annotations
 
 import importlib
+import re
 
 import pytest
 
@@ -151,7 +152,11 @@ def test_confirm_endpoint_warns_on_missing_scheme(monkeypatch, capsys):
     import cli.utils as cli_utils
     importlib.reload(cli_utils)
     cli_utils.confirm_ollama_endpoint("0.0.0.128")
-    out = capsys.readouterr().out
+    # Rich 콘솔은 터미널 폭에 따라 문구 중간을 줄바꿈하고, 하이라이터가
+    # 괄호/URL 안에 ANSI 색상 코드를 끼워 넣으므로 (환경에 따라 검사 문자열이
+    # 쪼개짐), ANSI 코드와 공백을 모두 제거한 뒤 비교한다.
+    out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    out = "".join(out.split())
     assert "스킴(scheme)이" in out
     assert "http://<host>:11434/v1" in out
 

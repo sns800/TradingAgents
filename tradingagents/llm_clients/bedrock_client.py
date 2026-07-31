@@ -83,6 +83,14 @@ class BedrockClient(BaseLLMClient):
         for key in ("temperature", "max_tokens", "max_retries", "callbacks"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
+        # botocore의 기본 읽기 타임아웃은 60초라, 긴 보고서 생성(특히 비영어
+        # 출력)이 중간에 ReadTimeoutError로 끊길 수 있다. LLM 응답 대기에
+        # 충분한 값으로 올린다 (TRADINGAGENTS_BEDROCK_READ_TIMEOUT으로 조정).
+        from botocore.config import Config as _BotoConfig
+        read_timeout = int(os.environ.get("TRADINGAGENTS_BEDROCK_READ_TIMEOUT", "300"))
+        llm_kwargs["config"] = _BotoConfig(
+            read_timeout=read_timeout, connect_timeout=10
+        )
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:

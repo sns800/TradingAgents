@@ -35,18 +35,18 @@
 
   var REPORT_LABEL = {
     'complete_report.md': '전체 보고서',
-    'analysts/market.md': '시장 분석',
-    'analysts/sentiment.md': '감성 분석',
-    'analysts/news.md': '뉴스 분석',
-    'analysts/fundamentals.md': '펀더멘털 분석',
-    'research/bull.md': '강세론',
-    'research/bear.md': '약세론',
-    'research/manager.md': '리서치 매니저',
-    'trading/trader.md': '트레이더 제안',
-    'risk/aggressive.md': '공격적 시각',
-    'risk/conservative.md': '보수적 시각',
-    'risk/neutral.md': '중립적 시각',
-    'risk/judge.md': '최종 결정'
+    '1_analysts/market.md': '시장 분석',
+    '1_analysts/sentiment.md': '감성 분석',
+    '1_analysts/news.md': '뉴스 분석',
+    '1_analysts/fundamentals.md': '펀더멘털 분석',
+    '2_research/bull.md': '강세론',
+    '2_research/bear.md': '약세론',
+    '2_research/manager.md': '리서치 매니저',
+    '3_trading/trader.md': '트레이더 제안',
+    '4_risk/aggressive.md': '공격적 시각',
+    '4_risk/conservative.md': '보수적 시각',
+    '4_risk/neutral.md': '중립적 시각',
+    '5_portfolio/decision.md': '최종 결정'
   };
 
   // ---------- DOM 참조 ----------
