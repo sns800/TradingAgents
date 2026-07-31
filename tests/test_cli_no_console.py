@@ -46,7 +46,7 @@ def test_missing_console_prints_actionable_message(monkeypatch):
 
     result = CliRunner().invoke(m.app, [])
     assert result.exit_code == 1
-    assert "no Windows console available" in result.output
+    assert "사용 가능한 Windows 콘솔이 없습니다" in result.output
     # prompt_toolkit의 원본 트레이스백이 사용자에게 도달하면 안 됩니다.
     assert "Traceback" not in result.output
 

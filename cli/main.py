@@ -76,7 +76,7 @@ else:
 
 app = typer.Typer(
     name="TradingAgents",
-    help="TradingAgents CLI: Multi-Agents LLM Financial Trading Framework",
+    help="TradingAgents CLI: 멀티 에이전트 LLM 금융 트레이딩 프레임워크",
     add_completion=True,  # 셸 자동완성(shell completion) 활성화
 )
 
@@ -212,13 +212,13 @@ class MessageBuffer:
         if latest_section and latest_content:
             # 현재 섹션을 화면 표시용으로 포맷
             section_titles = {
-                "market_report": "Market Analysis",
-                "sentiment_report": "Social Sentiment",
-                "news_report": "News Analysis",
-                "fundamentals_report": "Fundamentals Analysis",
-                "investment_plan": "Research Team Decision",
-                "trader_investment_plan": "Trading Team Plan",
-                "final_trade_decision": "Portfolio Management Decision",
+                "market_report": "시장 분석",
+                "sentiment_report": "소셜 감성 분석",
+                "news_report": "뉴스 분석",
+                "fundamentals_report": "기본적 분석",
+                "investment_plan": "리서치 팀 결정",
+                "trader_investment_plan": "트레이딩 팀 계획",
+                "final_trade_decision": "포트폴리오 관리 결정",
             }
             self.current_report = (
                 f"### {section_titles[latest_section]}\n{latest_content}"
@@ -233,37 +233,37 @@ class MessageBuffer:
         # 애널리스트 팀 보고서 - 누락된 섹션 처리를 위해 .get() 사용
         analyst_sections = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
         if any(self.report_sections.get(section) for section in analyst_sections):
-            report_parts.append("## Analyst Team Reports")
+            report_parts.append("## 분석가 팀 보고서")
             if self.report_sections.get("market_report"):
                 report_parts.append(
-                    f"### Market Analysis\n{self.report_sections['market_report']}"
+                    f"### 시장 분석\n{self.report_sections['market_report']}"
                 )
             if self.report_sections.get("sentiment_report"):
                 report_parts.append(
-                    f"### Social Sentiment\n{self.report_sections['sentiment_report']}"
+                    f"### 소셜 감성 분석\n{self.report_sections['sentiment_report']}"
                 )
             if self.report_sections.get("news_report"):
                 report_parts.append(
-                    f"### News Analysis\n{self.report_sections['news_report']}"
+                    f"### 뉴스 분석\n{self.report_sections['news_report']}"
                 )
             if self.report_sections.get("fundamentals_report"):
                 report_parts.append(
-                    f"### Fundamentals Analysis\n{self.report_sections['fundamentals_report']}"
+                    f"### 기본적 분석\n{self.report_sections['fundamentals_report']}"
                 )
 
         # 리서치 팀 보고서
         if self.report_sections.get("investment_plan"):
-            report_parts.append("## Research Team Decision")
+            report_parts.append("## 리서치 팀 결정")
             report_parts.append(f"{self.report_sections['investment_plan']}")
 
         # 트레이딩 팀 보고서
         if self.report_sections.get("trader_investment_plan"):
-            report_parts.append("## Trading Team Plan")
+            report_parts.append("## 트레이딩 팀 계획")
             report_parts.append(f"{self.report_sections['trader_investment_plan']}")
 
         # 포트폴리오 관리 결정
         if self.report_sections.get("final_trade_decision"):
-            report_parts.append("## Portfolio Management Decision")
+            report_parts.append("## 포트폴리오 관리 결정")
             report_parts.append(f"{self.report_sections['final_trade_decision']}")
 
         self.final_report = "\n\n".join(report_parts) if report_parts else None
@@ -306,9 +306,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     # 헤더: 환영 메시지
     layout["header"].update(
         Panel(
-            "[bold green]Welcome to TradingAgents CLI[/bold green]\n"
+            "[bold green]TradingAgents CLI에 오신 것을 환영합니다[/bold green]\n"
             "[dim]© [Tauric Research](https://github.com/TauricResearch)[/dim]",
-            title="Welcome to TradingAgents",
+            title="TradingAgents에 오신 것을 환영합니다",
             border_style="green",
             padding=(1, 2),
             expand=True,
@@ -325,9 +325,9 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         padding=(0, 2),  # 가로 여백 추가
         expand=True,  # 테이블이 가용 공간을 채우도록 확장
     )
-    progress_table.add_column("Team", style="cyan", justify="center", width=20)
-    progress_table.add_column("Agent", style="green", justify="center", width=20)
-    progress_table.add_column("Status", style="yellow", justify="center", width=20)
+    progress_table.add_column("팀", style="cyan", justify="center", width=20)
+    progress_table.add_column("에이전트", style="green", justify="center", width=20)
+    progress_table.add_column("상태", style="yellow", justify="center", width=20)
 
     # 에이전트를 팀별로 묶는다 - agent_status에 있는 에이전트만 포함하도록 필터링
     all_teams = {
@@ -389,7 +389,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         progress_table.add_row("─" * 20, "─" * 20, "─" * 20, style="dim")
 
     layout["progress"].update(
-        Panel(progress_table, title="Progress", border_style="cyan", padding=(1, 2))
+        Panel(progress_table, title="진행 상황", border_style="cyan", padding=(1, 2))
     )
 
     # 메시지 패널: 최근 메시지와 도구 호출(tool call) 표시
@@ -402,10 +402,10 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         show_lines=True,  # 가로줄 유지
         padding=(0, 1),  # 열 사이 여백 추가
     )
-    messages_table.add_column("Time", style="cyan", width=8, justify="center")
-    messages_table.add_column("Type", style="green", width=10, justify="center")
+    messages_table.add_column("시간", style="cyan", width=8, justify="center")
+    messages_table.add_column("유형", style="green", width=10, justify="center")
     messages_table.add_column(
-        "Content", style="white", no_wrap=False, ratio=1
+        "내용", style="white", no_wrap=False, ratio=1
     )  # 내용 열이 확장되도록 설정
 
     # 도구 호출과 메시지를 하나로 합친다
@@ -441,7 +441,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["messages"].update(
         Panel(
             messages_table,
-            title="Messages & Tools",
+            title="메시지 및 도구",
             border_style="blue",
             padding=(1, 2),
         )
@@ -452,7 +452,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         layout["analysis"].update(
             Panel(
                 Markdown(message_buffer.current_report),
-                title="Current Report",
+                title="현재 보고서",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -460,8 +460,8 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     else:
         layout["analysis"].update(
             Panel(
-                "[italic]Waiting for analysis report...[/italic]",
-                title="Current Report",
+                "[italic]분석 보고서를 기다리는 중...[/italic]",
+                title="현재 보고서",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -479,22 +479,22 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     reports_total = len(message_buffer.report_sections)
 
     # 통계 문자열 조각 구성
-    stats_parts = [f"Agents: {agents_completed}/{agents_total}"]
+    stats_parts = [f"에이전트: {agents_completed}/{agents_total}"]
 
     # 콜백 핸들러(callback handler)에서 가져온 LLM/도구 통계
     if stats_handler:
         stats = stats_handler.get_stats()
-        stats_parts.append(f"LLM: {stats['llm_calls']}")
-        stats_parts.append(f"Tools: {stats['tool_calls']}")
+        stats_parts.append(f"LLM 호출: {stats['llm_calls']}")
+        stats_parts.append(f"도구 호출: {stats['tool_calls']}")
 
         # 토큰 표시 (값이 없으면 -- 로 대체)
         if stats["tokens_in"] > 0 or stats["tokens_out"] > 0:
-            tokens_str = f"Tokens: {format_tokens(stats['tokens_in'])}\u2191 {format_tokens(stats['tokens_out'])}\u2193"
+            tokens_str = f"\ud1a0\ud070: {format_tokens(stats['tokens_in'])}\u2191 {format_tokens(stats['tokens_out'])}\u2193"
         else:
-            tokens_str = "Tokens: --"
+            tokens_str = "\ud1a0\ud070: --"
         stats_parts.append(tokens_str)
 
-    stats_parts.append(f"Reports: {reports_completed}/{reports_total}")
+    stats_parts.append(f"\ubcf4\uace0\uc11c: {reports_completed}/{reports_total}")
 
     # 경과 시간
     if start_time:
@@ -517,11 +517,11 @@ def get_user_selections():
 
     # 환영 박스 내용 구성
     welcome_content = f"{welcome_ascii}\n"
-    welcome_content += "[bold green]TradingAgents: Multi-Agents LLM Financial Trading Framework - CLI[/bold green]\n\n"
-    welcome_content += "[bold]Workflow Steps:[/bold]\n"
+    welcome_content += "[bold green]TradingAgents: 멀티 에이전트 LLM 금융 트레이딩 프레임워크 - CLI[/bold green]\n\n"
+    welcome_content += "[bold]워크플로 단계:[/bold]\n"
     welcome_content += "I. Analyst Team → II. Research Team → III. Trader → IV. Risk Management → V. Portfolio Management\n\n"
     welcome_content += (
-        "[dim]Built by [Tauric Research](https://github.com/TauricResearch)[/dim]"
+        "[dim]제작: [Tauric Research](https://github.com/TauricResearch)[/dim]"
     )
 
     # 환영 박스를 만들어 가운데 정렬
@@ -529,8 +529,8 @@ def get_user_selections():
         welcome_content,
         border_style="green",
         padding=(1, 2),
-        title="Welcome to TradingAgents",
-        subtitle="Multi-Agents LLM Financial Trading Framework",
+        title="TradingAgents에 오신 것을 환영합니다",
+        subtitle="멀티 에이전트 LLM 금융 트레이딩 프레임워크",
     )
     console.print(Align.center(welcome_box))
     console.print()
@@ -545,7 +545,7 @@ def get_user_selections():
         box_content = f"[bold]{title}[/bold]\n"
         box_content += f"[dim]{prompt}[/dim]"
         if default:
-            box_content += f"\n[dim]Default: {default}[/dim]"
+            box_content += f"\n[dim]기본값: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
     def thinking_value_or_prompt(env_var, config_key, label, box_title, box_body, prompt_fn):
@@ -557,7 +557,7 @@ def get_user_selections():
         """
         if os.environ.get(env_var):
             value = DEFAULT_CONFIG[config_key]
-            console.print(f"[green]✓ {label} from environment:[/green] {value}")
+            console.print(f"[green]✓ 환경변수에서 {label} 설정됨:[/green] {value}")
             return value
         console.print(create_question_box(box_title, box_body))
         return prompt_fn()
@@ -565,8 +565,8 @@ def get_user_selections():
     # 1단계: 종목 코드(ticker symbol)
     console.print(
         create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the ticker, with exchange suffix when needed (e.g. SPY, 0700.HK, BTC-USD)",
+            "1단계: 종목 코드(Ticker)",
+            "종목 코드를 입력하세요. 필요하면 거래소 접미사를 붙입니다 (예: SPY, 0700.HK, BTC-USD)",
             "SPY",
         )
     )
@@ -576,15 +576,15 @@ def get_user_selections():
     # "stock"이 출력되는 것을 피하기 위함.
     if asset_type.value != "stock":
         console.print(
-            f"[green]Detected asset type:[/green] {asset_type.value}"
+            f"[green]감지된 자산 유형:[/green] {asset_type.value}"
         )
 
     # 2단계: 분석 날짜
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
     console.print(
         create_question_box(
-            "Step 2: Analysis Date",
-            "Enter the analysis date (YYYY-MM-DD)",
+            "2단계: 분석 날짜",
+            "분석 날짜를 입력하세요 (YYYY-MM-DD)",
             default_date,
         )
     )
@@ -594,13 +594,13 @@ def get_user_selections():
     if os.environ.get("TRADINGAGENTS_OUTPUT_LANGUAGE"):
         output_language = DEFAULT_CONFIG["output_language"]
         console.print(
-            f"[green]✓ Output language from environment:[/green] {output_language}"
+            f"[green]✓ 환경변수에서 출력 언어 설정됨:[/green] {output_language}"
         )
     else:
         console.print(
             create_question_box(
-                "Step 3: Output Language",
-                "Select the language for analyst reports and final decision"
+                "3단계: 출력 언어",
+                "분석가 보고서와 최종 결정에 사용할 언어를 선택하세요"
             )
         )
         output_language = ask_output_language()
@@ -608,12 +608,12 @@ def get_user_selections():
     # 4단계: 애널리스트 선택
     console.print(
         create_question_box(
-            "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
+            "4단계: 분석가 팀", "분석에 사용할 LLM 분석가 에이전트를 선택하세요"
         )
     )
     selected_analysts = select_analysts(asset_type)
     console.print(
-        f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
+        f"[green]선택된 분석가:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
 
     # 5단계: 리서치 깊이 (두 라운드 수가 모두 환경변수로 설정된 경우 건너뜀).
@@ -626,14 +626,14 @@ def get_user_selections():
     if depth_from_env:
         selected_research_depth = DEFAULT_CONFIG["max_debate_rounds"]
         console.print(
-            f"[green]✓ Research depth from environment:[/green] "
-            f"{DEFAULT_CONFIG['max_debate_rounds']} debate / "
-            f"{DEFAULT_CONFIG['max_risk_discuss_rounds']} risk rounds"
+            f"[green]✓ 환경변수에서 리서치 깊이(Research Depth) 설정됨:[/green] "
+            f"토론 {DEFAULT_CONFIG['max_debate_rounds']}라운드 / "
+            f"리스크 {DEFAULT_CONFIG['max_risk_discuss_rounds']}라운드"
         )
     else:
         console.print(
             create_question_box(
-                "Step 5: Research Depth", "Select your research depth level"
+                "5단계: 리서치 깊이(Research Depth)", "리서치 깊이 수준을 선택하세요"
             )
         )
         selected_research_depth = select_research_depth()
@@ -648,14 +648,14 @@ def get_user_selections():
         backend_url = resolve_backend_url(
             selected_llm_provider, env_url=DEFAULT_CONFIG["backend_url"]
         )
-        console.print(f"[green]✓ LLM provider from environment:[/green] {selected_llm_provider}")
-        console.print(f"[green]✓ Backend URL:[/green] {backend_url}")
+        console.print(f"[green]✓ 환경변수에서 LLM 제공자 설정됨:[/green] {selected_llm_provider}")
+        console.print(f"[green]✓ 백엔드 URL:[/green] {backend_url}")
         # 나중에 실행이 실패하지 않도록 API 키는 여전히 확인/저장한다.
         ensure_api_key(selected_llm_provider)
     else:
         console.print(
             create_question_box(
-                "Step 6: LLM Provider", "Select your LLM provider"
+                "6단계: LLM 제공자", "LLM 제공자를 선택하세요"
             )
         )
         selected_llm_provider, backend_url = select_llm_provider()
@@ -695,13 +695,13 @@ def get_user_selections():
         selected_shallow_thinker = DEFAULT_CONFIG["quick_think_llm"]
         selected_deep_thinker = DEFAULT_CONFIG["deep_think_llm"]
         console.print(
-            f"[green]✓ Thinking agents from environment:[/green] "
+            f"[green]✓ 환경변수에서 사고 에이전트(Thinking Agents) 설정됨:[/green] "
             f"quick={selected_shallow_thinker}, deep={selected_deep_thinker}"
         )
     else:
         console.print(
             create_question_box(
-                "Step 7: Thinking Agents", "Select your thinking agents for analysis"
+                "7단계: 사고 에이전트(Thinking Agents)", "분석에 사용할 사고 에이전트를 선택하세요"
             )
         )
         selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider)
@@ -723,20 +723,20 @@ def get_user_selections():
     elif provider_lower == "google":
         thinking_level = thinking_value_or_prompt(
             "TRADINGAGENTS_GOOGLE_THINKING_LEVEL", "google_thinking_level",
-            "Gemini thinking mode", "Step 8: Thinking Mode",
-            "Configure Gemini thinking mode", ask_gemini_thinking_config,
+            "Gemini 사고 모드", "8단계: 사고 모드(Thinking Mode)",
+            "Gemini 사고 모드를 설정하세요", ask_gemini_thinking_config,
         )
     elif provider_lower == "openai":
         reasoning_effort = thinking_value_or_prompt(
             "TRADINGAGENTS_OPENAI_REASONING_EFFORT", "openai_reasoning_effort",
-            "Reasoning effort", "Step 8: Reasoning Effort",
-            "Configure OpenAI reasoning effort level", ask_openai_reasoning_effort,
+            "추론 강도(Reasoning Effort)", "8단계: 추론 강도(Reasoning Effort)",
+            "OpenAI 추론 강도 수준을 설정하세요", ask_openai_reasoning_effort,
         )
     elif provider_lower == "anthropic":
         anthropic_effort = thinking_value_or_prompt(
             "TRADINGAGENTS_ANTHROPIC_EFFORT", "anthropic_effort",
-            "Claude effort", "Step 8: Effort Level",
-            "Configure Claude effort level", ask_anthropic_effort,
+            "Claude 강도(Effort)", "8단계: 강도 수준(Effort Level)",
+            "Claude 강도 수준을 설정하세요", ask_anthropic_effort,
         )
 
     return {
@@ -766,12 +766,12 @@ def get_analysis_date():
             # 날짜 형식을 검증하고 미래 날짜가 아닌지 확인
             analysis_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
             if analysis_date.date() > datetime.datetime.now().date():
-                console.print("[red]Error: Analysis date cannot be in the future[/red]")
+                console.print("[red]오류: 분석 날짜는 미래일 수 없습니다[/red]")
                 continue
             return date_str
         except ValueError:
             console.print(
-                "[red]Error: Invalid date format. Please use YYYY-MM-DD[/red]"
+                "[red]오류: 잘못된 날짜 형식입니다. YYYY-MM-DD 형식을 사용하세요[/red]"
             )
 
 
@@ -783,7 +783,7 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
 def display_complete_report(final_state):
     """전체 분석 보고서를 순차적으로 출력한다 (내용 잘림 방지)."""
     console.print()
-    console.print(Rule("Complete Analysis Report", style="bold green"))
+    console.print(Rule("전체 분석 보고서", style="bold green"))
 
     # I. 애널리스트 팀 보고서
     analysts = []
@@ -796,7 +796,7 @@ def display_complete_report(final_state):
     if final_state.get("fundamentals_report"):
         analysts.append(("Fundamentals Analyst", final_state["fundamentals_report"]))
     if analysts:
-        console.print(Panel("[bold]I. Analyst Team Reports[/bold]", border_style="cyan"))
+        console.print(Panel("[bold]I. 분석가 팀 보고서[/bold]", border_style="cyan"))
         for title, content in analysts:
             console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
@@ -811,13 +811,13 @@ def display_complete_report(final_state):
         if debate.get("judge_decision"):
             research.append(("Research Manager", debate["judge_decision"]))
         if research:
-            console.print(Panel("[bold]II. Research Team Decision[/bold]", border_style="magenta"))
+            console.print(Panel("[bold]II. 리서치 팀 결정[/bold]", border_style="magenta"))
             for title, content in research:
                 console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
     # III. 트레이딩 팀
     if final_state.get("trader_investment_plan"):
-        console.print(Panel("[bold]III. Trading Team Plan[/bold]", border_style="yellow"))
+        console.print(Panel("[bold]III. 트레이딩 팀 계획[/bold]", border_style="yellow"))
         console.print(Panel(Markdown(final_state["trader_investment_plan"]), title="Trader", border_style="blue", padding=(1, 2)))
 
     # IV. 리스크 관리 팀
@@ -831,13 +831,13 @@ def display_complete_report(final_state):
         if risk.get("neutral_history"):
             risk_reports.append(("Neutral Analyst", risk["neutral_history"]))
         if risk_reports:
-            console.print(Panel("[bold]IV. Risk Management Team Decision[/bold]", border_style="red"))
+            console.print(Panel("[bold]IV. 리스크 관리 팀 결정[/bold]", border_style="red"))
             for title, content in risk_reports:
                 console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
 
         # V. 포트폴리오 매니저 결정
         if risk.get("judge_decision"):
-            console.print(Panel("[bold]V. Portfolio Manager Decision[/bold]", border_style="green"))
+            console.print(Panel("[bold]V. 포트폴리오 매니저 최종 결정[/bold]", border_style="green"))
             console.print(Panel(Markdown(risk["judge_decision"]), title="Portfolio Manager", border_style="blue", padding=(1, 2)))
 
 
@@ -1106,15 +1106,15 @@ def run_analysis(checkpoint: bool | None = None):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # 초기 메시지 추가
-        message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
+        message_buffer.add_message("System", f"선택된 종목 코드: {selections['ticker']}")
         if selections["asset_type"] != "stock":
-            message_buffer.add_message("System", f"Detected asset type: {selections['asset_type']}")
+            message_buffer.add_message("System", f"감지된 자산 유형: {selections['asset_type']}")
         message_buffer.add_message(
-            "System", f"Analysis date: {selections['analysis_date']}"
+            "System", f"분석 날짜: {selections['analysis_date']}"
         )
         message_buffer.add_message(
             "System",
-            f"Selected analysts: {', '.join(analyst.value for analyst in selections['analysts'])}",
+            f"선택된 분석가: {', '.join(analyst.value for analyst in selections['analysts'])}",
         )
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
@@ -1126,7 +1126,7 @@ def run_analysis(checkpoint: bool | None = None):
 
         # 스피너(spinner) 텍스트 생성
         spinner_text = (
-            f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
+            f"{selections['ticker']} 분석 중 ({selections['analysis_date']})..."
         )
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
@@ -1190,15 +1190,15 @@ def run_analysis(checkpoint: bool | None = None):
                     update_research_team_status("in_progress")
                 if bull_hist:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Bull Researcher Analysis\n{bull_hist}"
+                        "investment_plan", f"### Bull Researcher 분석\n{bull_hist}"
                     )
                 if bear_hist:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Bear Researcher Analysis\n{bear_hist}"
+                        "investment_plan", f"### Bear Researcher 분석\n{bear_hist}"
                     )
                 if judge:
                     message_buffer.update_report_section(
-                        "investment_plan", f"### Research Manager Decision\n{judge}"
+                        "investment_plan", f"### Research Manager 결정\n{judge}"
                     )
                     update_research_team_status("completed")
                     message_buffer.update_agent_status("Trader", "in_progress")
@@ -1224,24 +1224,24 @@ def run_analysis(checkpoint: bool | None = None):
                     if message_buffer.agent_status.get("Aggressive Analyst") != "completed":
                         message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Aggressive Analyst Analysis\n{agg_hist}"
+                        "final_trade_decision", f"### Aggressive Analyst 분석\n{agg_hist}"
                     )
                 if con_hist:
                     if message_buffer.agent_status.get("Conservative Analyst") != "completed":
                         message_buffer.update_agent_status("Conservative Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Conservative Analyst Analysis\n{con_hist}"
+                        "final_trade_decision", f"### Conservative Analyst 분석\n{con_hist}"
                     )
                 if neu_hist:
                     if message_buffer.agent_status.get("Neutral Analyst") != "completed":
                         message_buffer.update_agent_status("Neutral Analyst", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Neutral Analyst Analysis\n{neu_hist}"
+                        "final_trade_decision", f"### Neutral Analyst 분석\n{neu_hist}"
                     )
                 if judge and message_buffer.agent_status.get("Portfolio Manager") != "completed":
                     message_buffer.update_agent_status("Portfolio Manager", "in_progress")
                     message_buffer.update_report_section(
-                        "final_trade_decision", f"### Portfolio Manager Decision\n{judge}"
+                        "final_trade_decision", f"### Portfolio Manager 결정\n{judge}"
                     )
                     message_buffer.update_agent_status("Aggressive Analyst", "completed")
                     message_buffer.update_agent_status("Conservative Analyst", "completed")
@@ -1264,7 +1264,7 @@ def run_analysis(checkpoint: bool | None = None):
             message_buffer.update_agent_status(agent, "completed")
 
         message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
+            "System", f"{selections['analysis_date']} 분석이 완료되었습니다"
         )
         message_buffer.add_message("System", analyst_wall_time_tracker.format_summary())
 
@@ -1276,28 +1276,28 @@ def run_analysis(checkpoint: bool | None = None):
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
     # 분석 후 질문들 (깔끔한 상호작용을 위해 Live 컨텍스트 밖에서 진행)
-    console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+    console.print("\n[bold cyan]분석 완료![/bold cyan]\n")
     console.print(f"[dim]{analyst_wall_time_tracker.format_summary()}[/dim]")
 
     # 보고서 저장 여부 질문
-    save_choice = typer.prompt("Save report?", default="Y").strip().upper()
+    save_choice = typer.prompt("보고서를 저장할까요?", default="Y").strip().upper()
     if save_choice in ("Y", "YES", ""):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         default_path = Path.cwd() / "reports" / f"{selections['ticker']}_{timestamp}"
         save_path_str = typer.prompt(
-            "Save path (press Enter for default)",
+            "저장 경로 (기본값을 쓰려면 Enter)",
             default=str(default_path)
         ).strip()
         save_path = Path(save_path_str)
         try:
             report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
-            console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
-            console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+            console.print(f"\n[green]✓ 보고서 저장 위치:[/green] {save_path.resolve()}")
+            console.print(f"  [dim]전체 보고서:[/dim] {report_file.name}")
         except Exception as e:
-            console.print(f"[red]Error saving report: {e}[/red]")
+            console.print(f"[red]보고서 저장 중 오류: {e}[/red]")
 
     # 전체 보고서 화면 표시 여부 질문
-    display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
+    display_choice = typer.prompt("\n전체 보고서를 화면에 표시할까요?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
 
@@ -1307,19 +1307,19 @@ def analyze(
     checkpoint: bool | None = typer.Option(
         None,
         "--checkpoint/--no-checkpoint",
-        help="Enable/disable checkpoint-resume (save state after each node so a "
-        "crashed run can resume). Omit to honor TRADINGAGENTS_CHECKPOINT_ENABLED.",
+        help="체크포인트-재개(checkpoint-resume) 활성화/비활성화 (노드마다 상태를 "
+        "저장해 중단된 실행을 이어서 재개). 생략하면 TRADINGAGENTS_CHECKPOINT_ENABLED를 따릅니다.",
     ),
     clear_checkpoints: bool = typer.Option(
         False,
         "--clear-checkpoints",
-        help="Delete all saved checkpoints before running (force fresh start).",
+        help="실행 전에 저장된 체크포인트를 모두 삭제합니다 (강제로 새로 시작).",
     ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
-        console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
+        console.print(f"[yellow]체크포인트 {n}개를 삭제했습니다.[/yellow]")
     try:
         run_analysis(checkpoint=checkpoint)
     except _NO_CONSOLE_ERRORS:
@@ -1327,9 +1327,9 @@ def analyze(
         # prompt_toolkit 트레이스백 대신 조치 방법이 담긴 안내 한 줄을 stderr로
         # 출력한다. rich도 렌더링되지 않을 수 있으므로 일반 텍스트를 쓴다 (#1138).
         typer.echo(
-            "Error: no Windows console available. The interactive CLI needs a real "
-            "console buffer — run it from Windows Terminal, PowerShell, or cmd.exe "
-            "rather than a piped or embedded terminal.",
+            "오류: 사용 가능한 Windows 콘솔이 없습니다. 대화형 CLI에는 실제 콘솔 "
+            "버퍼가 필요합니다 — 파이프로 연결되거나 임베디드된 터미널이 아닌 "
+            "Windows Terminal, PowerShell 또는 cmd.exe에서 실행하세요.",
             err=True,
         )
         raise typer.Exit(code=1) from None

@@ -152,7 +152,7 @@ def test_confirm_endpoint_warns_on_missing_scheme(monkeypatch, capsys):
     importlib.reload(cli_utils)
     cli_utils.confirm_ollama_endpoint("0.0.0.128")
     out = capsys.readouterr().out
-    assert "missing a scheme" in out
+    assert "스킴(scheme)이" in out
     assert "http://<host>:11434/v1" in out
 
 
@@ -163,7 +163,7 @@ def test_confirm_endpoint_warns_on_non_default_port_remote(monkeypatch, capsys):
     importlib.reload(cli_utils)
     cli_utils.confirm_ollama_endpoint("http://remote-host/v1")
     out = capsys.readouterr().out
-    assert "port 11434" in out
+    assert "11434" in out  # 포트 11434 안내 문구 (한국어 번역, 줄바꿈에 안전하도록 숫자만 검사)
 
 
 def test_confirm_endpoint_quiet_on_local_no_port(monkeypatch, capsys):

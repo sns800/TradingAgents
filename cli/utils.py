@@ -21,10 +21,10 @@ console = Console()
 TICKER_INPUT_EXAMPLES = "SPY, 0700.HK, BTC-USD"
 
 ANALYST_ORDER = [
-    ("Market Analyst", AnalystType.MARKET),
-    ("Sentiment Analyst", AnalystType.SOCIAL),
-    ("News Analyst", AnalystType.NEWS),
-    ("Fundamentals Analyst", AnalystType.FUNDAMENTALS),
+    ("시장 분석가 (Market Analyst)", AnalystType.MARKET),
+    ("감성 분석가 (Sentiment Analyst)", AnalystType.SOCIAL),
+    ("뉴스 분석가 (News Analyst)", AnalystType.NEWS),
+    ("펀더멘털 분석가 (Fundamentals Analyst)", AnalystType.FUNDAMENTALS),
 ]
 
 CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-BTC", "-ETH")
@@ -49,10 +49,10 @@ def get_ticker() -> str:
     심볼 문자 집합을 검증한다.
     """
     ticker = questionary.text(
-        f"Enter ticker symbol (e.g. {TICKER_INPUT_EXAMPLES}):",
+        f"종목 코드를 입력하세요 (예: {TICKER_INPUT_EXAMPLES}):",
         validate=lambda x: (
             is_valid_ticker_input(x)
-            or "Please enter a valid ticker symbol, e.g. AAPL, 000404.SZ, 0700.HK, GC=F."
+            or "올바른 종목 코드를 입력해 주세요 (예: AAPL, 000404.SZ, 0700.HK, GC=F)."
         ),
         style=questionary.Style(
             [
@@ -63,7 +63,7 @@ def get_ticker() -> str:
     ).ask()
 
     if ticker is None:
-        console.print("\n[red]No ticker symbol provided. Exiting...[/red]")
+        console.print("\n[red]종목 코드가 입력되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return normalize_ticker_symbol(ticker) if ticker.strip() else "SPY"
@@ -122,9 +122,9 @@ def get_analysis_date() -> str:
             return False
 
     date = questionary.text(
-        "Enter the analysis date (YYYY-MM-DD):",
+        "분석 날짜를 입력하세요 (YYYY-MM-DD):",
         validate=lambda x: validate_date(x.strip())
-        or "Please enter a valid date in YYYY-MM-DD format.",
+        or "YYYY-MM-DD 형식의 올바른 날짜를 입력해 주세요.",
         style=questionary.Style(
             [
                 ("text", "fg:green"),
@@ -134,7 +134,7 @@ def get_analysis_date() -> str:
     ).ask()
 
     if not date:
-        console.print("\n[red]No date provided. Exiting...[/red]")
+        console.print("\n[red]날짜가 입력되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return date.strip()
@@ -147,14 +147,14 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK) -> list[AnalystType
         asset_type,
     )
     choices = questionary.checkbox(
-        "Select Your [Analysts Team]:",
+        "[분석가 팀]을 선택하세요:",
         choices=[
             questionary.Choice(display, value=value)
             for display, value in ANALYST_ORDER
             if value in available_analysts
         ],
-        instruction="\n- Press Space to select/unselect analysts\n- Press 'a' to select/unselect all\n- Press Enter when done",
-        validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+        instruction="\n- Space로 분석가 선택/해제\n- 'a'로 전체 선택/해제\n- 완료하면 Enter",
+        validate=lambda x: len(x) > 0 or "분석가를 최소 한 명은 선택해야 합니다.",
         style=questionary.Style(
             [
                 ("checkbox-selected", "fg:green"),
@@ -166,7 +166,7 @@ def select_analysts(asset_type: AssetType = AssetType.STOCK) -> list[AnalystType
     ).ask()
 
     if not choices:
-        console.print("\n[red]No analysts selected. Exiting...[/red]")
+        console.print("\n[red]분석가가 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return choices
@@ -177,17 +177,17 @@ def select_research_depth() -> int:
 
     # 리서치 깊이 옵션과 대응하는 값(라운드 수) 정의
     DEPTH_OPTIONS = [
-        ("Shallow - Quick research, few debate and strategy discussion rounds", 1),
-        ("Medium - Middle ground, moderate debate rounds and strategy discussion", 3),
-        ("Deep - Comprehensive research, in depth debate and strategy discussion", 5),
+        ("얕게(Shallow) - 빠른 리서치, 토론·전략 논의 라운드 최소", 1),
+        ("중간(Medium) - 중간 수준의 토론 라운드와 전략 논의", 3),
+        ("깊게(Deep) - 종합적인 리서치, 심층 토론과 전략 논의", 5),
     ]
 
     choice = questionary.select(
-        "Select Your [Research Depth]:",
+        "[리서치 깊이]를 선택하세요:",
         choices=[
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- Enter로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:yellow noinherit"),
@@ -198,7 +198,7 @@ def select_research_depth() -> int:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No research depth selected. Exiting...[/red]")
+        console.print("\n[red]리서치 깊이가 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     return choice
@@ -229,7 +229,7 @@ def _fetch_openrouter_models() -> list[tuple[str, str]]:
         models.sort(key=lambda m: m.get("created") or 0, reverse=True)
         return [(m.get("name") or m["id"], m["id"]) for m in models]
     except Exception as e:
-        console.print(f"\n[yellow]Could not fetch OpenRouter models: {e}[/yellow]")
+        console.print(f"\n[yellow]OpenRouter 모델 목록을 가져오지 못했습니다: {e}[/yellow]")
         return []
 
 
@@ -245,7 +245,7 @@ def _require_text(message: str, hint: str) -> str:
         validate=lambda x: len(x.strip()) > 0 or hint,
     ).ask()
     if response is None:
-        console.print("\n[red]Cancelled. Exiting...[/red]")
+        console.print("\n[red]취소되었습니다. 종료합니다...[/red]")
         exit(1)
     return response.strip()
 
@@ -267,12 +267,12 @@ def select_openrouter_model(mode: str) -> str:
     top = (mainstream or models)[:5]
 
     choices = [questionary.Choice(name, value=mid) for name, mid in top]
-    choices.append(questionary.Choice("Custom model ID", value="custom"))
+    choices.append(questionary.Choice("사용자 지정 모델 ID", value="custom"))
 
     choice = questionary.select(
-        f"Select Your [{mode.title()}-Thinking] OpenRouter Model (latest available):",
+        f"[{mode.title()}-Thinking] OpenRouter 모델을 선택하세요 (최신 모델 순):",
         choices=choices,
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- Enter로 선택",
         style=questionary.Style([
             ("selected", "fg:magenta noinherit"),
             ("highlighted", "fg:magenta noinherit"),
@@ -281,19 +281,19 @@ def select_openrouter_model(mode: str) -> str:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No model selected. Exiting...[/red]")
+        console.print("\n[red]모델이 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
     if choice == "custom":
         return _require_text(
-            "Enter OpenRouter model ID (e.g. google/gemma-4-26b-a4b-it):",
-            "Please enter a model ID.",
+            "OpenRouter 모델 ID를 입력하세요 (예: google/gemma-4-26b-a4b-it):",
+            "모델 ID를 입력해 주세요.",
         )
     return choice
 
 
 def _prompt_custom_model_id() -> str:
     """사용자 지정 모델 ID를 직접 입력받는다."""
-    return _require_text("Enter model ID:", "Please enter a model ID.")
+    return _require_text("모델 ID를 입력하세요:", "모델 ID를 입력해 주세요.")
 
 
 def _select_model(provider: str, mode: str) -> str:
@@ -303,17 +303,17 @@ def _select_model(provider: str, mode: str) -> str:
 
     if provider.lower() == "azure":
         return _require_text(
-            f"Enter Azure deployment name ({mode}-thinking):",
-            "Please enter a deployment name.",
+            f"Azure 배포(deployment) 이름을 입력하세요 ({mode}-thinking):",
+            "배포 이름을 입력해 주세요.",
         )
 
     choice = questionary.select(
-        f"Select Your [{mode.title()}-Thinking LLM Engine]:",
+        f"[{mode.title()}-Thinking LLM 엔진]을 선택하세요:",
         choices=[
             questionary.Choice(display, value=value)
             for display, value in get_model_options(provider, mode)
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- Enter로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -324,7 +324,7 @@ def _select_model(provider: str, mode: str) -> str:
     ).ask()
 
     if choice is None:
-        console.print(f"\n[red]No {mode} thinking llm engine selected. Exiting...[/red]")
+        console.print(f"\n[red]{mode}-thinking LLM 엔진이 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     if choice == "custom":
@@ -368,7 +368,7 @@ def _llm_provider_table() -> list[tuple[str, str, str | None]]:
         ("Azure OpenAI", "azure", None),
         ("Amazon Bedrock", "bedrock", None),
         ("Ollama", "ollama", ollama_url),
-        ("OpenAI-compatible (vLLM, LM Studio, llama.cpp, custom relay)", "openai_compatible", None),
+        ("OpenAI 호환 (vLLM, LM Studio, llama.cpp, 사용자 지정 릴레이)", "openai_compatible", None),
     ]
 
 
@@ -397,13 +397,13 @@ def resolve_backend_url(
 def prompt_openai_compatible_url() -> str:
     """사용자 지정 OpenAI 호환(OpenAI-compatible) 엔드포인트의 기본 URL을 입력받는다."""
     url = questionary.text(
-        "Enter the OpenAI-compatible base URL "
-        "(e.g. http://localhost:8000/v1 for vLLM, http://localhost:1234/v1 for LM Studio):",
+        "OpenAI 호환 기본 URL을 입력하세요 "
+        "(예: vLLM은 http://localhost:8000/v1, LM Studio는 http://localhost:1234/v1):",
         validate=lambda x: x.strip().startswith(("http://", "https://"))
-        or "Enter a URL starting with http:// or https://",
+        or "http:// 또는 https://로 시작하는 URL을 입력해 주세요.",
     ).ask()
     if not url:
-        console.print("\n[red]No endpoint URL provided. Exiting...[/red]")
+        console.print("\n[red]엔드포인트 URL이 입력되지 않았습니다. 종료합니다...[/red]")
         exit(1)
     return url.strip()
 
@@ -413,12 +413,12 @@ def select_llm_provider() -> tuple[str, str | None]:
     PROVIDERS = _llm_provider_table()
 
     choice = questionary.select(
-        "Select your LLM Provider:",
+        "LLM 제공자를 선택하세요:",
         choices=[
             questionary.Choice(display, value=(provider_key, url))
             for display, provider_key, url in PROVIDERS
         ],
-        instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        instruction="\n- 방향키로 이동\n- Enter로 선택",
         style=questionary.Style(
             [
                 ("selected", "fg:magenta noinherit"),
@@ -429,7 +429,7 @@ def select_llm_provider() -> tuple[str, str | None]:
     ).ask()
 
     if choice is None:
-        console.print("\n[red]No LLM provider selected. Exiting...[/red]")
+        console.print("\n[red]LLM 제공자가 선택되지 않았습니다. 종료합니다...[/red]")
         exit(1)
 
     provider, url = choice
@@ -439,12 +439,12 @@ def select_llm_provider() -> tuple[str, str | None]:
 def ask_openai_reasoning_effort() -> str:
     """OpenAI 추론 강도(reasoning effort) 수준을 물어본다."""
     choices = [
-        questionary.Choice("Medium (Default)", "medium"),
-        questionary.Choice("High (More thorough)", "high"),
-        questionary.Choice("Low (Faster)", "low"),
+        questionary.Choice("중간 (기본값)", "medium"),
+        questionary.Choice("높음 (더 꼼꼼함)", "high"),
+        questionary.Choice("낮음 (더 빠름)", "low"),
     ]
     return questionary.select(
-        "Select Reasoning Effort:",
+        "추론 강도(Reasoning Effort)를 선택하세요:",
         choices=choices,
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
@@ -461,11 +461,11 @@ def ask_anthropic_effort() -> str | None:
     API는 "max"도 받지만, 일반적인 선택 범위인 low/medium/high만 노출한다.
     """
     return questionary.select(
-        "Select Effort Level:",
+        "노력 수준(Effort Level)을 선택하세요:",
         choices=[
-            questionary.Choice("High (recommended)", "high"),
-            questionary.Choice("Medium (balanced)", "medium"),
-            questionary.Choice("Low (faster, cheaper)", "low"),
+            questionary.Choice("높음 (권장)", "high"),
+            questionary.Choice("중간 (균형)", "medium"),
+            questionary.Choice("낮음 (더 빠르고 저렴)", "low"),
         ],
         style=questionary.Style([
             ("selected", "fg:cyan noinherit"),
@@ -482,10 +482,10 @@ def ask_gemini_thinking_config() -> str | None:
     클라이언트가 모델 시리즈에 맞는 API 파라미터로 매핑한다.
     """
     return questionary.select(
-        "Select Thinking Mode:",
+        "사고(Thinking) 모드를 선택하세요:",
         choices=[
-            questionary.Choice("Enable Thinking (recommended)", "high"),
-            questionary.Choice("Minimal/Disable Thinking", "minimal"),
+            questionary.Choice("사고 활성화 (권장)", "high"),
+            questionary.Choice("사고 최소화/비활성화", "minimal"),
         ],
         style=questionary.Style([
             ("selected", "fg:green noinherit"),
@@ -502,14 +502,14 @@ def ask_glm_region() -> tuple[str, str]:
     키는 서로 호환되지 않는다. (provider_key, backend_url)을 반환한다.
     """
     return questionary.select(
-        "Select GLM platform:",
+        "GLM 플랫폼을 선택하세요:",
         choices=[
             questionary.Choice(
-                "Z.AI — api.z.ai (international, uses ZHIPU_API_KEY)",
+                "Z.AI — api.z.ai (국제용, ZHIPU_API_KEY 사용)",
                 value=("glm", "https://api.z.ai/api/paas/v4/"),
             ),
             questionary.Choice(
-                "BigModel — open.bigmodel.cn (China, uses ZHIPU_CN_API_KEY)",
+                "BigModel — open.bigmodel.cn (중국용, ZHIPU_CN_API_KEY 사용)",
                 value=("glm-cn", "https://open.bigmodel.cn/api/paas/v4/"),
             ),
         ],
@@ -529,14 +529,14 @@ def ask_qwen_region() -> tuple[str, str]:
     (provider_key, backend_url)을 반환한다.
     """
     return questionary.select(
-        "Select Qwen region:",
+        "Qwen 지역을 선택하세요:",
         choices=[
             questionary.Choice(
-                "International — dashscope-intl.aliyuncs.com (uses DASHSCOPE_API_KEY)",
+                "국제 — dashscope-intl.aliyuncs.com (DASHSCOPE_API_KEY 사용)",
                 value=("qwen", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
             ),
             questionary.Choice(
-                "China — dashscope.aliyuncs.com (uses DASHSCOPE_CN_API_KEY)",
+                "중국 — dashscope.aliyuncs.com (DASHSCOPE_CN_API_KEY 사용)",
                 value=("qwen-cn", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             ),
         ],
@@ -555,14 +555,14 @@ def ask_minimax_region() -> tuple[str, str]:
     다른 지역에 인증할 수 없다. (provider_key, backend_url)을 반환한다.
     """
     return questionary.select(
-        "Select MiniMax region:",
+        "MiniMax 지역을 선택하세요:",
         choices=[
             questionary.Choice(
-                "Global — api.minimax.io (uses MINIMAX_API_KEY)",
+                "글로벌 — api.minimax.io (MINIMAX_API_KEY 사용)",
                 value=("minimax", "https://api.minimax.io/v1"),
             ),
             questionary.Choice(
-                "China — api.minimaxi.com (uses MINIMAX_CN_API_KEY)",
+                "중국 — api.minimaxi.com (MINIMAX_CN_API_KEY 사용)",
                 value=("minimax-cn", "https://api.minimaxi.com/v1"),
             ),
         ],
@@ -584,22 +584,22 @@ def confirm_ollama_endpoint(url: str) -> None:
     있으므로 잘못된 형식의 입력을 거부하지는 않는다.
     """
     from_env = os.environ.get("OLLAMA_BASE_URL")
-    origin = " (from OLLAMA_BASE_URL)" if from_env and from_env == url else ""
-    console.print(f"[green]✓ Using Ollama at {url}{origin}[/green]")
+    origin = " (OLLAMA_BASE_URL에서 설정됨)" if from_env and from_env == url else ""
+    console.print(f"[green]✓ Ollama 사용 주소: {url}{origin}[/green]")
 
     if not url.startswith(("http://", "https://")):
         console.print(
-            f"[yellow]Note: {url!r} is missing a scheme. "
-            f"Ollama-serve typically expects a URL like "
-            f"http://<host>:11434/v1.[/yellow]"
+            f"[yellow]참고: {url!r}에 스킴(scheme)이 없습니다. "
+            f"ollama-serve는 보통 http://<host>:11434/v1 형태의 "
+            f"URL을 기대합니다.[/yellow]"
         )
     elif ":11434" not in url and "://localhost" not in url and "://127.0.0.1" not in url:
         # 포트가 ollama-serve 기본값과 다르고 호스트가 로컬이 아닐 때
         # (사용자가 :80으로 프록시하는 경우도 있음) 가벼운 힌트를 준다.
         console.print(
-            f"[yellow]Note: {url!r} doesn't include port 11434. "
-            f"Make sure your remote ollama-serve listens on the port "
-            f"shown above.[/yellow]"
+            f"[yellow]참고: {url!r}에 포트 11434가 없습니다. "
+            f"원격 ollama-serve가 위에 표시된 포트에서 수신 대기 중인지 "
+            f"확인하세요.[/yellow]"
         )
 
 
@@ -629,10 +629,10 @@ def ensure_api_key(provider: str) -> str | None:
         return existing
 
     console.print(
-        f"\n[yellow]{env_var} is not set in your environment.[/yellow]"
+        f"\n[yellow]{env_var} 환경변수가 설정되어 있지 않습니다.[/yellow]"
     )
     key = questionary.password(
-        f"Paste your {env_var} (will be saved to .env):",
+        f"{env_var} 값을 붙여넣으세요 (.env 파일에 저장됩니다):",
         style=questionary.Style([
             ("text", "fg:cyan"),
             ("highlighted", "noinherit"),
@@ -640,7 +640,7 @@ def ensure_api_key(provider: str) -> str | None:
     ).ask()
     if not key:
         console.print(
-            f"[red]Skipped. API calls will fail until {env_var} is set.[/red]"
+            f"[red]건너뛰었습니다. {env_var}가 설정될 때까지 API 호출은 실패합니다.[/red]"
         )
         return None
 
@@ -648,14 +648,14 @@ def ensure_api_key(provider: str) -> str | None:
     Path(env_path).touch(exist_ok=True)
     set_key(env_path, env_var, key)
     os.environ[env_var] = key
-    console.print(f"[green]Saved {env_var} to {env_path}[/green]")
+    console.print(f"[green]{env_var}를 {env_path}에 저장했습니다[/green]")
     return key
 
 
 def ask_output_language() -> str:
     """보고서 출력 언어를 물어본다."""
     choice = questionary.select(
-        "Select Output Language:",
+        "출력 언어를 선택하세요:",
         choices=[
             # 한글화 포크: Korean을 기본값으로 맨 위에 배치 (원본은 English가 기본)
             questionary.Choice("Korean (한국어, 기본값)", "Korean"),
@@ -669,7 +669,7 @@ def ask_output_language() -> str:
             questionary.Choice("German (Deutsch)", "German"),
             questionary.Choice("Arabic (العربية)", "Arabic"),
             questionary.Choice("Russian (Русский)", "Russian"),
-            questionary.Choice("Custom language", "custom"),
+            questionary.Choice("사용자 지정 언어", "custom"),
         ],
         style=questionary.Style([
             ("selected", "fg:yellow noinherit"),
@@ -684,8 +684,8 @@ def ask_output_language() -> str:
         return "Korean"
     if choice == "custom":
         return (questionary.text(
-            "Enter language name (e.g. Turkish, Vietnamese, Thai, Indonesian):",
-            validate=lambda x: len(x.strip()) > 0 or "Please enter a language name.",
+            "언어 이름을 입력하세요 (예: Turkish, Vietnamese, Thai, Indonesian):",
+            validate=lambda x: len(x.strip()) > 0 or "언어 이름을 입력해 주세요.",
         ).ask() or "").strip() or "Korean"
 
     return choice

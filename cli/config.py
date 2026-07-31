@@ -10,5 +10,5 @@ CLI_CONFIG = {
     # 공지사항(Announcements) 관련 설정
     "announcements_url": "https://api.tauric.ai/v1/announcements",
     "announcements_timeout": 1.0,
-    "announcements_fallback": "[cyan]For more information, please visit[/cyan] [link=https://github.com/TauricResearch]https://github.com/TauricResearch[/link]",
+    "announcements_fallback": "[cyan]자세한 내용은 다음 페이지를 방문하세요:[/cyan] [link=https://github.com/TauricResearch]https://github.com/TauricResearch[/link]",
 }

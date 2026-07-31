@@ -53,13 +53,13 @@ def display_announcements(console: Console, data: dict) -> None:
         content,
         border_style="cyan",
         padding=(1, 2),
-        title="Announcements",
+        title="공지사항",
     )
     console.print(panel)
 
     if require_attention:
         # getpass를 쓰면 입력한 내용이 화면에 표시되지 않아
         # "Enter를 눌러 계속" 용도로 깔끔하게 대기할 수 있다.
-        getpass.getpass("Press Enter to continue...")
+        getpass.getpass("계속하려면 Enter를 누르세요...")
     else:
         console.print()
