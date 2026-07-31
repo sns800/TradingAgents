@@ -88,7 +88,9 @@ rm -rf "$API_TMP"
 
 # ---------- 5. 프론트엔드 배포 ----------
 echo "== 프론트엔드 S3 동기화 및 CloudFront 무효화 =="
-aws s3 sync --region "$REGION" "$ROOT/webui/frontend/" "s3://$SITE_BUCKET/" --delete
+# no-cache: 브라우저가 매번 재검증하게 해 배포 직후 구버전이 남지 않도록 함
+# (ETag 기반 304 응답이라 실제 트래픽 부담은 거의 없음)
+aws s3 sync --region "$REGION" "$ROOT/webui/frontend/" "s3://$SITE_BUCKET/" --delete --cache-control "no-cache"
 aws cloudfront create-invalidation --distribution-id "$DIST_ID" \
   --paths "/*" --query 'Invalidation.Id' --output text
 
