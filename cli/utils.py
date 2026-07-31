@@ -657,10 +657,11 @@ def ask_output_language() -> str:
     choice = questionary.select(
         "Select Output Language:",
         choices=[
-            questionary.Choice("English (default)", "English"),
+            # 한글화 포크: Korean을 기본값으로 맨 위에 배치 (원본은 English가 기본)
+            questionary.Choice("Korean (한국어, 기본값)", "Korean"),
+            questionary.Choice("English", "English"),
             questionary.Choice("Chinese (中文)", "Chinese"),
             questionary.Choice("Japanese (日本語)", "Japanese"),
-            questionary.Choice("Korean (한국어)", "Korean"),
             questionary.Choice("Hindi (हिन्दी)", "Hindi"),
             questionary.Choice("Spanish (Español)", "Spanish"),
             questionary.Choice("Portuguese (Português)", "Portuguese"),
@@ -678,13 +679,13 @@ def ask_output_language() -> str:
     ).ask()
 
     # 출력 언어는 합리적인 기본값이 있으므로, 취소해도 (필수인 모델/공급자
-    # 질문들과 달리) 실행을 종료하지 않고 English로 대체한다.
+    # 질문들과 달리) 실행을 종료하지 않고 Korean(이 포크의 기본값)으로 대체한다.
     if choice is None:
-        return "English"
+        return "Korean"
     if choice == "custom":
         return (questionary.text(
             "Enter language name (e.g. Turkish, Vietnamese, Thai, Indonesian):",
             validate=lambda x: len(x.strip()) > 0 or "Please enter a language name.",
-        ).ask() or "").strip() or "English"
+        ).ask() or "").strip() or "Korean"
 
     return choice

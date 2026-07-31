@@ -119,14 +119,15 @@ class TestCancelExitsCleanly:
 
 
 @pytest.mark.unit
-class TestLanguageDefaultsToEnglish:
-    def test_select_cancel_defaults_english(self):
-        """출력 언어 선택을 취소하면 영어(English)가 기본값이 되는지 검증하는 테스트."""
+class TestLanguageDefaultsToKorean:
+    # 한글화 포크: 기본 출력 언어가 English에서 Korean으로 변경됨
+    def test_select_cancel_defaults_korean(self):
+        """출력 언어 선택을 취소하면 한국어(Korean)가 기본값이 되는지 검증하는 테스트."""
         with mock.patch.object(utils.questionary, "select", return_value=_asks(None)):
-            assert utils.ask_output_language() == "English"
+            assert utils.ask_output_language() == "Korean"
 
-    def test_custom_language_cancel_defaults_english(self):
-        """사용자 지정 언어 입력을 취소해도 영어가 기본값이 되는지 검증하는 테스트."""
+    def test_custom_language_cancel_defaults_korean(self):
+        """사용자 지정 언어 입력을 취소해도 한국어가 기본값이 되는지 검증하는 테스트."""
         with mock.patch.object(utils.questionary, "select", return_value=_asks("custom")), \
              mock.patch.object(utils.questionary, "text", return_value=_asks(None)):
-            assert utils.ask_output_language() == "English"
+            assert utils.ask_output_language() == "Korean"

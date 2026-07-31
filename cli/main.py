@@ -1009,7 +1009,7 @@ def _build_run_config(selections: dict, checkpoint: bool | None) -> dict:
     config["google_thinking_level"] = selections.get("google_thinking_level")
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
-    config["output_language"] = selections.get("output_language", "English")
+    config["output_language"] = selections.get("output_language", "Korean")
     # --checkpoint/--no-checkpoint는 명시적으로 줬을 때만 덮어쓴다. 플래그를
     # 생략하면 TRADINGAGENTS_CHECKPOINT_ENABLED / 기본값이 유지된다 (#976).
     if checkpoint is not None:

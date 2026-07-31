@@ -124,7 +124,9 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "checkpoint_enabled": False,
     # 애널리스트 보고서와 최종 결정의 출력 언어.
     # 내부 에이전트 토론은 추론 품질을 위해 영어로 유지됩니다.
-    "output_language": "English",
+    # ※ 한글화 포크: 원본의 기본값은 "English"이지만 이 포크는 "Korean"입니다.
+    #    TRADINGAGENTS_OUTPUT_LANGUAGE 환경변수로 언제든 바꿀 수 있습니다.
+    "output_language": "Korean",
     # ----- 토론(debate) 관련 설정 -----
     # 강세/약세 연구원 토론의 최대 라운드 수
     "max_debate_rounds": 1,
