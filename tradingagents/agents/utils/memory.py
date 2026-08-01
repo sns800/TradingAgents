@@ -70,11 +70,15 @@ class TradingMemoryLog:
         """
         if not self._log_path:
             return
-        # 멱등성(idempotency) 가드: 전체 파싱 대신 빠른 원문 텍스트 스캔
+        # 멱등성(idempotency) 가드: 전체 파싱 대신 빠른 원문 텍스트 스캔.
+        # unresolved(영구 데이터 부재로 마킹된) 항목도 같은 결정의 기록이므로
+        # 재실행 시 중복 pending 항목을 만들지 않는다.
         if self._log_path.exists():
             raw = self._log_path.read_text(encoding="utf-8")
             for line in raw.splitlines():
-                if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
+                if line.startswith(f"[{trade_date} | {ticker} |") and (
+                    line.endswith("| pending]") or line.endswith("| unresolved]")
+                ):
                     return
         rating = parse_rating(final_trade_decision, context="memory log entry")
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
@@ -106,7 +110,12 @@ class TradingMemoryLog:
         return entries
 
     def get_pending_entries(self) -> list[dict]:
-        """결과가 pending(대기) 상태인 항목을 반환한다(Phase B에서 사용)."""
+        """결과가 pending(대기) 상태인 항목을 반환한다(Phase B에서 사용).
+
+        ``unresolved``로 마킹된 항목(상장폐지 등 가격 데이터가 영구히 없는
+        항목)은 pending과 구분되어 여기 포함되지 않으므로, 해소 재시도
+        루프에서 자동으로 제외됩니다.
+        """
         return [e for e in self.load_entries() if e.get("pending")]
 
     def get_past_context(
@@ -120,9 +129,13 @@ class TradingMemoryLog:
         주입하고, 다른 종목(cross)은 반성만 짧게 주입하되 ``asset_type``이
         같은 자산군(stock/crypto)의 항목만 선별합니다 — crypto 교훈이 주식
         결정에 주입되는 것을 막습니다. ASSET 태그가 없는 구형 항목은
-        stock으로 간주합니다(하위 호환).
+        stock으로 간주합니다(하위 호환). pending과 unresolved(수익률이 영구히
+        확인 불가능한 항목 — 교훈이 없음) 항목은 둘 다 제외합니다.
         """
-        entries = [e for e in self.load_entries() if not e.get("pending")]
+        entries = [
+            e for e in self.load_entries()
+            if not e.get("pending") and not e.get("unresolved")
+        ]
         if not entries:
             return ""
 
@@ -273,12 +286,68 @@ class TradingMemoryLog:
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
 
+    def batch_mark_unresolved(self, items: list[dict]) -> None:
+        """pending 태그를 ``| unresolved]``로 일괄 교체한다(원자적 쓰기).
+
+        상장폐지 등으로 가격 데이터가 영구히 확보되지 않을 항목을 재시도
+        루프에서 빼내는 용도입니다(설계분석 중기 로드맵 #7). items의 각
+        원소는 ``ticker``와 ``trade_date`` 키를 가져야 합니다. 마킹된 항목은
+        ``get_pending_entries``(재시도)·``get_past_context``(프롬프트 주입)·
+        스코어보드 집계에서 모두 제외되며, 본문(DECISION 등)은 기록으로
+        보존됩니다.
+        """
+        if not self._log_path or not self._log_path.exists() or not items:
+            return
+
+        text = self._log_path.read_text(encoding="utf-8")
+        blocks = text.split(self._SEPARATOR)
+
+        keys = {(i["trade_date"], i["ticker"]) for i in items}
+
+        marked = False
+        new_blocks = []
+        for block in blocks:
+            stripped = block.strip()
+            if not stripped:
+                new_blocks.append(block)
+                continue
+
+            lines = stripped.splitlines()
+            tag_line = lines[0].strip()
+
+            matched = False
+            for trade_date, ticker in list(keys):
+                pending_prefix = f"[{trade_date} | {ticker} |"
+                if tag_line.startswith(pending_prefix) and tag_line.endswith("| pending]"):
+                    fields = [f.strip() for f in tag_line[1:-1].split("|")]
+                    rating = fields[2]
+                    new_tag = f"[{trade_date} | {ticker} | {rating} | unresolved]"
+                    rest = "\n".join(lines[1:])
+                    new_blocks.append(f"{new_tag}\n\n{rest.lstrip()}")
+                    keys.discard((trade_date, ticker))
+                    matched = True
+                    marked = True
+                    break
+
+            if not matched:
+                new_blocks.append(block)
+
+        if not marked:
+            return
+
+        new_text = self._SEPARATOR.join(new_blocks)
+        tmp_path = self._log_path.with_suffix(".tmp")
+        tmp_path.write_text(new_text, encoding="utf-8")
+        tmp_path.replace(self._log_path)
+
     # --- 헬퍼(Helpers) ---
 
     def _apply_rotation(self, blocks: list[str]) -> list[str]:
         """결과 확정 블록 수가 max_entries를 초과하면 가장 오래된 것부터 버린다.
 
         pending 블록은 항상 유지한다(아직 처리되지 않은 작업을 나타내므로).
+        unresolved 블록은 더 이상 재시도할 작업이 아니므로 확정 블록과 동일하게
+        로테이션 대상이다 — 죽은 블록이 무한 누적되는 것을 막는다.
         로테이션이 비활성화됐거나 상한 이하이면 ``blocks``를 그대로 반환한다.
         """
         if not self._max_entries or self._max_entries <= 0:
@@ -324,12 +393,17 @@ class TradingMemoryLog:
         fields = [f.strip() for f in tag_line[1:-1].split("|")]
         if len(fields) < 4:
             return None
+        # 네 번째 필드는 상태 마커(pending/unresolved) 또는 원(raw) 수익률.
+        # unresolved는 "가격 데이터가 영구히 없어 해소를 포기한 항목"으로,
+        # pending(아직 데이터가 쌓일 수 있어 재시도 대상)과 구분된다.
+        status = fields[3]
         entry = {
             "date": fields[0],
             "ticker": fields[1],
             "rating": fields[2],
-            "pending": fields[3] == "pending",
-            "raw": fields[3] if fields[3] != "pending" else None,
+            "pending": status == "pending",
+            "unresolved": status == "unresolved",
+            "raw": status if status not in ("pending", "unresolved") else None,
             "alpha": fields[4] if len(fields) > 4 else None,
             "holding": fields[5] if len(fields) > 5 else None,
         }

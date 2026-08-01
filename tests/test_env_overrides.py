@@ -84,6 +84,21 @@ def test_holding_days_default_and_override(monkeypatch):
     assert isinstance(dc.DEFAULT_CONFIG["holding_days"], int)
 
 
+def test_resolve_all_pending_default_and_override(monkeypatch):
+    """pending 일괄 해소 설정의 기본값(True/10)과 환경 변수 덮어쓰기를 검증하는 테스트."""
+    dc = _reload_with_env(monkeypatch)
+    assert dc.DEFAULT_CONFIG["resolve_all_pending_on_run"] is True
+    assert dc.DEFAULT_CONFIG["resolve_pending_batch_limit"] == 10
+    dc = _reload_with_env(
+        monkeypatch,
+        TRADINGAGENTS_RESOLVE_ALL_PENDING="false",
+        TRADINGAGENTS_RESOLVE_PENDING_BATCH_LIMIT="25",
+    )
+    assert dc.DEFAULT_CONFIG["resolve_all_pending_on_run"] is False
+    assert dc.DEFAULT_CONFIG["resolve_pending_batch_limit"] == 25
+    assert isinstance(dc.DEFAULT_CONFIG["resolve_pending_batch_limit"], int)
+
+
 def test_memory_log_max_entries_finite_default(monkeypatch):
     """메모리 로그 로테이션 상한 기본값이 무한(None)이 아닌 유한값(200)인지 검증하는 테스트."""
     dc = _reload_with_env(monkeypatch)

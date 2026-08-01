@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
@@ -57,6 +58,45 @@ from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
 logger = logging.getLogger(__name__)
+
+# unresolved 마킹 기준 배수: 결정일로부터 holding_days x 이 값 이상의 달력일이
+# 지났는데도 종목 가격 이력이 아예 없으면(상장폐지 등) 영구 미확정으로 본다.
+# holding_days 거래일을 채우는 데 필요한 달력일은 주말·휴장을 감안해도
+# 이 배수면 넉넉하다 (기본 holding_days=5 기준 30일).
+UNRESOLVED_AGE_MULTIPLIER = 6
+
+
+def _is_permanently_stale(trade_date: str, holding_days: int) -> bool:
+    """결정일 이후 가격 데이터가 쌓이기에 충분한 달력일이 지났는지 판정한다.
+
+    조기 확정 가드와 unresolved 마킹의 경계입니다: 가드는 "아직 데이터가
+    쌓일 수 있음"(최근 결정 — pending 유지, 재시도), 이 판정을 통과한
+    무(無)데이터 항목은 "영구히 안 쌓임"(상장폐지 등 — unresolved 마킹,
+    재시도 중단)으로 취급합니다. 날짜를 파싱할 수 없는 손상된 항목은
+    보수적으로 False(마킹하지 않음)를 반환합니다.
+    """
+    try:
+        decided = datetime.strptime(trade_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return False
+    age_days = (datetime.now() - decided).days
+    return age_days >= holding_days * UNRESOLVED_AGE_MULTIPLIER
+
+
+def _slice_history_from(history, trade_date: str):
+    """캐시된 벤치마크 가격 이력에서 ``trade_date`` 이후 구간만 잘라 낸다.
+
+    배치 해소 경로에서 벤치마크는 배치 전체를 덮는 창(window)으로 한 번만
+    조회되므로, 항목별 수익률 계산 전에 그 항목의 결정일 이후 구간으로
+    잘라야 iloc 위치가 단건 조회와 동일해집니다. 날짜 인덱스가 아니면
+    (예: 테스트 모킹 데이터) 자르지 않고 그대로 반환합니다.
+    """
+    try:
+        if isinstance(history.index, pd.DatetimeIndex):
+            return history.loc[trade_date:]
+    except Exception:
+        pass
+    return history
 
 
 def _coerce_max_retries(value):
@@ -283,6 +323,9 @@ class TradingAgentsGraph:
     def _fetch_returns(
         self, ticker: str, trade_date: str, holding_days: int = 5,
         benchmark: str = "SPY",
+        bench_cache: dict | None = None,
+        bench_window: tuple[str, str] | None = None,
+        detail: dict | None = None,
     ) -> tuple[float | None, float | None, int | None]:
         """trade_date부터 holding_days 동안의 원(raw) 수익률과 알파 수익률을 조회한다.
 
@@ -296,8 +339,23 @@ class TradingAgentsGraph:
         못 미치면 (None, None, None)을 반환해 항목이 pending으로 남게 합니다.
         다음 날 재실행 시 5일 보유 의도가 1일 수익률(노이즈)로 영구 확정되던
         문제를 막고, 데이터가 충분히 쌓인 다음 실행에서 확정하게 합니다.
+
+        ``bench_cache``/``bench_window``는 일괄 해소(배치) 경로용입니다:
+        cache dict가 주어지면 벤치마크 가격을 (배치 전체를 덮는) window
+        범위로 한 번만 조회해 cache에 저장하고, 같은 벤치마크의 이후
+        호출은 재조회 없이 trade_date 이후 구간만 잘라 씁니다 — 같은
+        벤치마크를 티커마다 중복 조회하지 않기 위한 장치입니다.
+
+        ``detail``이 dict로 주어지면 미해소 사유를 ``detail["reason"]``에
+        기록합니다: ``"no_data"``(결정일 이후 종목 가격 바가 사실상 없음 —
+        상장폐지 후보), ``"insufficient_history"``(아직 거래일이 부족 —
+        재시도 대상), ``"error"``(일시적 조회 오류 — 재시도 대상).
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        def _note(reason: str) -> None:
+            if detail is not None:
+                detail["reason"] = reason
 
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
@@ -308,15 +366,35 @@ class TradingAgentsGraph:
             # 가리키도록 심볼을 정규화한다 (예: XAUUSD -> GC=F) (#984).
             # 벤치마크는 ``_resolve_benchmark``가 이미 표준 야후(Yahoo) 심볼로 준다.
             stock = yf.Ticker(normalize_symbol(ticker)).history(start=trade_date, end=end_str)
-            bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
 
-            if len(stock) < 2 or len(bench) < 2:
+            if len(stock) < 2:
+                # 결정일 이후 가격 바가 사실상 없음. 결정이 오래됐는데도 이
+                # 상태면 상장폐지 등 영구 부재일 가능성이 높다 (호출자가
+                # detail["reason"]으로 unresolved 마킹 여부를 판단).
+                _note("no_data")
+                return None, None, None
+
+            if bench_cache is None:
+                bench = yf.Ticker(benchmark).history(start=trade_date, end=end_str)
+            else:
+                full = bench_cache.get(benchmark)
+                if full is None:
+                    window_start, window_end = bench_window or (trade_date, end_str)
+                    full = yf.Ticker(benchmark).history(start=window_start, end=window_end)
+                    bench_cache[benchmark] = full
+                bench = _slice_history_from(full, trade_date)
+
+            if len(bench) < 2:
+                # 벤치마크 쪽 데이터 부재 — 종목이 아닌 지수의 (대개 일시적)
+                # 문제이므로 unresolved 후보가 아니라 재시도 대상으로 남긴다.
+                _note("insufficient_history")
                 return None, None, None
 
             # 종목과 벤치마크 모두 보유 기간만큼의 거래일이 쌓였을 때만 확정.
             # 부족하면 pending으로 남겨 다음 실행에서 재시도한다.
             available_days = min(len(stock) - 1, len(bench) - 1)
             if available_days < holding_days:
+                _note("insufficient_history")
                 logger.info(
                     "Deferring outcome for %s on %s: only %d of %d trading days available",
                     ticker, trade_date, available_days, holding_days,
@@ -335,6 +413,7 @@ class TradingAgentsGraph:
             alpha = raw - bench_ret
             return raw, alpha, actual_days
         except Exception as e:
+            _note("error")
             logger.warning(
                 "Could not resolve outcome for %s on %s vs %s (will retry next run): %s",
                 ticker, trade_date, benchmark, e,
@@ -342,46 +421,138 @@ class TradingAgentsGraph:
             return None, None, None
 
     def _resolve_pending_entries(self, ticker: str) -> None:
-        """새 실행 시작 시, 해당 티커의 결과 대기(pending) 로그 항목들을 해소한다.
+        """새 실행 시작 시, 결과 대기(pending) 메모리 로그 항목들을 해소한다.
 
         [초보자용 설명] 이전 실행에서 저장해 둔 매매 결정 중 아직 결과가
         확인되지 않은 항목들을 찾아, 실제 수익률을 조회하고 LLM 리플렉션
         (복기 요약)을 생성한 뒤 메모리 로그를 갱신합니다. 이렇게 쌓인 교훈이
         다음 분석에 과거 맥락으로 주입됩니다.
 
-        같은 티커의 대기 항목별로 수익률을 조회하고 리플렉션을 생성한 다음,
-        불필요한 I/O를 피하기 위해 모든 갱신을 한 번의 원자적(atomic) 일괄
-        쓰기로 기록합니다. 가격 데이터가 아직 없는 항목(너무 최근이거나
-        상장 폐지)은 건너뜁니다.
+        기본값(``resolve_all_pending_on_run=True``)에서는 현재 실행 티커뿐
+        아니라 로그의 **모든 티커**의 pending 항목이 해소 대상입니다
+        (설계분석 중기 로드맵 #7) — 한 번만 분석한 티커의 결과가 같은 티커의
+        재실행 없이는 영구 미확정으로 남아 cross-ticker 교훈 풀이 빈약해지는
+        문제를 막습니다. False면 기존 동작(현재 티커의 항목만 해소)입니다.
 
-        트레이드오프: 실행당 같은 티커의 항목만 해소됩니다. 다른 티커의
-        항목들은 그 티커가 다시 실행될 때까지 쌓입니다.
+        처리 규칙:
+        - 현재 티커의 항목을 먼저(기존 보장 유지), 그다음 나머지 티커를
+          로그 순서(오래된 순)로 처리합니다.
+        - 해소되는 항목마다 LLM 반성 호출이 1회씩 발생하므로, 한 실행에서
+          ``resolve_pending_batch_limit``개까지만 처리합니다(0/None이면
+          무제한). 초과분은 다음 실행에서 이어서 처리됩니다.
+        - 티커별 가격 조회 실패(네트워크 오류 등)는 해당 항목만 건너뛰고
+          계속합니다(경고 로그는 ``_fetch_returns``가 남김).
+        - 조기 확정 가드: 가격/거래일이 아직 부족한 항목은 pending으로 남겨
+          다음 실행에서 재시도합니다("아직 데이터가 쌓일 수 있음").
+        - 결정일로부터 holding_days x 6(UNRESOLVED_AGE_MULTIPLIER) 달력일
+          이상 지났는데도 가격 이력이 아예 없는 항목(상장폐지 등 — "영구히
+          안 쌓임")은
+          ``| unresolved]``로 마킹해 재시도 루프에서 영구 제외합니다.
+        - 같은 벤치마크의 가격은 배치 전체에서 한 번만 조회합니다(캐시).
+
+        갱신은 원자적(atomic) 일괄 쓰기로 기록합니다.
+
+        향후 과제: 파이프라인 실행 없이 수동으로 일괄 해소하는 CLI
+        서브커맨드(예: ``resolve``)는 만들지 않았습니다 — 실행 시 자동
+        해소로 충분하며, 필요해지면 이 메서드를 재사용해 추가하세요.
         """
-        pending = [e for e in self.memory_log.get_pending_entries() if e["ticker"] == ticker]
+        pending = self.memory_log.get_pending_entries()
+        if not self.config.get("resolve_all_pending_on_run", True):
+            # 옵트아웃: 기존 동작 — 현재 실행 티커의 항목만 해소.
+            pending = [e for e in pending if e["ticker"] == ticker]
         if not pending:
             return
 
-        benchmark = self._resolve_benchmark(ticker)
+        # 현재 티커 우선 + 나머지는 로그 순서(오래된 순), 배치 상한 적용.
+        ordered = (
+            [e for e in pending if e["ticker"] == ticker]
+            + [e for e in pending if e["ticker"] != ticker]
+        )
+        limit = self.config.get("resolve_pending_batch_limit", 10)
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
+            ordered = ordered[:limit]
+
         holding_days = self.config.get("holding_days", 5)
+
+        # 티커별 벤치마크를 한 번씩만 결정하고, 벤치마크별 가격 조회 창
+        # (window)을 계산한다: 같은 벤치마크를 쓰는 항목들의 가장 이른
+        # 결정일 ~ 가장 늦은 조회 종료일. _fetch_returns가 이 창으로 1회만
+        # 조회해 bench_cache에 저장하고, 항목별로는 결정일 이후 구간만
+        # 잘라 쓴다 — 티커마다 벤치마크를 중복 조회하지 않는다.
+        benchmarks: dict[str, str] = {}
+        bench_windows: dict[str, list[str]] = {}
+        for entry in ordered:
+            entry_ticker = entry["ticker"]
+            if entry_ticker not in benchmarks:
+                benchmarks[entry_ticker] = self._resolve_benchmark(entry_ticker)
+            benchmark = benchmarks[entry_ticker]
+            try:
+                window_start = entry["date"]
+                window_end = (
+                    datetime.strptime(window_start, "%Y-%m-%d")
+                    + timedelta(days=holding_days + 7)
+                ).strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                continue  # 날짜가 손상된 항목 — 개별 조회 시점에 실패 처리됨
+            window = bench_windows.get(benchmark)
+            if window is None:
+                bench_windows[benchmark] = [window_start, window_end]
+            else:
+                window[0] = min(window[0], window_start)
+                window[1] = max(window[1], window_end)
+
+        bench_cache: dict[str, Any] = {}
         updates = []
-        for entry in pending:
+        unresolved = []
+        for entry in ordered:
+            entry_ticker = entry["ticker"]
+            benchmark = benchmarks[entry_ticker]
+            detail: dict[str, str] = {}
             raw, alpha, days = self._fetch_returns(
-                ticker, entry["date"], holding_days=holding_days, benchmark=benchmark,
+                entry_ticker, entry["date"], holding_days=holding_days,
+                benchmark=benchmark,
+                bench_cache=bench_cache,
+                bench_window=bench_windows.get(benchmark),
+                detail=detail,
             )
             if raw is None:
-                continue  # 가격/거래일이 아직 부족함 — 다음 실행 때 다시 시도
-            reflection = self.reflector.reflect_on_final_decision(
-                final_decision=entry.get("decision", ""),
-                raw_return=raw,
-                alpha_return=alpha,
-                benchmark_name=benchmark,
-                actual_days=days,
-                # 당시 investment_plan 요약(PLAN: 섹션). 반성이 "무엇을 근거로
-                # 판단했는지"를 알 수 있게 한다. 구형 항목엔 없어 빈 문자열.
-                investment_plan=entry.get("plan", ""),
-            )
+                # 해소 불가 항목 마킹: 결정일로부터 충분히 오래 지났는데도
+                # 가격 이력이 아예 없으면(상장폐지 등) unresolved로 마킹해
+                # 재시도를 중단한다. 데이터가 "아직" 부족한 경우(조기 확정
+                # 가드)나 일시적 조회 오류는 pending으로 남겨 재시도한다.
+                if detail.get("reason") == "no_data" and _is_permanently_stale(
+                    entry["date"], holding_days
+                ):
+                    logger.warning(
+                        "Marking %s on %s as unresolved: no price history after "
+                        "%d+ calendar days (delisted?)",
+                        entry_ticker, entry["date"],
+                        holding_days * UNRESOLVED_AGE_MULTIPLIER,
+                    )
+                    unresolved.append(
+                        {"ticker": entry_ticker, "trade_date": entry["date"]}
+                    )
+                continue
+            try:
+                reflection = self.reflector.reflect_on_final_decision(
+                    final_decision=entry.get("decision", ""),
+                    raw_return=raw,
+                    alpha_return=alpha,
+                    benchmark_name=benchmark,
+                    actual_days=days,
+                    # 당시 investment_plan 요약(PLAN: 섹션). 반성이 "무엇을 근거로
+                    # 판단했는지"를 알 수 있게 한다. 구형 항목엔 없어 빈 문자열.
+                    investment_plan=entry.get("plan", ""),
+                )
+            except Exception as e:
+                # 반성 실패가 배치의 다른 항목 해소를 막지 않게 격리한다.
+                logger.warning(
+                    "Reflection failed for %s on %s (will retry next run): %s",
+                    entry_ticker, entry["date"], e,
+                )
+                continue
             updates.append({
-                "ticker": ticker,
+                "ticker": entry_ticker,
                 "trade_date": entry["date"],
                 "raw_return": raw,
                 "alpha_return": alpha,
@@ -391,6 +562,8 @@ class TradingAgentsGraph:
 
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
+        if unresolved:
+            self.memory_log.batch_mark_unresolved(unresolved)
 
     def resolve_instrument_context(self, ticker: str, asset_type: str = "stock") -> str:
         """티커 정체성(identity)을 한 번만 조회해 전체 종목 컨텍스트 문자열을 반환한다.
@@ -441,7 +614,9 @@ class TradingAgentsGraph:
         """
         self.ticker = company_name
 
-        # 파이프라인 실행 전에 이 티커의 결과 대기(pending) 메모리 로그 항목들을 해소.
+        # 파이프라인 실행 전에 결과 대기(pending) 메모리 로그 항목들을 해소.
+        # 기본 설정에서는 현재 티커뿐 아니라 모든 티커의 pending이 대상이다
+        # (설계분석 중기 로드맵 #7 — resolve_all_pending_on_run 참고).
         self._resolve_pending_entries(company_name)
 
         # 사용자가 옵트인(opt-in)했다면 체크포인터와 함께 다시 컴파일.

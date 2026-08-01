@@ -24,6 +24,8 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_DEBATE_FIRST_SPEAKER": "debate_first_speaker",
     "TRADINGAGENTS_HOLDING_DAYS":         "holding_days",
+    "TRADINGAGENTS_RESOLVE_ALL_PENDING":  "resolve_all_pending_on_run",
+    "TRADINGAGENTS_RESOLVE_PENDING_BATCH_LIMIT": "resolve_pending_batch_limit",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
@@ -97,6 +99,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # pending으로 남겨 다음 실행 때 재시도하므로, 5일 보유 의도가 1일
     # 수익률(노이즈)로 조기 확정되는 것을 막습니다.
     "holding_days": 5,
+    # pending 일괄 해소(설계분석 중기 로드맵 #7): True면 실행 시작 시 현재
+    # 티커뿐 아니라 로그의 모든 티커 pending 항목 중 holding_days가 경과한
+    # 것을 일괄 해소합니다. False면 기존 동작(현재 실행 티커의 항목만 해소) —
+    # 한 번만 분석한 티커의 결과가 영구 미확정으로 남아 cross-ticker 교훈
+    # 풀이 빈약해지는 것을 막기 위한 기본값입니다.
+    "resolve_all_pending_on_run": True,
+    # 한 실행에서 처리(가격 조회 + LLM 반성)할 pending 항목 수의 상한.
+    # 일괄 해소는 해소 항목마다 LLM 리플렉션을 1회 호출하므로, 쌓인 pending이
+    # 많아도 실행 시작이 무한정 느려지지 않도록 배치 크기를 제한합니다.
+    # 0 또는 None이면 무제한.
+    "resolve_pending_batch_limit": 10,
     # ----- LLM 설정 -----
     # 사용할 LLM 제공자(provider): "openai", "google", "anthropic" 등
     "llm_provider": "openai",

@@ -124,7 +124,11 @@ def aggregate_entries(
     random_baseline_hits = 0.0
 
     for entry in entries:
-        if entry.get("pending"):
+        # pending(결과 대기)과 unresolved(가격 데이터가 영구히 없어 해소를
+        # 포기한 항목)는 실현 수익률이 없으므로 판정에서 제외한다.
+        # unresolved는 알파 필드도 없어 아래 parse_percent에서도 걸러지지만,
+        # 여기서 명시적으로 제외해 의도를 분명히 한다.
+        if entry.get("pending") or entry.get("unresolved"):
             skipped += 1
             continue
         alpha = parse_percent(entry.get("alpha"))
@@ -206,7 +210,7 @@ def render_markdown(summary: dict) -> str:
         "# 메모리 로그 스코어보드",
         "",
         f"- 판정 포함 항목: {summary['total']}건 "
-        f"(제외: {summary['skipped']}건 — pending 또는 수익률 파싱 불가)",
+        f"(제외: {summary['skipped']}건 — pending/unresolved 또는 수익률 파싱 불가)",
         f"- Hold 적중 임계값: |알파| < {threshold:.2%}",
         "",
         "## 등급별 성과",

@@ -665,11 +665,14 @@ class TestDeferredReflection:
     # TradingAgentsGraph._resolve_pending_entries
 
     def test_resolve_skips_other_tickers(self, tmp_path):
-        """NVDA 실행에서는 대기 중인 AAPL 항목이 확정되지 않는지 검증하는 테스트."""
+        """resolve_all_pending_on_run=False(기존 동작)이면 NVDA 실행에서 대기
+        중인 AAPL 항목이 확정되지 않는지 검증하는 테스트. (기본값 True의
+        일괄 해소 동작은 test_pending_batch_resolution.py에서 검증한다.)"""
         log = make_log(tmp_path)
         log.store_decision("AAPL", "2026-01-10", DECISION_BUY)
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.memory_log = log
+        mock_graph.config = {"holding_days": 5, "resolve_all_pending_on_run": False}
         mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5))
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
         mock_graph._fetch_returns.assert_not_called()
