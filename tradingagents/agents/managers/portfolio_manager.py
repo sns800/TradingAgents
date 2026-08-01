@@ -25,6 +25,7 @@ from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_verified_snapshot_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -106,6 +107,10 @@ def create_portfolio_manager(llm):
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
 
+        # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
+        # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
+        snapshot_block = get_verified_snapshot_block(state)
+
         # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
         # "포트폴리오 매니저로서 리스크 분석가들의 토론을 종합해 최종 거래 결정을 내려라.
         # 등급(Rating)은 Buy(매수)/Overweight(비중 확대)/Hold(보유)/
@@ -146,7 +151,7 @@ Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 
-**Risk Analysts Debate History:**
+{snapshot_block}**Risk Analysts Debate History:**
 {history}
 
 ---

@@ -17,6 +17,7 @@ from tradingagents.agents.schemas import ResearchPlan, render_research_plan
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_verified_snapshot_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -49,6 +50,10 @@ def create_research_manager(llm):
         sentiment_report = state.get("sentiment_report", "")
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
+
+        # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
+        # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
+        snapshot_block = get_verified_snapshot_block(state)
 
         # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 판정용 지시문과 함께
         # 프롬프트에 포함합니다. 비어 있으면 섹션 전체를 생략합니다 — 빈 섹션이
@@ -118,7 +123,7 @@ Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 
----
+{snapshot_block}---
 
 {lessons_block}**Debate History:**
 {history}

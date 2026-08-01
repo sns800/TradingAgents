@@ -15,6 +15,14 @@ from tradingagents.dataflows.errors import NoMarketDataError
 from tradingagents.dataflows.interface import NO_DATA_SENTINEL_PREFIX
 from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
 
+# [한국어 설명] build_verified_market_snapshot 출력의 첫 줄 접두사.
+# 시장 분석가 노드가 도구 메시지(ToolMessage) 중 검증 스냅샷을 식별해
+# 상태 필드(verified_snapshot)로 보존할 때(설계분석 중기 로드맵 #5),
+# 메시지의 name 속성이 없어도 내용으로 판별할 수 있게 하는 폴백 기준입니다.
+# 실제 렌더링(market_data_validator.py)과 일치해야 하며, 어긋나면
+# tests/test_snapshot_preservation.py가 잡아냅니다.
+VERIFIED_SNAPSHOT_HEADER_PREFIX = "## Verified market data snapshot"
+
 
 # [한국어 설명] 정확한 시장 데이터 주장을 검증하기 위한 결정론적 스냅샷 툴.
 # curr_date 이전(포함) 최신 OHLCV 행, 주요 기술적 지표(technical indicators),

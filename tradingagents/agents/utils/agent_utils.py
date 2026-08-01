@@ -53,6 +53,7 @@ __all__ = [
     "resolve_instrument_identity",
     "get_instrument_context_from_state",
     "get_language_instruction",
+    "get_verified_snapshot_block",
     "create_msg_delete",
 ]
 
@@ -72,6 +73,29 @@ def get_language_instruction() -> str:
     if lang.strip().lower() == "english":
         return ""
     return f" Write your entire response in {lang}."
+
+
+def get_verified_snapshot_block(state: Mapping[str, Any]) -> str:
+    """하류 프롬프트에 넣을 검증 스냅샷 섹션을 반환한다. 스냅샷이 없으면 빈 문자열.
+
+    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] Msg Clear가 원본 도구
+    데이터를 파기한 뒤에도 하류 에이전트(리서처/리스크 토론자, 트레이더,
+    리서치 매니저, 포트폴리오 매니저)가 정확한 가격·지표 수치의 기준점을
+    갖도록, 시장 분석가가 보존한 스냅샷(verified_snapshot 상태 필드)을
+    프롬프트 섹션으로 감쌉니다. 스냅샷은 수백 자 수준의 마크다운 표라
+    전문을 그대로 주입해도 토큰 부담이 작습니다. 비어 있으면(스냅샷 도구
+    미호출, NO_DATA, 구형 체크포인트) 섹션 전체를 생략해 빈 섹션이
+    존재하지 않는 수치를 지어내게 유도하지 않습니다(past_context의 빈 값
+    가드와 동일한 패턴). 지시문은 LLM 프롬프트이므로 영어를 유지합니다.
+    """
+    snapshot = state.get("verified_snapshot", "")
+    if not isinstance(snapshot, str) or not snapshot.strip():
+        return ""
+    return (
+        "Verified market snapshot (authoritative numbers — when citing exact "
+        "prices or indicator values, cite them from here; do not invent "
+        f"figures):\n{snapshot}\n\n"
+    )
 
 
 def _clean_identity_value(value: Any) -> str | None:

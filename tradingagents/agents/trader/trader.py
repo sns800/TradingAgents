@@ -21,6 +21,7 @@ from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_verified_snapshot_block,
 )
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -48,6 +49,10 @@ def create_trader(llm):
         sentiment_report = state.get("sentiment_report", "")
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
+
+        # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
+        # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
+        snapshot_block = get_verified_snapshot_block(state)
 
         # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 실행 계획 수립용
         # 지시문과 함께 프롬프트에 포함합니다. 비어 있으면 섹션 전체를 생략해,
@@ -106,6 +111,7 @@ def create_trader(llm):
                     f"Social Media Sentiment Report: {sentiment_report}\n"
                     f"Latest World Affairs Report: {news_report}\n"
                     f"Company Fundamentals Report: {fundamentals_report}\n\n"
+                    f"{snapshot_block}"
                     f"{lessons_block}"
                     f"Proposed Investment Plan: {investment_plan}\n\n"
                     f"Leverage these insights to make an informed and strategic decision."

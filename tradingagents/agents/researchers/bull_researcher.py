@@ -10,6 +10,7 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    get_verified_snapshot_block,
 )
 from tradingagents.agents.utils.debate_context import condense_debate_history
 
@@ -46,6 +47,9 @@ def create_bull_researcher(llm):
             if asset_type == "stock"
             else "Asset fundamentals report (may be unavailable for crypto)"
         )
+        # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
+        # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
+        snapshot_block = get_verified_snapshot_block(state)
 
         # [프롬프트 요약 - 한국어] 강세 애널리스트(Bull Analyst) 역할 지시문:
         # 성장 잠재력·경쟁 우위·긍정적 지표를 근거로 투자 찬성 논리를 세우고,
@@ -70,7 +74,7 @@ Market research report: {market_research_report}
 Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
-Conversation history of the debate (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history}
+{snapshot_block}Conversation history of the debate (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history}
 Last bear argument: {current_response}
 If there is no bear argument yet, this is the opening statement of the debate: present your own bull case based on the available data instead of rebutting.
 Use this information to deliver a compelling bull argument, refute the bear's concerns when they exist, and engage in a dynamic debate that demonstrates the strengths of the bull position.

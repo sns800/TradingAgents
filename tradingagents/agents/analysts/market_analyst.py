@@ -19,6 +19,9 @@ from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_verified_market_snapshot,
 )
+from tradingagents.agents.utils.market_data_validation_tools import (
+    VERIFIED_SNAPSHOT_HEADER_PREFIX,
+)
 from tradingagents.dataflows.interface import is_no_data_sentinel
 
 
@@ -40,6 +43,34 @@ def _market_data_ok(messages) -> bool:
         if is_no_data_sentinel(text):
             return False
     return True
+
+
+def _extract_verified_snapshot(messages) -> str:
+    """도구 메시지에서 검증 스냅샷(get_verified_market_snapshot 출력)을 찾아 반환한다.
+
+    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] Msg Clear가 분석가의 도구
+    메시지를 전량 파기하므로, 하류(토론자·트레이더·PM)가 수치 인용의
+    기준점으로 쓸 수 있도록 스냅샷 원문을 별도 상태 필드로 옮기기 위한
+    결정론적 추출입니다. 식별 기준은 두 가지입니다:
+    (1) ToolNode가 채우는 ToolMessage.name == "get_verified_market_snapshot",
+    (2) name이 없는 환경(일부 프레임워크 버전·테스트)을 위한 폴백으로
+        스냅샷 렌더러의 고정 헤더 접두사.
+    스냅샷 도구가 여러 번 호출됐으면 마지막 출력이 최신이므로 그것을
+    사용하고, NO_DATA 센티널이면(데이터 부재) 빈 문자열을 반환합니다.
+    """
+    snapshot = ""
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        content = message.content
+        text = content if isinstance(content, str) else str(content)
+        is_snapshot = (
+            getattr(message, "name", None) == "get_verified_market_snapshot"
+            or text.lstrip().startswith(VERIFIED_SNAPSHOT_HEADER_PREFIX)
+        )
+        if is_snapshot:
+            snapshot = "" if is_no_data_sentinel(text) else text
+    return snapshot
 
 
 def create_market_analyst(llm):
@@ -151,13 +182,16 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
 
         # 상태(state) 갱신: 대화 메시지에 결과를 추가하고,
         # 완성된 보고서를 "market_report" 키에 저장해 후속 단계에서 사용하게 합니다.
-        # market_data_ok는 매 방문마다 현재까지의 도구 결과로 재계산됩니다 —
-        # 마지막 방문(도구 호출 없음, 보고서 완성) 시점의 값이 도구 루프 전체의
-        # 결과를 반영한 최종값이 되어 하류(포트폴리오 매니저)로 전달됩니다.
+        # market_data_ok와 verified_snapshot은 매 방문마다 현재까지의 도구
+        # 결과로 재계산됩니다 — 마지막 방문(도구 호출 없음, 보고서 완성)
+        # 시점의 값이 도구 루프 전체의 결과를 반영한 최종값이 되어 하류로
+        # 전달됩니다. verified_snapshot은 Msg Clear에서 파기되는 도구
+        # 메시지와 달리 별도 상태 필드라 그래프 끝까지 생존합니다(중기 #5).
         return {
             "messages": [result],
             "market_report": report,
             "market_data_ok": _market_data_ok(state["messages"]),
+            "verified_snapshot": _extract_verified_snapshot(state["messages"]),
         }
 
     return market_analyst_node

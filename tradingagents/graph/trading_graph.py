@@ -45,6 +45,7 @@ from tradingagents.reporting import write_report_tree
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
 from .conditional_logic import ConditionalLogic
+from .numeric_audit import audit_final_decision
 from .propagation import Propagator
 from .reflection import Reflector
 from .setup import GraphSetup
@@ -511,6 +512,21 @@ class TradingAgentsGraph:
                 final_state.update(chunk)
         else:
             final_state = self.graph.invoke(init_agent_state, **args)
+
+        # [사후 수치 대조 감사 — 설계분석 중기 로드맵 #5] PM 결정문에 인용된
+        # 달러 가격을 보존된 검증 스냅샷과 결정론적으로 대조하고, 스냅샷에서
+        # 찾지 못한 가격이 있으면 경고 블록을 덧붙인다. 그래프 노드 대신
+        # 여기서 함수로 적용해 그래프 모양(체크포인트 시그니처)을 바꾸지
+        # 않으며, 경고가 붙은 결정문이 이후의 보고서 저장·메모리 로그·시그널
+        # 추출에 그대로 흐른다(등급 파싱에는 영향 없음). 스냅샷이 비어
+        # 있으면(NO_DATA, 스냅샷 도구 미호출, 구형 체크포인트) 감사를
+        # 생략하고 결정문을 그대로 둔다.
+        audited_decision = audit_final_decision(
+            final_state.get("final_trade_decision", ""),
+            final_state.get("verified_snapshot", ""),
+        )
+        if audited_decision != final_state.get("final_trade_decision", ""):
+            final_state["final_trade_decision"] = audited_decision
 
         # 리플렉션을 위해 현재 상태를 보관.
         self.curr_state = final_state

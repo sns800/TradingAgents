@@ -82,6 +82,10 @@ class Propagator:
             # NO_DATA 센티널을 감지하면 False로 내립니다. 시장 분석가가
             # 선택되지 않은 실행에서는 True로 남아 기존 흐름을 유지합니다.
             "market_data_ok": True,
+            # 검증 스냅샷 보존(중기 로드맵 #5). 시장 분석가가 도구 결과에서
+            # get_verified_market_snapshot 출력을 발견하면 여기에 복사해
+            # Msg Clear 이후에도 하류가 원본 수치 기준점을 갖게 합니다.
+            "verified_snapshot": "",
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

@@ -84,6 +84,20 @@ class AgentState(MessagesState):
         "contained a NO_DATA sentinel (core market data unavailable)",
     ]
 
+    # 검증 스냅샷 보존(설계분석 중기 로드맵 #5). Msg Clear가 분석가의 도구
+    # 메시지(ToolMessage)를 전량 파기하기 때문에, 시장 분석가 노드가
+    # get_verified_market_snapshot의 원본 출력을 이 별도 상태 필드로 옮겨
+    # 보존합니다. 하류(토론자·트레이더·리서치 매니저·PM)는 이 스냅샷을
+    # "정확한 수치의 기준점"으로 프롬프트에 주입받고, 실행 종료 후 결정문의
+    # 수치 대조(numeric audit)에도 사용됩니다. NO_DATA 센티널이거나 스냅샷
+    # 도구가 호출되지 않았으면 빈 문자열입니다. 구형 체크포인트에는 이 키가
+    # 없을 수 있으므로 소비자는 반드시 .get()으로 접근해야 합니다.
+    verified_snapshot: Annotated[
+        str,
+        "Verified market snapshot preserved from the market analyst's tool "
+        "results (survives Msg Clear); empty when unavailable",
+    ]
+
     # 리서처 팀 토론 단계 — 투자 여부 토론 상태와 결과 계획
     investment_debate_state: Annotated[
         InvestDebateState, "Current state of the debate on if to invest or not"
