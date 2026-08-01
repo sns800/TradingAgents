@@ -86,11 +86,18 @@ class BedrockClient(BaseLLMClient):
         # botocore의 기본 읽기 타임아웃은 60초라, 긴 보고서 생성(특히 비영어
         # 출력)이 중간에 ReadTimeoutError로 끊길 수 있다. LLM 응답 대기에
         # 충분한 값으로 올린다 (TRADINGAGENTS_BEDROCK_READ_TIMEOUT으로 조정).
-        from botocore.config import Config as _BotoConfig
-        read_timeout = int(os.environ.get("TRADINGAGENTS_BEDROCK_READ_TIMEOUT", "300"))
-        llm_kwargs["config"] = _BotoConfig(
-            read_timeout=read_timeout, connect_timeout=10
-        )
+        # botocore는 bedrock 옵션 의존성이라 없을 수 있다(예: 모킹 기반
+        # 테스트를 도는 순수 설치) — 그 경우 조용히 생략한다. 실제 Bedrock
+        # 사용에는 어차피 boto3/botocore가 필요하므로 동작 손실이 없다.
+        try:
+            from botocore.config import Config as _BotoConfig
+        except ImportError:
+            _BotoConfig = None
+        if _BotoConfig is not None:
+            read_timeout = int(os.environ.get("TRADINGAGENTS_BEDROCK_READ_TIMEOUT", "300"))
+            llm_kwargs["config"] = _BotoConfig(
+                read_timeout=read_timeout, connect_timeout=10
+            )
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:
