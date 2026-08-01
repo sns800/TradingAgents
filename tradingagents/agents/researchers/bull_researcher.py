@@ -46,7 +46,9 @@ def create_bull_researcher(llm):
         # 성장 잠재력·경쟁 우위·긍정적 지표를 근거로 투자 찬성 논리를 세우고,
         # 약세론자(Bear)의 직전 주장을 데이터로 조목조목 반박하며, 사실 나열이
         # 아닌 대화체 토론으로 응답하라는 내용. 아래에 4종 분석 보고서와 토론
-        # 이력을 근거 자료로 제공합니다. (LLM 프롬프트이므로 영어 원문 유지)
+        # 이력을 근거 자료로 제공합니다. 토론 시작(첫 발언)이라 반박할 약세
+        # 주장이 아직 없으면, 가용 데이터에 근거한 자기 논거(개시 발언)를
+        # 제시하라는 폴백 문구를 포함합니다. (LLM 프롬프트이므로 영어 원문 유지)
         prompt = f"""You are a Bull Analyst advocating for investing in the {target_label}. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
 
 Key points to focus on:
@@ -64,7 +66,8 @@ Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
 Conversation history of the debate: {history}
 Last bear argument: {current_response}
-Use this information to deliver a compelling bull argument, refute the bear's concerns, and engage in a dynamic debate that demonstrates the strengths of the bull position.
+If there is no bear argument yet, this is the opening statement of the debate: present your own bull case based on the available data instead of rebutting.
+Use this information to deliver a compelling bull argument, refute the bear's concerns when they exist, and engage in a dynamic debate that demonstrates the strengths of the bull position.
 """ + get_language_instruction()
 
         # LLM을 한 번 호출해 강세론자의 주장 발언을 생성합니다.

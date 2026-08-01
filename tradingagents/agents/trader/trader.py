@@ -40,12 +40,24 @@ def create_trader(llm):
         instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
         investment_plan = state["investment_plan"]  # 리서치 매니저가 작성한 투자 계획
 
+        # 분석가 4종 원본 보고서: 프롬프트의 "분석가 보고서에 근거하라" 지시가
+        # 실제로 이행 가능하도록 리스크 토론자와 동일한 방식으로 제공합니다.
+        # 분석가 일부만 선택된 실행에서는 키가 없거나 빈 문자열일 수 있으므로
+        # .get()으로 안전하게 꺼냅니다.
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+
         # [한국어 요약] 아래 메시지들은 LLM에게 다음을 지시하는 프롬프트입니다:
         # - system: "당신은 시장 데이터를 분석해 투자 결정을 내리는 트레이딩 에이전트다.
         #   분석에 근거해 매수/매도/보유 중 하나의 구체적 추천을 제시하고,
         #   분석가 보고서와 리서치 계획에 근거를 두라. 외부 도구는 사용하지 말라."
         # - user: "분석가 팀의 종합 분석으로 만든 {company_name} 투자 계획이다.
-        #   기술적 추세, 거시 지표, 소셜 미디어 감성이 반영되어 있으니
+        #   기술적 추세, 거시 지표, 소셜 미디어 감성이 반영되어 있다.
+        #   아래에 계획의 근거가 된 분석가 원본 보고서 4종을 제공하니
+        #   계획의 주장을 검증하고 누락된 신호를 확인하는 데 사용하라
+        #   (해당 분석가가 실행되지 않았으면 보고서가 비어 있을 수 있다).
         #   이를 토대로 다음 거래 결정을 평가하라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         messages = [
@@ -66,7 +78,15 @@ def create_trader(llm):
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
+                    f"trading decision.\n\n"
+                    f"Here are the original analyst reports the plan was built on. Use them to verify "
+                    f"the plan's claims and to catch any signal it may have missed. A report may be "
+                    f"empty if that analyst was not run; rely on the reports that are available.\n\n"
+                    f"Market Research Report: {market_research_report}\n"
+                    f"Social Media Sentiment Report: {sentiment_report}\n"
+                    f"Latest World Affairs Report: {news_report}\n"
+                    f"Company Fundamentals Report: {fundamentals_report}\n\n"
+                    f"Proposed Investment Plan: {investment_plan}\n\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },

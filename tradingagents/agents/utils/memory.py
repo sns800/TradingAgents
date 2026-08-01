@@ -24,6 +24,12 @@ class TradingMemoryLog:
     # 미리 컴파일한 정규식 패턴 — load_entries() 호출 때마다 재컴파일되는 것을 방지
     _DECISION_RE = re.compile(r"DECISION:\n(.*?)(?=\nREFLECTION:|\Z)", re.DOTALL)
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
+    # 자산군(asset class) 태그 줄. DECISION 본문 앞 헤더 영역에서만 찾는다.
+    _ASSET_RE = re.compile(r"^ASSET:\s*(\S+)\s*$", re.MULTILINE)
+    # past_context에 주입할 때 DECISION 원문을 자르는 길이(문자 수, 결정론적).
+    # 교훈의 핵심은 REFLECTION이므로 결정문 전문 주입은 토큰만 낭비하고
+    # 직전 등급에 앵커링(anchoring)시키는 부작용이 있다.
+    _DECISION_SNIPPET_CHARS = 300
 
     def __init__(self, config: dict = None):
         cfg = config or {}
@@ -42,8 +48,14 @@ class TradingMemoryLog:
         ticker: str,
         trade_date: str,
         final_trade_decision: str,
+        asset_type: str = "stock",
     ) -> None:
-        """propagate() 종료 시점에 대기(pending) 항목을 추가한다. LLM 호출 없음."""
+        """propagate() 종료 시점에 대기(pending) 항목을 추가한다. LLM 호출 없음.
+
+        ``asset_type``(stock/crypto)은 항목 헤더의 ``ASSET:`` 줄로 저장되어,
+        나중에 cross-ticker 교훈을 같은 자산군으로만 선별하는 데 쓰입니다.
+        태그가 없는 구형 항목은 파싱 시 stock으로 간주됩니다(하위 호환).
+        """
         if not self._log_path:
             return
         # 멱등성(idempotency) 가드: 전체 파싱 대신 빠른 원문 텍스트 스캔
@@ -54,7 +66,10 @@ class TradingMemoryLog:
                     return
         rating = parse_rating(final_trade_decision, context="memory log entry")
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
-        entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
+        entry = (
+            f"{tag}\n\nASSET: {asset_type}\n\n"
+            f"DECISION:\n{final_trade_decision}{self._SEPARATOR}"
+        )
         with open(self._log_path, "a", encoding="utf-8") as f:
             f.write(entry)
 
@@ -77,10 +92,19 @@ class TradingMemoryLog:
         """결과가 pending(대기) 상태인 항목을 반환한다(Phase B에서 사용)."""
         return [e for e in self.load_entries() if e.get("pending")]
 
-    def get_past_context(self, ticker: str, n_same: int = 5, n_cross: int = 3) -> str:
-        """에이전트 프롬프트 주입용으로 포맷된 과거 컨텍스트 문자열을 반환한다."""
-        # 결과가 확정된(pending 아님) 항목만 대상으로,
-        # 같은 종목(same)은 전체 내용, 다른 종목(cross)은 반성만 최근순으로 모은다.
+    def get_past_context(
+        self, ticker: str, n_same: int = 5, n_cross: int = 3,
+        asset_type: str = "stock",
+    ) -> str:
+        """에이전트 프롬프트 주입용으로 포맷된 과거 컨텍스트 문자열을 반환한다.
+
+        결과가 확정된(pending 아님) 항목만 대상으로 최근순으로 모읍니다.
+        같은 종목(same)은 REFLECTION 전문 + DECISION 앞부분 요약으로 축약해
+        주입하고, 다른 종목(cross)은 반성만 짧게 주입하되 ``asset_type``이
+        같은 자산군(stock/crypto)의 항목만 선별합니다 — crypto 교훈이 주식
+        결정에 주입되는 것을 막습니다. ASSET 태그가 없는 구형 항목은
+        stock으로 간주합니다(하위 호환).
+        """
         entries = [e for e in self.load_entries() if not e.get("pending")]
         if not entries:
             return ""
@@ -91,7 +115,11 @@ class TradingMemoryLog:
                 break
             if e["ticker"] == ticker and len(same) < n_same:
                 same.append(e)
-            elif e["ticker"] != ticker and len(cross) < n_cross:
+            elif (
+                e["ticker"] != ticker
+                and e.get("asset_type", "stock") == asset_type
+                and len(cross) < n_cross
+            ):
                 cross.append(e)
 
         if not same and not cross:
@@ -100,7 +128,7 @@ class TradingMemoryLog:
         parts = []
         if same:
             parts.append(f"Past analyses of {ticker} (most recent first):")
-            parts.extend(self._format_full(e) for e in same)
+            parts.extend(self._format_condensed(e) for e in same)
         if cross:
             parts.append("Recent cross-ticker lessons:")
             parts.extend(self._format_reflection_only(e) for e in cross)
@@ -289,21 +317,36 @@ class TradingMemoryLog:
             "holding": fields[5] if len(fields) > 5 else None,
         }
         body = "\n".join(lines[1:]).strip()
+        # ASSET 태그는 DECISION 본문 앞 헤더 영역에서만 찾는다 — 결정문 안에
+        # 우연히 "ASSET:"으로 시작하는 줄이 있어도 오인하지 않도록.
+        header = body.split("DECISION:", 1)[0]
+        asset_match = self._ASSET_RE.search(header)
+        # 태그가 없는 구형 항목은 stock으로 간주(하위 호환)
+        entry["asset_type"] = asset_match.group(1).lower() if asset_match else "stock"
         decision_match = self._DECISION_RE.search(body)
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""
         entry["reflection"] = reflection_match.group(1).strip() if reflection_match else ""
         return entry
 
-    def _format_full(self, e: dict) -> str:
-        # 같은 종목의 과거 항목용: 태그 + 결정(DECISION) + 반성(REFLECTION) 전체 포맷
+    def _truncate_decision(self, text: str) -> str:
+        # DECISION 원문을 결정론적으로 앞부분만 자른다(항상 같은 입력 → 같은 출력).
+        if len(text) <= self._DECISION_SNIPPET_CHARS:
+            return text
+        return text[: self._DECISION_SNIPPET_CHARS].rstrip() + "..."
+
+    def _format_condensed(self, e: dict) -> str:
+        # 같은 종목의 과거 항목용 축약 포맷: 태그 + REFLECTION 전문 +
+        # DECISION 앞부분 요약. 교훈(REFLECTION)이 핵심이므로 앞세우고,
+        # 결정문 전문 대신 앞 300자만 넣어 신호 대 잡음비를 지킨다.
         raw = e["raw"] or "n/a"
         alpha = e["alpha"] or "n/a"
         holding = e["holding"] or "n/a"
         tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {raw} | {alpha} | {holding}]"
-        parts = [tag, f"DECISION:\n{e['decision']}"]
+        parts = [tag]
         if e["reflection"]:
             parts.append(f"REFLECTION:\n{e['reflection']}")
+        parts.append(f"DECISION:\n{self._truncate_decision(e['decision'])}")
         return "\n\n".join(parts)
 
     def _format_reflection_only(self, e: dict) -> str:
@@ -312,6 +355,4 @@ class TradingMemoryLog:
         tag = f"[{e['date']} | {e['ticker']} | {e['rating']} | {e['raw'] or 'n/a'}]"
         if e["reflection"]:
             return f"{tag}\n{e['reflection']}"
-        text = e["decision"][:300]
-        suffix = "..." if len(e["decision"]) > 300 else ""
-        return f"{tag}\n{text}{suffix}"
+        return f"{tag}\n{self._truncate_decision(e['decision'])}"

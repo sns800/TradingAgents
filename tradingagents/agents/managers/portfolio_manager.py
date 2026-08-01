@@ -56,13 +56,25 @@ def create_portfolio_manager(llm):
             else ""
         )
 
+        # 분석가 4종 원본 보고서: 최종 판정자가 토론자들의 주장을 원자료와
+        # 대조해 검증할 수 있도록 리스크 토론자와 동일한 방식으로 제공합니다.
+        # 분석가 일부만 선택된 실행에서는 키가 없거나 빈 문자열일 수 있으므로
+        # .get()으로 안전하게 꺼냅니다.
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+
         # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
         # "포트폴리오 매니저로서 리스크 분석가들의 토론을 종합해 최종 거래 결정을 내려라.
         # 등급(Rating)은 Buy(매수)/Overweight(비중 확대)/Hold(보유)/
         # Underweight(비중 축소)/Sell(매도) 중 정확히 하나를 사용하라.
         # 리서치 매니저의 투자 계획, 트레이더의 거래 제안, (있다면) 과거 교훈,
-        # 리스크 토론 이력이 컨텍스트로 주어진다. 단호하게 결정하고
-        # 모든 결론을 분석가들의 구체적 근거에 기반하라. 외부 도구는 사용하지 말라."
+        # 분석가 원본 보고서 4종, 리스크 토론 이력이 컨텍스트로 주어진다.
+        # 토론자의 주장은 원본 보고서와 대조해 검증하라 (해당 분석가가
+        # 실행되지 않았으면 보고서가 비어 있을 수 있다). 단호하게 결정하고
+        # 모든 결론을 분석가 보고서와 토론의 구체적 근거에 기반하라.
+        # 외부 도구는 사용하지 말라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
 
@@ -81,12 +93,18 @@ def create_portfolio_manager(llm):
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
 {lessons_line}
+**Analyst Reports** (original evidence — cross-check the debaters' claims against these reports; a report may be empty if that analyst was not run):
+Market Research Report: {market_research_report}
+Social Media Sentiment Report: {sentiment_report}
+Latest World Affairs Report: {news_report}
+Company Fundamentals Report: {fundamentals_report}
+
 **Risk Analysts Debate History:**
 {history}
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.
+Be decisive and ground every conclusion in specific evidence from the analyst reports and the debate.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 

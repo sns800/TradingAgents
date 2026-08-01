@@ -38,6 +38,15 @@ def create_research_manager(llm):
 
         investment_debate_state = state["investment_debate_state"]
 
+        # 분석가 4종 원본 보고서: 심판이 토론자들의 주장을 원자료와 대조해
+        # 검증할 수 있도록 리스크 토론자와 동일한 방식으로 제공합니다.
+        # 분석가 일부만 선택된 실행에서는 키가 없거나 빈 문자열일 수 있으므로
+        # .get()으로 안전하게 꺼냅니다.
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+
         # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
         # "리서치 매니저이자 토론 진행자로서 이번 토론 라운드를 비판적으로 평가하고,
         # 트레이더를 위한 명확하고 실행 가능한 투자 계획을 제시하라.
@@ -45,7 +54,10 @@ def create_research_manager(llm):
         # Underweight(비중 축소)/Sell(매도) 중 정확히 하나를 사용하라.
         # 토론의 가장 강한 논거가 뒷받침될 때는 분명한 입장을 취하고,
         # Hold는 양측 근거가 진정으로 균형일 때만 남겨 두라.
-        # 토론 이력이 컨텍스트로 주어진다. 외부 도구는 사용하지 말라."
+        # 분석가 원본 보고서 4종과 토론 이력이 컨텍스트로 주어진다.
+        # 토론자의 주장은 원본 보고서와 대조해 검증하고, 보고서에 근거가 없는
+        # 주장은 낮게 평가하라 (해당 분석가가 실행되지 않았으면 보고서가
+        # 비어 있을 수 있다). 외부 도구는 사용하지 말라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -61,6 +73,14 @@ def create_research_manager(llm):
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
 Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
+
+---
+
+**Analyst Reports** (original evidence — cross-check the debaters' claims against these reports and discount claims they do not support; a report may be empty if that analyst was not run):
+Market Research Report: {market_research_report}
+Social Media Sentiment Report: {sentiment_report}
+Latest World Affairs Report: {news_report}
+Company Fundamentals Report: {fundamentals_report}
 
 ---
 

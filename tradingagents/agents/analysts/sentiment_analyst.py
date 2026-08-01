@@ -95,18 +95,17 @@ def create_sentiment_analyst(llm):
         )
 
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:
-        # "당신은 다른 어시스턴트들과 협업하는 AI다. 최종 결론이 나오면
-        # 'FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**' 접두어를 붙여
-        # 팀이 중단 시점을 알 수 있게 하라. 오늘 날짜를 '현재'로 간주하라.
-        # 외부 도구는 사용하지 말라(NO_EXTERNAL_TOOLS)."
+        # "당신은 다른 어시스턴트들과 협업하는 AI다. 오늘 날짜를 '현재'로
+        # 간주하라. 외부 도구는 사용하지 말라(NO_EXTERNAL_TOOLS)."
+        # ※ 매수/매도 최종 제안 지시는 넣지 않습니다 — 분석가는 파이프라인
+        #   1단계로 보고서만 작성하며, 최종 결정은 하류(트레이더·포트폴리오
+        #   매니저)의 역할입니다.
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     # 여기서는 도구 호출을 사용하지 않습니다: 데이터가 이미 프롬프트에
                     # 주입되어 있으므로, 도구 관련 문구를 넣으면 오히려 환각(hallucination)
                     # 도구 호출을 유발할 수 있습니다(#1130).

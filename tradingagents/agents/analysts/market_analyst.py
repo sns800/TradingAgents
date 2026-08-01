@@ -85,8 +85,11 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:
         # "당신은 다른 어시스턴트들과 협업하는 AI다. 도구를 사용해 진행하고,
         # 완전히 답하지 못해도 괜찮다(다른 어시스턴트가 이어받는다).
-        # 최종 결론이 나오면 'FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL**' 접두어를 붙여
-        # 팀이 중단 시점을 알 수 있게 하라. 오늘 날짜({current_date})를 '현재'로 간주하라."
+        # 오늘 날짜({current_date})를 '현재'로 간주하라."
+        # ※ 매수/매도 최종 제안 지시는 넣지 않습니다 — 분석가는 파이프라인
+        #   1단계로 보고서만 작성하며, 최종 결정은 하류(트레이더·포트폴리오
+        #   매니저)의 역할입니다. 최상류에서 결론을 박으면 하류 5단계 등급
+        #   체계와 충돌하고 토론을 앵커링합니다.
         # {tool_names}, {system_message} 등은 아래 partial()로 채워지는 자리표시자입니다.
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -96,8 +99,6 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",
