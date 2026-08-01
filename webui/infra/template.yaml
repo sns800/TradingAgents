@@ -21,6 +21,18 @@ Parameters:
     MinValue: 1
     MaxValue: 50
     Description: "동시에 진행할 수 있는 분석 실행(큐 대기 포함) 최대 개수 - Fargate/Bedrock 비용 상한 안전장치"
+  DomainName:
+    Type: String
+    Default: stock.happymstn.com
+    Description: "CloudFront 커스텀 도메인 (Route53 happymstn.com 존의 서브도메인)"
+  AcmCertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:199177488202:certificate/0d30f3ab-f543-4a4b-b427-8e9647488317
+    Description: "커스텀 도메인용 ACM 인증서 ARN (CloudFront 요구사항: us-east-1 발급)"
+  HostedZoneId:
+    Type: String
+    Default: Z13DFWPUSKITLD
+    Description: "happymstn.com Route53 호스팅 존 ID"
   BedrockDeepModel:
     Type: String
     Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -279,6 +291,12 @@ Resources:
         DefaultRootObject: index.html
         PriceClass: PriceClass_200
         HttpVersion: http2and3
+        Aliases:
+          - !Ref DomainName
+        ViewerCertificate:
+          AcmCertificateArn: !Ref AcmCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
         Origins:
           - Id: site
             DomainName: !GetAtt SiteBucket.RegionalDomainName
@@ -381,7 +399,27 @@ Resources:
           - { Name: ECR_URI, Value: !GetAtt EcrRepo.RepositoryUri }
           - { Name: AWS_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }
 
+  # stock.happymstn.com -> CloudFront 별칭 레코드 (A/AAAA)
+  # Z2FDTNDATAQYW2는 CloudFront 배포판 공통의 고정 호스팅 존 ID다.
+  DnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Ref DomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+        - Name: !Ref DomainName
+          Type: AAAA
+          AliasTarget:
+            DNSName: !GetAtt Distribution.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+
 Outputs:
+  CustomDomainURL:
+    Value: !Sub "https://${DomainName}"
   CloudFrontURL:
     Value: !Sub "https://${Distribution.DomainName}"
   DistributionId:
