@@ -91,6 +91,10 @@ def main() -> int:
              "(기본: 설정 results_dir 아래 backtest/)",
     )
     parser.add_argument(
+        "--combo-timeout", type=int, default=1500,
+        help="조합 하나의 실행 시간 상한(초). 라이브러리 무한 대기를 해당 조합 실패로 격리 (기본: 1500)",
+    )
+    parser.add_argument(
         "--hold-threshold", type=float, default=DEFAULT_HOLD_THRESHOLD,
         help="Hold 적중 판정용 |알파| 임계값, 소수 비율 (기본: 0.01 = 1%%)",
     )
@@ -123,7 +127,9 @@ def main() -> int:
         return 1
 
     decision_fn = make_decision_fn(args.mode, config=config, depth=args.depth)
-    records = run_backtest(schedule, decision_fn, mode=args.mode)
+    records = run_backtest(
+        schedule, decision_fn, mode=args.mode, combo_timeout=args.combo_timeout
+    )
 
     # 결정 이후 구간의 가격으로 사후 채점 (결정 생성 경로와 완전히 분리됨)
     annotate_returns(records, config=config)

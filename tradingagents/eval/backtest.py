@@ -183,21 +183,55 @@ def make_decision_fn(mode: str, config: dict | None = None, depth: int = 1) -> D
     raise ValueError(f"Unknown backtest mode: {mode!r} (expected 'full' or 'single_llm')")
 
 
+class ComboTimeoutError(Exception):
+    """조합 하나가 시간 상한을 초과했음을 알리는 예외 (watchdog)."""
+
+
 def run_backtest(
-    schedule: list[tuple[str, str]], decision_fn: DecisionFn, mode: str = "full"
+    schedule: list[tuple[str, str]],
+    decision_fn: DecisionFn,
+    mode: str = "full",
+    combo_timeout: int | None = 1500,
 ) -> list[dict]:
     """스케줄의 각 (티커, 날짜)에 대해 결정 함수를 실행하고 레코드를 만든다.
 
     개별 조합의 실패는 해당 레코드에 오류로 기록하고 다음 조합을 계속
     실행합니다(실패 격리) — 긴 배치가 한 번의 API 오류로 통째로 죽지 않게.
+
+    ``combo_timeout``(초): 조합 하나의 실행 시간 상한. 일부 데이터
+    라이브러리의 타임아웃 없는 HTTP 호출이 소켓 읽기에서 무한 대기하는
+    사례가 실측 2회 발생 — 전역 socket.setdefaulttimeout으로도 못 잡는
+    경로(라이브러리가 자체 타임아웃 None을 명시)가 있어, SIGALRM 기반
+    상한으로 해당 조합만 실패 처리하고 배치를 계속 진행한다.
+    (유닉스 메인 스레드에서만 동작; 그 외 환경에선 자동 비활성)
     """
+    import signal
+    import threading
+
+    use_alarm = bool(
+        combo_timeout
+        and hasattr(signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+    )
+
+    def _on_alarm(signum, frame):
+        raise ComboTimeoutError(f"combo exceeded {combo_timeout}s (watchdog)")
+
     records = []
     total = len(schedule)
     for i, (ticker, trade_date) in enumerate(schedule, start=1):
         logger.info("Backtest run %d/%d: %s on %s", i, total, ticker, trade_date)
         record = {"ticker": ticker, "trade_date": trade_date, "mode": mode}
         try:
-            out = decision_fn(ticker, trade_date)
+            if use_alarm:
+                old_handler = signal.signal(signal.SIGALRM, _on_alarm)
+                signal.alarm(combo_timeout)
+            try:
+                out = decision_fn(ticker, trade_date)
+            finally:
+                if use_alarm:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
             record["rating"] = out["rating"]
             record["decision"] = (out.get("decision") or "")[:DECISION_SNIPPET_CHARS]
             record["status"] = "ok"

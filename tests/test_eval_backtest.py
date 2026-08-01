@@ -294,3 +294,38 @@ def test_make_decision_fn_single_llm_uses_baseline():
     # depth 오버라이드가 config에 반영되어야 한다
     assert call_kwargs["config"]["max_debate_rounds"] == 2
     assert call_kwargs["config"]["max_risk_discuss_rounds"] == 2
+
+
+@pytest.mark.unit
+class TestComboWatchdog:
+    """조합당 시간 상한(watchdog) — 무한 대기 조합을 실패로 격리 (실측 정지 2회 대응)."""
+
+    def test_hanging_combo_is_isolated_and_batch_continues(self):
+        """시간 초과 조합은 error로 기록되고 다음 조합이 계속 실행되는지 검증하는 테스트."""
+        import time
+
+        calls = []
+
+        def decision_fn(ticker, date):
+            calls.append(ticker)
+            if ticker == "HANG":
+                time.sleep(5)  # 1초 상한 초과 유도
+            return {"rating": "Hold", "decision": "ok"}
+
+        records = run_backtest(
+            [("HANG", "2025-01-06"), ("OK", "2025-01-06")],
+            decision_fn, mode="full", combo_timeout=1,
+        )
+        assert records[0]["status"] == "error"
+        assert "watchdog" in records[0]["error"]
+        assert records[1]["status"] == "ok"
+        assert calls == ["HANG", "OK"]
+
+    def test_timeout_disabled_when_none(self):
+        """combo_timeout=None이면 알람 없이 기존 동작을 유지하는지 검증하는 테스트."""
+        records = run_backtest(
+            [("A", "2025-01-06")],
+            lambda t, d: {"rating": "Buy", "decision": "x"},
+            mode="full", combo_timeout=None,
+        )
+        assert records[0]["status"] == "ok"
