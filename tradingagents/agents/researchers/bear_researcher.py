@@ -11,6 +11,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.debate_context import condense_debate_history
 
 
 def create_bear_researcher(llm):
@@ -22,6 +23,10 @@ def create_bear_researcher(llm):
         # history는 전체 토론 기록, bear_history는 약세론자(Bear) 발언만 모은 기록입니다.
         investment_debate_state = state["investment_debate_state"]
         history = investment_debate_state.get("history", "")
+        # 프롬프트용 압축 이력: 직전 발언은 전문, 그 이전 발언들은 각 300자
+        # 절단 (토큰 O(라운드²) 완화 — 중기 로드맵 #3). 상태에 저장되는
+        # history 원본은 그대로 유지되며, 심판은 전체 이력을 받는다.
+        condensed_history = condense_debate_history(history)
         bear_history = investment_debate_state.get("bear_history", "")
 
         # current_response: 직전 발언(여기서는 강세론자(Bull)의 마지막 주장).
@@ -46,7 +51,8 @@ def create_bear_researcher(llm):
         # 리스크·경쟁 약점·부정적 지표를 근거로 투자 반대 논리를 세우고,
         # 강세론자(Bull)의 직전 주장을 데이터로 조목조목 반박하며, 사실 나열이
         # 아닌 대화체 토론으로 응답하라는 내용. 아래에 4종 분석 보고서와 토론
-        # 이력을 근거 자료로 제공합니다. 반박할 강세 주장이 아직 없으면
+        # 이력(압축본: 직전 발언 전문 + 이전 발언 300자 절단)을 근거 자료로
+        # 제공합니다. 반박할 강세 주장이 아직 없으면
         # 가용 데이터에 근거한 자기 논거(개시 발언)를 제시하라는 폴백 문구를
         # 포함합니다(리스크 토론자들과 동일한 패턴). (LLM 프롬프트이므로 영어 원문 유지)
         prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
@@ -66,7 +72,7 @@ Market research report: {market_research_report}
 Social media sentiment report: {sentiment_report}
 Latest world affairs news: {news_report}
 {fundamentals_label}: {fundamentals_report}
-Conversation history of the debate: {history}
+Conversation history of the debate (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history}
 Last bull argument: {current_response}
 If there is no bull argument yet, this is the opening statement of the debate: present your own bear case based on the available data instead of rebutting.
 Use this information to deliver a compelling bear argument, refute the bull's claims when they exist, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}.

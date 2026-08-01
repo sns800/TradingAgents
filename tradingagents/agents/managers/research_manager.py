@@ -34,6 +34,9 @@ def create_research_manager(llm):
     def research_manager_node(state) -> dict:
         instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
         # 강세론자(Bull)/약세론자(Bear) 토론의 전체 이력을 상태에서 꺼냅니다.
+        # 주의: 토론자들은 토큰 절약을 위해 압축 이력(debate_context 참고)을
+        # 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체 이력을
+        # 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
@@ -73,6 +76,13 @@ def create_research_manager(llm):
         # Underweight(비중 축소)/Sell(매도) 중 정확히 하나를 사용하라.
         # 토론의 가장 강한 논거가 뒷받침될 때는 분명한 입장을 취하고,
         # Hold는 양측 근거가 진정으로 균형일 때만 남겨 두라.
+        # [평가 루브릭 — 중기 로드맵 #3] 수사(말솜씨)가 아닌 논거 품질로
+        # 판정하라: (1) 증거 접지 — 각 측의 핵심 주장이 분석가 보고서의 구체
+        # 수치·사실로 뒷받침되는가(추적 불가한 주장은 할인), (2) 응답성 —
+        # 상대의 최강 논거에 실제로 응답했는가(응답 없이 남은 논거는 유효하고,
+        # 논점을 회피한 반박은 응답으로 치지 않으며, 도전받고도 무응답인
+        # 주장은 할인), (3) 리스크 비대칭 — 논거 개수가 아니라 각 측이 틀렸을
+        # 때의 손실 크기(강세 실패 시 하방 vs 약세 실패 시 기회비용)를 가중하라.
         # 분석가 원본 보고서 4종과 토론 이력, (있다면) 과거 교훈이 컨텍스트로
         # 주어진다. 토론자의 주장은 원본 보고서와 대조해 검증하고, 보고서에
         # 근거가 없는 주장은 낮게 평가하라 (해당 분석가가 실행되지 않았으면
@@ -92,6 +102,13 @@ def create_research_manager(llm):
 - **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
 
 Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
+
+---
+
+**Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to both sides):
+1. **Evidence grounding**: Is each side's core claim backed by specific numbers or facts from the analyst reports below? Discount any claim you cannot trace back to a report.
+2. **Responsiveness**: Did each side actually engage with the other's strongest argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
+3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the bull case fails versus the opportunity cost if the bear case fails — not merely the number of arguments raised.
 
 ---
 

@@ -12,6 +12,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
 )
+from tradingagents.agents.utils.debate_context import condense_debate_history
 
 
 def create_neutral_debator(llm):
@@ -24,6 +25,10 @@ def create_neutral_debator(llm):
         # 중립적 애널리스트 발언만 모은 기록입니다.
         risk_debate_state = state["risk_debate_state"]
         history = risk_debate_state.get("history", "")
+        # 프롬프트용 압축 이력: 직전 발언은 전문, 그 이전 발언들은 각 300자
+        # 절단 (토큰 O(라운드²) 완화 — 중기 로드맵 #3). 상태에 저장되는
+        # history 원본은 그대로 유지되며, 심판(PM)은 전체 이력을 받는다.
+        condensed_history = condense_debate_history(history)
         neutral_history = risk_debate_state.get("neutral_history", "")
 
         # 반박 대상인 다른 두 애널리스트(공격적/보수적)의 최근 발언입니다.
@@ -56,7 +61,7 @@ Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
-Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Here is the current conversation history (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
 Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
 

@@ -40,10 +40,17 @@ def test_router_return_always_routable(latest_speaker):
 
 @pytest.mark.unit
 def test_router_terminates_at_round_limit():
-    """토론 라운드 한도에 도달하면 라우터가 토론을 종료시키는지 검증하는 테스트."""
+    """토론 라운드 한도에 도달하면 라우터가 토론을 종료시키는지 검증하는 테스트.
+
+    응답 보장 종료 조건(중기 로드맵 #3)으로 종료 시점이 3N에서 3N+1로
+    바뀌었다: count=3(예전 종료점)에서는 선발언자 Aggressive가 마지막 비판에
+    재반박하도록 토론을 계속하고, count=4(3N+1)에서 종료한다.
+    """
     logic = ConditionalLogic(max_risk_discuss_rounds=1)
-    # count >= 3 * rounds이면 포트폴리오 매니저(Portfolio Manager)로 라우팅 (토론 종료)
-    assert logic.should_continue_risk_analysis(_state("Neutral", count=3)) == "Portfolio Manager"
+    # count == 3N에서는 Neutral 직후 -> Aggressive의 마지막 재반박 차례
+    assert logic.should_continue_risk_analysis(_state("Neutral", count=3)) == "Aggressive Analyst"
+    # count >= 3N+1이면 포트폴리오 매니저(Portfolio Manager)로 라우팅 (토론 종료)
+    assert logic.should_continue_risk_analysis(_state("Aggressive", count=4)) == "Portfolio Manager"
 
 
 @pytest.mark.unit

@@ -66,8 +66,11 @@ def test_research_manager_prompt_states_constraint():
     captured = {}
     llm = _capturing_llm(
         captured,
+        # bull/bear_case_assessment는 중기 로드맵 #3에서 추가된 필수 필드.
         ResearchPlan(
-            recommendation=PortfolioRating.BUY, rationale="x", strategic_actions="y"
+            recommendation=PortfolioRating.BUY,
+            bull_case_assessment="ba", bear_case_assessment="be",
+            rationale="x", strategic_actions="y",
         ),
     )
     create_research_manager(llm)({

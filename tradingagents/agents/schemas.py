@@ -120,6 +120,30 @@ class ResearchPlan(BaseModel):
             "the side with the stronger arguments."
         ),
     )
+    # [한국어] 강세(Bull) 측 논거 평가. 심판 루브릭(중기 로드맵 #3)을 구조화
+    # 출력으로 강제하는 필드: 가장 강한 주장 + 분석가 보고서의 구체 증거로
+    # 뒷받침되는지 + 상대(Bear)의 최강 논거에 실제로 응답했는지를 평가하고,
+    # 응답 없이 넘어간 주장은 할인하라는 지시. (2~4문장)
+    bull_case_assessment: str = Field(
+        description=(
+            "Assessment of the bull side's argument quality: their strongest "
+            "claim, whether it is backed by specific evidence from the analyst "
+            "reports, and whether they actually answered the bear's strongest "
+            "counterargument. Discount claims that lack report evidence or that "
+            "the bull never responded to when challenged. Two to four sentences."
+        ),
+    )
+    # [한국어] 약세(Bear) 측 논거 평가. bull_case_assessment와 대칭 —
+    # 최강 주장·증거 뒷받침·상대 최강 논거에 대한 응답 여부를 평가.
+    bear_case_assessment: str = Field(
+        description=(
+            "Assessment of the bear side's argument quality: their strongest "
+            "claim, whether it is backed by specific evidence from the analyst "
+            "reports, and whether they actually answered the bull's strongest "
+            "counterargument. Discount claims that lack report evidence or that "
+            "the bear never responded to when challenged. Two to four sentences."
+        ),
+    )
     # [한국어] 토론 양측 핵심 논점 요약과 최종 추천에 이른 근거. 동료에게
     # 말하듯 자연스러운 대화체로 작성하라는 지시.
     rationale: str = Field(
@@ -140,9 +164,18 @@ class ResearchPlan(BaseModel):
 
 
 def render_research_plan(plan: ResearchPlan) -> str:
-    """ResearchPlan을 저장용·트레이더 프롬프트 컨텍스트용 마크다운으로 렌더링한다."""
+    """ResearchPlan을 저장용·트레이더 프롬프트 컨텍스트용 마크다운으로 렌더링한다.
+
+    기존 섹션 헤더(**Recommendation** / **Rationale** / **Strategic Actions**)와
+    순서는 다운스트림 소비자(트레이더 프롬프트, 저장 보고서)와의 하위 호환을
+    위해 그대로 유지하고, 양측 논거 평가(중기 로드맵 #3)를 그 사이에 추가한다.
+    """
     return "\n".join([
         f"**Recommendation**: {plan.recommendation.value}",
+        "",
+        f"**Bull Case Assessment**: {plan.bull_case_assessment}",
+        "",
+        f"**Bear Case Assessment**: {plan.bear_case_assessment}",
         "",
         f"**Rationale**: {plan.rationale}",
         "",

@@ -43,6 +43,9 @@ def create_portfolio_manager(llm):
         instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
 
         # 상태에서 리스크 토론 이력과 상위 단계 산출물들을 꺼냅니다.
+        # 주의: 리스크 토론자들은 토큰 절약을 위해 압축 이력(debate_context
+        # 참고)을 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체
+        # 이력을 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
         history = state["risk_debate_state"]["history"]  # 리스크 분석가 토론 전체 이력
         risk_debate_state = state["risk_debate_state"]
         research_plan = state["investment_plan"]  # 리서치 매니저의 투자 계획
@@ -72,7 +75,13 @@ def create_portfolio_manager(llm):
         # 리서치 매니저의 투자 계획, 트레이더의 거래 제안, (있다면) 과거 교훈,
         # 분석가 원본 보고서 4종, 리스크 토론 이력이 컨텍스트로 주어진다.
         # 토론자의 주장은 원본 보고서와 대조해 검증하라 (해당 분석가가
-        # 실행되지 않았으면 보고서가 비어 있을 수 있다). 단호하게 결정하고
+        # 실행되지 않았으면 보고서가 비어 있을 수 있다).
+        # [평가 루브릭 — 중기 로드맵 #3] 리스크 토론의 판정은 수사가 아닌 논거
+        # 품질로 하라: (1) 증거 접지 — 각 분석가의 핵심 주장이 보고서의 구체
+        # 수치·사실로 뒷받침되는가(추적 불가한 주장은 할인), (2) 응답성 —
+        # 상대의 최강 논거에 실제로 응답했는가(무응답 논거는 유효, 도전받고도
+        # 무응답인 주장은 할인), (3) 리스크 비대칭 — 각 관점이 틀렸을 때의
+        # 손실 크기를 가중하라. 단호하게 결정하고
         # 모든 결론을 분석가 보고서와 토론의 구체적 근거에 기반하라.
         # 외부 도구는 사용하지 말라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
@@ -103,6 +112,11 @@ Company Fundamentals Report: {fundamentals_report}
 {history}
 
 ---
+
+**Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to every risk analyst):
+1. **Evidence grounding**: Is each analyst's core claim backed by specific numbers or facts from the analyst reports above? Discount any claim you cannot trace back to a report.
+2. **Responsiveness**: Did each analyst actually engage with the strongest opposing argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
+3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the aggressive view fails versus the opportunity cost if the cautious view fails — not merely the number of arguments raised.
 
 Be decisive and ground every conclusion in specific evidence from the analyst reports and the debate.
 

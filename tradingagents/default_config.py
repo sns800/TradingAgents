@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
+    "TRADINGAGENTS_DEBATE_FIRST_SPEAKER": "debate_first_speaker",
     "TRADINGAGENTS_HOLDING_DAYS":         "holding_days",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
@@ -134,10 +135,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     #    TRADINGAGENTS_OUTPUT_LANGUAGE 환경변수로 언제든 바꿀 수 있습니다.
     "output_language": "Korean",
     # ----- 토론(debate) 관련 설정 -----
-    # 강세/약세 연구원 토론의 최대 라운드 수
+    # 강세/약세 연구원 토론의 최대 라운드 수(N). 실제 발언 수는 2N+1로,
+    # 마지막 +1 발언은 선발언자가 마지막 비판에 재반박하는 차례입니다
+    # (설계분석 중기 로드맵 #3 — 응답 보장 종료 조건).
     "max_debate_rounds": 1,
-    # 리스크 3자 토론의 최대 라운드 수
+    # 리스크 3자 토론의 최대 라운드 수(N). 실제 발언 수는 3N+1 (위와 동일한
+    # 이유로 선발언자 Aggressive의 마지막 재반박 1회가 추가됩니다).
     "max_risk_discuss_rounds": 1,
+    # 강세/약세 연구원 토론의 선발언자: "bull"(기본값 — 기존 동작 보존) 또는
+    # "bear". 선발언자는 개시 발언과 마지막 재반박(2N+1번째 발언)을 모두
+    # 가지므로, 순서 편향을 실험하려면 이 값을 바꿔 교차 실행하세요.
+    # 리스크 토론(3자)의 발언 순서는 설정화하지 않습니다(복잡도 대비 효과 낮음).
+    "debate_first_speaker": "bull",
     # LangGraph 재귀 한도(recursion limit): 그래프가 무한 루프에 빠지지 않도록
     # 노드 실행 횟수를 제한합니다
     "max_recur_limit": 100,

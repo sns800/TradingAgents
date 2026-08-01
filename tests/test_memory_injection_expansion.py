@@ -61,8 +61,11 @@ def _run_research_manager(state_overrides: dict) -> str:
     captured = {}
     llm = _capturing_llm(
         captured,
+        # bull/bear_case_assessment는 중기 로드맵 #3에서 추가된 필수 필드.
         ResearchPlan(
-            recommendation=PortfolioRating.BUY, rationale="x", strategic_actions="y"
+            recommendation=PortfolioRating.BUY,
+            bull_case_assessment="ba", bear_case_assessment="be",
+            rationale="x", strategic_actions="y",
         ),
     )
     state = {

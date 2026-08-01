@@ -134,6 +134,9 @@ class TradingAgentsGraph:
         self.conditional_logic = ConditionalLogic(
             max_debate_rounds=self.config["max_debate_rounds"],
             max_risk_discuss_rounds=self.config["max_risk_discuss_rounds"],
+            # 리서처 토론 선발언자. 키가 없는 사용자 설정 dict(하위 호환)에서는
+            # 기존 동작인 "bull"을 유지한다.
+            debate_first_speaker=self.config.get("debate_first_speaker", "bull"),
         )
         self.graph_setup = GraphSetup(
             self.quick_thinking_llm,
@@ -397,6 +400,8 @@ class TradingAgentsGraph:
             "analysts=" + ",".join(self.selected_analysts),
             f"debate={self.config['max_debate_rounds']}",
             f"risk={self.config['max_risk_discuss_rounds']}",
+            # 선발언자는 토론 진입 엣지(그래프 모양)를 바꾸므로 시그니처에 포함.
+            f"first={self.config.get('debate_first_speaker', 'bull')}",
             f"asset={asset_type}",
         ])
 

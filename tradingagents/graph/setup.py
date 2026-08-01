@@ -124,6 +124,18 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
+        # 리서처 토론의 선발언자 노드. debate_first_speaker 설정(기본 "bull" —
+        # 기존 동작 보존)을 따르며, 라우팅 폴백과의 일관성을 위해
+        # conditional_logic이 검증·정규화한 값을 단일 소스로 읽는다.
+        # 리스크 토론(3자)의 발언 순서 설정화는 이번 범위에서 제외 —
+        # 순서 조합이 6가지로 늘어 복잡도 대비 효과가 낮다 (중기 로드맵 #3).
+        first_debater_node = (
+            "Bear Researcher"
+            if getattr(self.conditional_logic, "debate_first_speaker", "bull")
+            == "bear"
+            else "Bull Researcher"
+        )
+
         # 엣지(edge) 정의
         # START(그래프 시작점)에서 첫 번째 애널리스트로 진입
         workflow.add_edge(START, plan.specs[0].agent_node)
@@ -146,11 +158,12 @@ class GraphSetup:
             )
             workflow.add_edge(current_tools, current_analyst)
 
-            # 다음 애널리스트로 연결하고, 마지막 애널리스트라면 Bull Researcher로 연결
+            # 다음 애널리스트로 연결하고, 마지막 애널리스트라면 리서처 토론의
+            # 선발언자(debate_first_speaker 설정, 기본 Bull Researcher)로 연결
             if i < len(plan.specs) - 1:
                 workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
             else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+                workflow.add_edge(current_clear, first_debater_node)
 
         # 연구 토론 엣지 두 개는 완전한 DEBATE_PATH_MAP을 공유한다 (#1088).
         for debate_node in ("Bull Researcher", "Bear Researcher"):

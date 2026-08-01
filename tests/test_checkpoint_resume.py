@@ -216,7 +216,15 @@ class TestCheckpointSignature(unittest.TestCase):
         self.assertNotEqual(base, g._run_signature("stock"))      # 토론(debate) 깊이
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 5}
         self.assertNotEqual(base, g._run_signature("stock"))      # 리스크 논의 깊이
-        # 동일한 입력에는 항상 같은 값이 나와야 함.
+        # 토론 선발언자(debate_first_speaker)는 토론 진입 엣지(그래프 모양)를
+        # 바꾸므로 시그니처에 반영되어야 한다 (중기 로드맵 #3).
+        g.config = {
+            "max_debate_rounds": 1, "max_risk_discuss_rounds": 1,
+            "debate_first_speaker": "bear",
+        }
+        self.assertNotEqual(base, g._run_signature("stock"))      # 토론 선발언자
+        # 동일한 입력에는 항상 같은 값이 나와야 함 — 키가 없으면 기본값 "bull"
+        # 로 취급되어 예전 설정 dict(하위 호환)와 시그니처가 유지된다.
         g.config = {"max_debate_rounds": 1, "max_risk_discuss_rounds": 1}
         self.assertEqual(base, g._run_signature("stock"))
 
