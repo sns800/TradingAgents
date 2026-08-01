@@ -102,6 +102,8 @@ class TestParseUS(unittest.TestCase):
 class TestParseKR(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # pd.read_html의 파싱 엔진 lxml은 배치 전용 의존성이라 CI에는 없을 수 있다
+        pytest.importorskip("lxml", reason="catalog batch deps not installed")
         # 픽스처는 KIND 원본에서 잘라낸 EUC-KR HTML (유가/코스닥/코넥스 각 1종목)
         cls.items = parsers.parse_kr((FIXTURES / "krx_corplist_sample.xls").read_bytes())
         cls.index = _by_ticker(cls.items)

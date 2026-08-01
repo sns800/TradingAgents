@@ -16,7 +16,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+
+# botocore는 웹 UI Lambda 전용 의존성이라 순수 dev 설치(CI)에는 없다.
+# bedrock 테스트와 동일한 관례로, 없으면 이 모듈 전체를 스킵한다.
+pytest.importorskip("botocore", reason="webui Lambda deps not installed")
+from botocore.exceptions import ClientError  # noqa: E402
 
 HANDLER_PATH = Path(__file__).resolve().parents[1] / "webui" / "backend" / "api_handler.py"
 
