@@ -32,9 +32,17 @@ from __future__ import annotations
 import argparse
 import copy
 import logging
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# 일부 데이터 라이브러리(yfinance 등)의 내부 HTTP 호출에는 타임아웃이 없어,
+# 응답 없는 소켓 읽기에서 백테스트 전체가 무한 대기할 수 있다 (실측: 30분+ 정지).
+# 전역 소켓 기본 타임아웃을 걸면 그런 호출이 예외로 바뀌고, run_backtest의
+# 조합별 실패 격리가 다음 조합으로 진행시킨다. 명시적 타임아웃이 있는 호출
+# (requests/botocore)에는 영향이 없다.
+socket.setdefaulttimeout(120)
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.eval.backtest import (
