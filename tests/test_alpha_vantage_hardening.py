@@ -90,8 +90,12 @@ def test_fundamentals_look_ahead_filter_runs_on_json_string(monkeypatch):
     # #1115: 응답 페이로드(payload)는 dict가 아닌 JSON *문자열*로 도착합니다.
     # 예전에는 dict일 때만 필터를 적용해서, 과거 시점 백테스트 실행에
     # 미래 회계 기간 데이터가 누출되는 문제가 있었습니다.
+    # 참고: 필터가 공시 지연(fiscalDateEnding + 45일)을 반영하게 되면서,
+    # 2023-12-31 종료 보고서가 "공시된 상태"가 되는 기준일(2024-02-14 이후)로
+    # curr_date를 옮겼습니다. 테스트의 의도(#1115: JSON 문자열에서도 필터가
+    # 실행되는가)는 그대로입니다.
     monkeypatch.setattr(avf, "_make_api_request", lambda fn, params: _FUNDAMENTALS_JSON)
-    out = avf.get_balance_sheet("AAPL", curr_date="2024-01-01")
+    out = avf.get_balance_sheet("AAPL", curr_date="2024-03-01")
     assert isinstance(out, str)  # 호출자는 여전히 문자열(str)을 받아야 함
     parsed = json.loads(out)
     assert [r["fiscalDateEnding"] for r in parsed["annualReports"]] == ["2023-12-31"]

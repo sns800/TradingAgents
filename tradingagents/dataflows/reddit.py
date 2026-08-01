@@ -34,12 +34,13 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .symbol_utils import crypto_base
+from .utils import is_historical_run, snapshot_warning_banner
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +200,42 @@ def _fetch_subreddit(
     return _fetch_subreddit_rss(ticker, sub, limit, timeout)
 
 
+def _filter_posts_by_date(
+    posts: list[dict], curr_date: str | None, historical: bool
+) -> list[dict]:
+    """curr_date 이후에 작성된 게시글을 제거해 룩어헤드(look-ahead)를 방지한다.
+
+    ``created_utc`` (UTC 에포크 초)가 curr_date 당일 자정(다음 날, 미포함)
+    이전인 게시글만 남깁니다. 타임스탬프가 없는 게시글은 과거 날짜 실행에서
+    미래가 아니라고 증명할 수 없으므로 제외하고, 실시간 실행에서는 유지합니다.
+    """
+    if not curr_date:
+        return posts
+    try:
+        cutoff_epoch = (
+            datetime.strptime(curr_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            + timedelta(days=1)  # curr_date 당일 전체 포함(다음 날 자정 미포함)
+        ).timestamp()
+    except (ValueError, TypeError):
+        return posts
+    def _visible(p: dict) -> bool:
+        created = p.get("created_utc")
+        if created is None:
+            # 타임스탬프 없는 게시글: 과거 실행에서는 미래가 아니라고 증명할
+            # 수 없어 제외하고, 실시간 실행에서는 유지한다.
+            return not historical
+        return created < cutoff_epoch
+
+    return [p for p in posts if _visible(p)]
+
+
 def fetch_reddit_posts(
     ticker: str,
     subreddits: Iterable[str] = DEFAULT_SUBREDDITS,
     limit_per_sub: int = 5,
     timeout: float = 10.0,
     inter_request_delay: float = 1.0,
+    curr_date: str | None = None,
 ) -> str:
     """금융 서브레딧들에서 ``ticker``를 언급한 최근 Reddit 게시글을 가져와
     형식을 갖춘 일반 텍스트 블록으로 반환한다.
@@ -212,16 +243,24 @@ def fetch_reddit_posts(
     ``inter_request_delay``는 (이제 RSS 전용인) 서브레딧별 요청 사이에
     간격을 두어 Reddit의 공개 IP당 요청 제한을 넘지 않게 합니다; RSS 우선
     경로와 결합하면 여러 분석이 연달아 돌아도 429가 드물어집니다.
+
+    ``curr_date`` (yyyy-mm-dd)가 주어지면 그 날짜 이후에 작성된 게시글
+    (``created_utc`` 기준)을 걸러내 백테스트의 룩어헤드를 막고, 과거 날짜
+    실행이면 결과 앞에 스냅샷 경고 배너를 붙입니다 — Reddit 검색은 '지금'
+    기준 최근 글만 반환하므로 과거 시점 여론을 되돌려 볼 수 없기 때문입니다.
     """
     # 암호화폐는 야후 페어(BTC-USD) 형태로 들어오는데, Reddit에서는 기초
     # 자산("BTC")으로 검색해야 거의 아무것도 안 걸리는 대신 실제 토론이 걸립니다.
     ticker = crypto_base(ticker) or ticker
+    historical = is_historical_run(curr_date)
+    banner = snapshot_warning_banner(curr_date, "Reddit 감성") if historical else ""
     blocks = []
     total_posts = 0
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        posts = _filter_posts_by_date(posts, curr_date, historical)
         total_posts += len(posts)
         if not posts:
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")
@@ -254,8 +293,8 @@ def fetch_reddit_posts(
         blocks.append("\n".join(lines))
 
     if total_posts == 0:
-        return (
+        return banner + (
             f"<no Reddit posts found mentioning {ticker.upper()} across "
             f"{', '.join(f'r/{s}' for s in subreddits)} in the past 7 days>"
         )
-    return "\n\n".join(blocks)
+    return banner + "\n\n".join(blocks)

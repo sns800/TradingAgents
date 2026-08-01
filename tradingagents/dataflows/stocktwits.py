@@ -23,12 +23,15 @@ HTTP·파싱 실패 시의 우아한 성능 저하(graceful degradation), 그리
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 
 from .symbol_utils import crypto_base
+from .utils import is_historical_run, snapshot_warning_banner
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +50,38 @@ def _stocktwits_symbol(ticker: str) -> str:
     return f"{base}.X" if base else ticker.strip().upper()
 
 
-def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.0) -> str:
+def _parse_created_at(created: str) -> datetime | None:
+    """StockTwits의 ``created_at`` 타임스탬프를 UTC 인식(aware) datetime으로 파싱한다.
+
+    형식은 ISO 8601(``2024-01-15T12:34:56Z``)입니다. 파싱에 실패하면 None을
+    반환하고, 호출부는 과거 날짜 실행에서 그런 메시지를 제외합니다(미래가
+    아니라고 증명할 수 없으므로).
+    """
+    if not created:
+        return None
+    with contextlib.suppress(ValueError, TypeError, AttributeError):
+        dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    return None
+
+
+def fetch_stocktwits_messages(
+    ticker: str,
+    limit: int = 30,
+    timeout: float = 10.0,
+    curr_date: str | None = None,
+) -> str:
     """``ticker``의 최근 StockTwits 메시지를 가져와, 프롬프트에 바로 넣을 수
     있는 형식의 일반 텍스트 블록으로 반환한다.
 
     엔드포인트에 접속할 수 없거나, 심볼에 메시지가 없거나, 응답 형태가
     예상과 다를 때는 자리표시(placeholder) 문자열을 반환합니다 — 호출자가
     None이나 예외를 따로 처리할 필요가 전혀 없습니다.
+
+    ``curr_date`` (yyyy-mm-dd)가 주어지면 그 날짜 이후에 작성된 메시지
+    (``created_at`` 기준)를 걸러내 백테스트의 룩어헤드를 막고, 과거 날짜
+    실행이면 결과 앞에 스냅샷 경고 배너를 붙입니다 — StockTwits는 '현재'
+    여론 스트림이라 과거 시점 여론을 되돌려 볼 수 없기 때문입니다.
     """
     url = _API.format(ticker=_stocktwits_symbol(ticker))
     req = Request(url, headers={"User-Agent": _UA, "Accept": "application/json"})
@@ -67,7 +95,34 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         return f"<stocktwits unavailable: {type(exc).__name__}>"
 
     messages = data.get("messages", []) if isinstance(data, dict) else []
+
+    # 룩어헤드 차단: curr_date가 주어지면 그 날짜(포함) 이후에 작성된
+    # 메시지를 제외한다. 타임스탬프가 없는 메시지는 과거 실행에서 미래가
+    # 아니라고 증명할 수 없으므로 함께 제외한다(실시간 실행은 필터 없음).
+    historical = is_historical_run(curr_date)
+    if curr_date and messages:
+        with contextlib.suppress(ValueError, TypeError):
+            cutoff = datetime.strptime(curr_date, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc
+            ) + timedelta(days=1)  # curr_date 당일 전체 포함(다음 날 자정 미포함)
+            def _visible(m: dict) -> bool:
+                created_dt = _parse_created_at(m.get("created_at", ""))
+                if created_dt is None:
+                    # 타임스탬프 없는 메시지: 과거 실행에서는 미래가 아니라고
+                    # 증명할 수 없어 제외하고, 실시간 실행에서는 유지한다.
+                    return not historical
+                return created_dt < cutoff
+
+            messages = [m for m in messages if _visible(m)]
+
+    banner = snapshot_warning_banner(curr_date, "StockTwits 감성") if historical else ""
+
     if not messages:
+        if curr_date:
+            return banner + (
+                f"<no StockTwits messages found for ${ticker.upper()} "
+                f"on or before {curr_date}>"
+            )
         return f"<no StockTwits messages found for ${ticker.upper()}>"
 
     lines = []
@@ -103,4 +158,4 @@ def fetch_stocktwits_messages(ticker: str, limit: int = 30, timeout: float = 10.
         f"Unlabeled: {unlabeled} · "
         f"Total: {total} most-recent messages"
     )
-    return summary + "\n\n" + "\n".join(lines)
+    return banner + summary + "\n\n" + "\n".join(lines)

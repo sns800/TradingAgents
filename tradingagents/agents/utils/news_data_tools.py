@@ -61,17 +61,22 @@ def get_global_news(
     return route_to_vendor("get_global_news", curr_date, look_back_days, limit)
 
 # [한국어 설명] 지정한 기업의 내부자 거래(insider transactions) 정보를 조회하는 툴.
+# curr_date를 벤더 구현까지 전달해 curr_date 이후의 거래(백테스트 기준 미래
+# 매매 내역)가 걸러지도록 한다(룩어헤드 방지).
 # 아래 docstring은 LLM에게 툴 설명으로 전달되므로 영어 원문을 유지한다.
 @tool
 def get_insider_transactions(
     ticker: Annotated[str, "ticker symbol"],
+    curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
 ) -> str:
     """
     Retrieve insider transaction information about a company.
-    Uses the configured news_data vendor.
+    Uses the configured news_data vendor. Transactions dated after curr_date
+    are excluded to avoid look-ahead bias in backtests.
     Args:
         ticker (str): Ticker symbol of the company
+        curr_date (str): Current date you are trading at, yyyy-mm-dd
     Returns:
         str: A report of insider transaction data
     """
-    return route_to_vendor("get_insider_transactions", ticker)
+    return route_to_vendor("get_insider_transactions", ticker, curr_date)

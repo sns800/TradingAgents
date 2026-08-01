@@ -6,8 +6,12 @@
 # 에이전트가 주가 흐름을 분석할 때 사용하는 가장 기본적인 데이터 소스입니다.
 # =============================================================================
 from datetime import datetime
+from io import StringIO
+
+import pandas as pd
 
 from .alpha_vantage_common import _filter_csv_by_date_range, _make_api_request
+from .stockstats_utils import _assert_ohlcv_not_stale
 
 
 def get_stock(
@@ -44,6 +48,24 @@ def get_stock(
     }
 
     response = _make_api_request("TIME_SERIES_DAILY_ADJUSTED", params)
+
+    # yfinance 경로와 동일한 진부(stale) 데이터 거부(#1021 패턴): 벤더가 가진
+    # 최신 행이 요청한 end_date보다 지나치게 오래됐다면(예: 상장폐지, 커버리지
+    # 중단) 아래 범위 필터가 조용히 빈 결과를 만들기 전에 명시적으로 거부한다.
+    # 반드시 범위 필터 *이전*의 전체 응답으로 검사한다 — 필터 후에는 진부한
+    # 행이 범위 밖으로 걸러져 검사가 무력화되기 때문이다. Alpha Vantage CSV의
+    # 첫 컬럼(timestamp)을 검사용 Date 컬럼으로 이름만 바꿔 공용 가드에 넘긴다.
+    if isinstance(response, str) and response.strip():
+        try:
+            frame = pd.read_csv(StringIO(response))
+        except Exception:
+            # CSV로 파싱할 수 없는 본문은 아래 범위 필터가 fail-closed로
+            # 예외 처리한다(빈 프레임 정책도 가드와 동일: 데이터-없음 처리에 맡김).
+            frame = None
+        if frame is not None and not frame.empty:
+            _assert_ohlcv_not_stale(
+                frame.rename(columns={frame.columns[0]: "Date"}), end_date, symbol
+            )
 
     # 요청 범위 밖(특히 end_date 이후 = 미래)의 행을 잘라내어
     # 백테스트 시 룩어헤드 편향(look-ahead bias)을 방지한다

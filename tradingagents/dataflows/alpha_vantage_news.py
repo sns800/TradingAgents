@@ -6,7 +6,10 @@
 # 소셜/심리 애널리스트 에이전트가 종목 관련 뉴스, 전체 시장 뉴스, 임원·대주주의
 # 주식 매매 내역을 분석할 때 이 모듈을 사용합니다.
 # =============================================================================
+import json
+
 from .alpha_vantage_common import _make_api_request, format_datetime_for_api
+from .errors import VendorError
 
 
 def get_news(ticker, start_date, end_date) -> dict[str, str] | str:
@@ -62,13 +65,46 @@ def get_global_news(curr_date, look_back_days: int = 7, limit: int = 50) -> dict
     return _make_api_request("NEWS_SENTIMENT", params)
 
 
-def get_insider_transactions(symbol: str) -> dict[str, str] | str:
+def _filter_insider_transactions_by_date(result, curr_date: str | None, symbol: str):
+    """curr_date 이후의 내부자 거래 항목을 제거해 룩어헤드(look-ahead)를 방지한다.
+
+    Alpha Vantage의 INSIDER_TRANSACTIONS 응답은 ``{"data": [{"transaction_date":
+    "YYYY-MM-DD", ...}, ...]}`` 형태의 JSON 문자열입니다. ``curr_date`` 가 주어지면
+    ``transaction_date > curr_date`` 인 항목(백테스트 기준 미래의 매매 내역)을
+    걸러냅니다. 날짜가 없는 항목은 미래가 아니라고 증명할 수 없으므로 함께
+    제외합니다(fail-closed). 필터를 적용할 수 없는 본문이면 조용히 통과시키는
+    대신 예외를 던져 라우터가 처리하게 합니다.
+    """
+    if not curr_date or not isinstance(result, str):
+        return result
+    try:
+        payload = json.loads(result)
+    except json.JSONDecodeError:
+        raise VendorError(
+            f"Cannot enforce look-ahead filter on Alpha Vantage insider "
+            f"transactions for {symbol!r}: response body is not JSON"
+        ) from None
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return result
+    # transaction_date는 ISO(YYYY-MM-DD) 형식이므로 문자열 비교로 충분하다.
+    payload["data"] = [
+        r for r in payload["data"]
+        if isinstance(r, dict)
+        and r.get("transaction_date")
+        and str(r["transaction_date"]) <= curr_date
+    ]
+    return json.dumps(payload)
+
+
+def get_insider_transactions(symbol: str, curr_date: str = None) -> dict[str, str] | str:
     """주요 이해관계자의 최신·과거 내부자 거래(insider transactions) 내역을 반환한다.
 
     창업자, 임원, 이사회 구성원 등의 주식 매매 내역을 다룬다.
 
     Args:
         symbol: 티커 심볼(ticker symbol). 예: "IBM".
+        curr_date: 현재 트레이딩 날짜(yyyy-mm-dd). 지정하면 이 날짜 이후의
+            거래를 걸러내 백테스트의 룩어헤드를 방지한다.
 
     Returns:
         내부자 거래 데이터가 담긴 딕셔너리 또는 JSON 문자열.
@@ -78,4 +114,5 @@ def get_insider_transactions(symbol: str) -> dict[str, str] | str:
         "symbol": symbol,
     }
 
-    return _make_api_request("INSIDER_TRANSACTIONS", params)
+    result = _make_api_request("INSIDER_TRANSACTIONS", params)
+    return _filter_insider_transactions_by_date(result, curr_date, symbol)

@@ -117,42 +117,41 @@ def get_news_yfinance(
     # 뉴스가 없다고 나옵니다. 보고서 헤더에는 사용자가 입력한 티커를 유지합니다.
     canonical = normalize_symbol(ticker)
     resolved = "" if canonical == ticker else f" (resolved to {canonical})"
-    try:
-        stock = yf.Ticker(canonical)
-        news = yf_retry(lambda: stock.get_news(count=article_limit))
+    # 예외는 그대로 전파합니다 — 라우터(interface.route_to_vendor)의 폴백과
+    # 센티널 처리가 전부 예외 기반이므로, 여기서 "Error ..." 문자열로 삼키면
+    # 그 안전장치가 우회되고 원시 오류가 LLM 컨텍스트에 유입됩니다.
+    stock = yf.Ticker(canonical)
+    news = yf_retry(lambda: stock.get_news(count=article_limit))
 
-        if not news:
-            return f"No news found for {ticker}{resolved}"
+    if not news:
+        return f"No news found for {ticker}{resolved}"
 
-        # 필터링을 위한 날짜 범위를 파싱한다
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    # 필터링을 위한 날짜 범위를 파싱한다
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
-        filtered_count = 0
+    news_str = ""
+    filtered_count = 0
 
-        for article in news:
-            data = _extract_article_data(article)
+    for article in news:
+        data = _extract_article_data(article)
 
-            # 요청한 날짜 창 안의 기사만 유지한다 (선견 편향 안전).
-            if not _in_news_window(data["pub_date"], start_dt, end_dt):
-                continue
+        # 요청한 날짜 창 안의 기사만 유지한다 (선견 편향 안전).
+        if not _in_news_window(data["pub_date"], start_dt, end_dt):
+            continue
 
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
-            if data["summary"]:
-                news_str += f"{data['summary']}\n"
-            if data["link"]:
-                news_str += f"Link: {data['link']}\n"
-            news_str += "\n"
-            filtered_count += 1
+        news_str += f"### {data['title']} (source: {data['publisher']})\n"
+        if data["summary"]:
+            news_str += f"{data['summary']}\n"
+        if data["link"]:
+            news_str += f"Link: {data['link']}\n"
+        news_str += "\n"
+        filtered_count += 1
 
-        if filtered_count == 0:
-            return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
+    if filtered_count == 0:
+        return f"No news found for {ticker}{resolved} between {start_date} and {end_date}"
 
-        return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
-
-    except Exception as e:
-        return f"Error fetching news for {ticker}: {str(e)}"
+    return f"## {ticker}{resolved} News, from {start_date} to {end_date}:\n\n{news_str}"
 
 
 def get_global_news_yfinance(
@@ -183,62 +182,59 @@ def get_global_news_yfinance(
     all_news = []
     seen_titles = set()
 
-    try:
-        for query in search_queries:
-            search = yf_retry(lambda q=query: yf.Search(
-                query=q,
-                news_count=limit,
-                enable_fuzzy_query=True,
-            ))
+    # 예외는 그대로 전파합니다(라우터의 폴백·센티널 처리가 예외 기반이므로).
+    for query in search_queries:
+        search = yf_retry(lambda q=query: yf.Search(
+            query=q,
+            news_count=limit,
+            enable_fuzzy_query=True,
+        ))
 
-            if search.news:
-                for article in search.news:
-                    # 평평한 구조와 중첩 구조 모두 처리한다
-                    if "content" in article:
-                        data = _extract_article_data(article)
-                        title = data["title"]
-                    else:
-                        title = article.get("title", "")
+        if search.news:
+            for article in search.news:
+                # 평평한 구조와 중첩 구조 모두 처리한다
+                if "content" in article:
+                    data = _extract_article_data(article)
+                    title = data["title"]
+                else:
+                    title = article.get("title", "")
 
-                    # 제목으로 중복 제거
-                    if title and title not in seen_titles:
-                        seen_titles.add(title)
-                        all_news.append(article)
+                # 제목으로 중복 제거
+                if title and title not in seen_titles:
+                    seen_titles.add(title)
+                    all_news.append(article)
 
-            if len(all_news) >= limit:
-                break
+        if len(all_news) >= limit:
+            break
 
-        if not all_news:
-            return f"No global news found for {curr_date}"
+    if not all_news:
+        return f"No global news found for {curr_date}"
 
-        # 날짜 범위를 계산한다
-        curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
-        start_dt = curr_dt - relativedelta(days=look_back_days)
-        start_date = start_dt.strftime("%Y-%m-%d")
+    # 날짜 범위를 계산한다
+    curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_dt = curr_dt - relativedelta(days=look_back_days)
+    start_date = start_dt.strftime("%Y-%m-%d")
 
-        news_str = ""
-        kept = 0
-        for article in all_news[:limit]:
-            # (평평한 구조든 중첩 구조든) 동일하게 추출하고 동일한 선견 편향
-            # 안전 창 필터를 적용해, 평평한 구조의 기사도 미래 뉴스를 흘리지
-            # 못하게 합니다(#1007).
-            data = _extract_article_data(article)
-            if not _in_news_window(data["pub_date"], start_dt, curr_dt):
-                continue
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
-            if data["summary"]:
-                news_str += f"{data['summary']}\n"
-            if data["link"]:
-                news_str += f"Link: {data['link']}\n"
-            news_str += "\n"
-            kept += 1
+    news_str = ""
+    kept = 0
+    for article in all_news[:limit]:
+        # (평평한 구조든 중첩 구조든) 동일하게 추출하고 동일한 선견 편향
+        # 안전 창 필터를 적용해, 평평한 구조의 기사도 미래 뉴스를 흘리지
+        # 못하게 합니다(#1007).
+        data = _extract_article_data(article)
+        if not _in_news_window(data["pub_date"], start_dt, curr_dt):
+            continue
+        news_str += f"### {data['title']} (source: {data['publisher']})\n"
+        if data["summary"]:
+            news_str += f"{data['summary']}\n"
+        if data["link"]:
+            news_str += f"Link: {data['link']}\n"
+        news_str += "\n"
+        kept += 1
 
-        # 후보 기사가 모두 날짜 창 밖으로 떨어졌다면 -> 본문이 빈 보고서를
-        # 돌려주는 대신 그렇다고 말한다(#993).
-        if kept == 0:
-            return f"No global news found between {start_date} and {curr_date}"
+    # 후보 기사가 모두 날짜 창 밖으로 떨어졌다면 -> 본문이 빈 보고서를
+    # 돌려주는 대신 그렇다고 말한다(#993).
+    if kept == 0:
+        return f"No global news found between {start_date} and {curr_date}"
 
-        return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
-
-    except Exception as e:
-        return f"Error fetching global news: {str(e)}"
+    return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"

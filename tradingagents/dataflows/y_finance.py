@@ -15,6 +15,7 @@ import pandas as pd
 import yfinance as yf
 from dateutil.relativedelta import relativedelta
 
+from .errors import VendorError
 from .stockstats_utils import (
     StockstatsUtils,
     _assert_ohlcv_not_stale,
@@ -23,6 +24,7 @@ from .stockstats_utils import (
     yf_retry,
 )
 from .symbol_utils import NoMarketDataError, normalize_symbol
+from .utils import is_historical_run, snapshot_warning_banner
 
 
 def get_YFin_data_online(
@@ -288,72 +290,79 @@ def get_stockstats_indicator(
 
 def get_fundamentals(
     ticker: Annotated[str, "ticker symbol of the company"],
-    curr_date: Annotated[str, "current date (not used for yfinance)"] = None
+    curr_date: Annotated[
+        str, "current trading date, YYYY-MM-DD (used only for the backtest warning banner)"
+    ] = None
 ):
-    """yfinance에서 기업 기초 정보(fundamentals) 개요를 가져온다."""
+    """yfinance에서 기업 기초 정보(fundamentals) 개요를 가져온다.
+
+    yfinance의 ``info`` 는 시점(point-in-time) 조회를 지원하지 않는 "현재
+    스냅샷"입니다(시총·PER 등은 항상 오늘 값). 데이터 소스 한계로 과거
+    curr_date에 맞춰 차단할 수 없으므로, curr_date가 과거이면 반환 텍스트
+    맨 앞에 경고 배너를 붙여 백테스트에서 룩어헤드로 오독되지 않게 합니다.
+    """
     canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
-        info = yf_retry(lambda: ticker_obj.info)
+    ticker_obj = yf.Ticker(canonical)
+    info = yf_retry(lambda: ticker_obj.info)
 
-        if not info:
-            raise NoMarketDataError(ticker, canonical, "no fundamentals returned")
+    if not info:
+        raise NoMarketDataError(ticker, canonical, "no fundamentals returned")
 
-        # 표시할 재무 지표 필드 목록: PER(주가수익비율), EPS(주당순이익),
-        # 배당수익률, 베타(시장 대비 변동성) 등.
-        fields = [
-            ("Name", info.get("longName")),
-            ("Sector", info.get("sector")),
-            ("Industry", info.get("industry")),
-            ("Market Cap", info.get("marketCap")),
-            ("PE Ratio (TTM)", info.get("trailingPE")),
-            ("Forward PE", info.get("forwardPE")),
-            ("PEG Ratio", info.get("pegRatio")),
-            ("Price to Book", info.get("priceToBook")),
-            ("EPS (TTM)", info.get("trailingEps")),
-            ("Forward EPS", info.get("forwardEps")),
-            ("Dividend Yield", info.get("dividendYield")),
-            ("Beta", info.get("beta")),
-            ("52 Week High", info.get("fiftyTwoWeekHigh")),
-            ("52 Week Low", info.get("fiftyTwoWeekLow")),
-            ("50 Day Average", info.get("fiftyDayAverage")),
-            ("200 Day Average", info.get("twoHundredDayAverage")),
-            ("Revenue (TTM)", info.get("totalRevenue")),
-            ("Gross Profit", info.get("grossProfits")),
-            ("EBITDA", info.get("ebitda")),
-            ("Net Income", info.get("netIncomeToCommon")),
-            ("Profit Margin", info.get("profitMargins")),
-            ("Operating Margin", info.get("operatingMargins")),
-            ("Return on Equity", info.get("returnOnEquity")),
-            ("Return on Assets", info.get("returnOnAssets")),
-            ("Debt to Equity", info.get("debtToEquity")),
-            ("Current Ratio", info.get("currentRatio")),
-            ("Book Value", info.get("bookValue")),
-            ("Free Cash Flow", info.get("freeCashflow")),
-        ]
+    # 표시할 재무 지표 필드 목록: PER(주가수익비율), EPS(주당순이익),
+    # 배당수익률, 베타(시장 대비 변동성) 등.
+    fields = [
+        ("Name", info.get("longName")),
+        ("Sector", info.get("sector")),
+        ("Industry", info.get("industry")),
+        ("Market Cap", info.get("marketCap")),
+        ("PE Ratio (TTM)", info.get("trailingPE")),
+        ("Forward PE", info.get("forwardPE")),
+        ("PEG Ratio", info.get("pegRatio")),
+        ("Price to Book", info.get("priceToBook")),
+        ("EPS (TTM)", info.get("trailingEps")),
+        ("Forward EPS", info.get("forwardEps")),
+        ("Dividend Yield", info.get("dividendYield")),
+        ("Beta", info.get("beta")),
+        ("52 Week High", info.get("fiftyTwoWeekHigh")),
+        ("52 Week Low", info.get("fiftyTwoWeekLow")),
+        ("50 Day Average", info.get("fiftyDayAverage")),
+        ("200 Day Average", info.get("twoHundredDayAverage")),
+        ("Revenue (TTM)", info.get("totalRevenue")),
+        ("Gross Profit", info.get("grossProfits")),
+        ("EBITDA", info.get("ebitda")),
+        ("Net Income", info.get("netIncomeToCommon")),
+        ("Profit Margin", info.get("profitMargins")),
+        ("Operating Margin", info.get("operatingMargins")),
+        ("Return on Equity", info.get("returnOnEquity")),
+        ("Return on Assets", info.get("returnOnAssets")),
+        ("Debt to Equity", info.get("debtToEquity")),
+        ("Current Ratio", info.get("currentRatio")),
+        ("Book Value", info.get("bookValue")),
+        ("Free Cash Flow", info.get("freeCashflow")),
+    ]
 
-        lines = []
-        for label, value in fields:
-            if value is not None:
-                lines.append(f"{label}: {value}")
+    lines = []
+    for label, value in fields:
+        if value is not None:
+            lines.append(f"{label}: {value}")
 
-        # yfinance는 알 수 없는 심볼에 대해 스텁(stub) 딕셔너리(예:
-        # {"trailingPegRatio": None})를 반환하므로, `info`가 참(truthy)이어도
-        # 모든 필드가 비어 있을 수 있습니다. "쓸 만한 필드 없음"을 데이터
-        # 없음으로 취급하여, 에이전트가 그 주변에서 지어낼 수 있는 빈 헤더를
-        # 내보내지 않습니다.
-        if not lines:
-            raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
+    # yfinance는 알 수 없는 심볼에 대해 스텁(stub) 딕셔너리(예:
+    # {"trailingPegRatio": None})를 반환하므로, `info`가 참(truthy)이어도
+    # 모든 필드가 비어 있을 수 있습니다. "쓸 만한 필드 없음"을 데이터
+    # 없음으로 취급하여, 에이전트가 그 주변에서 지어낼 수 있는 빈 헤더를
+    # 내보내지 않습니다.
+    if not lines:
+        raise NoMarketDataError(ticker, canonical, "no fundamental fields returned")
 
-        header = f"# Company Fundamentals for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # 과거 날짜 실행이면 스냅샷 경고 배너를 맨 앞에 붙인다 — yfinance는
+    # 과거 시점 펀더멘털 조회를 지원하지 않으므로 차단 대신 경고합니다.
+    header = ""
+    if is_historical_run(curr_date):
+        header += snapshot_warning_banner(curr_date, "펀더멘털")
+    header += f"# Company Fundamentals for {canonical}\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + "\n".join(lines)
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+    return header + "\n".join(lines)
 
 
 def get_balance_sheet(
@@ -361,34 +370,33 @@ def get_balance_sheet(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
-    """yfinance에서 재무상태표(balance sheet) 데이터를 가져온다."""
+    """yfinance에서 재무상태표(balance sheet) 데이터를 가져온다.
+
+    예외는 그대로 전파합니다 — 라우터(interface.route_to_vendor)의 폴백과
+    센티널 처리가 전부 예외 기반이므로, 여기서 "Error ..." 문자열로 삼키면
+    그 안전장치가 통째로 우회되고 원시 오류가 LLM 컨텍스트에 유입됩니다.
+    """
     canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
+    ticker_obj = yf.Ticker(canonical)
 
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_balance_sheet)
-        else:
-            data = yf_retry(lambda: ticker_obj.balance_sheet)
+    if freq.lower() == "quarterly":
+        data = yf_retry(lambda: ticker_obj.quarterly_balance_sheet)
+    else:
+        data = yf_retry(lambda: ticker_obj.balance_sheet)
 
-        data = filter_financials_by_date(data, curr_date)
+    data = filter_financials_by_date(data, curr_date)
 
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no balance sheet data")
+    if data.empty:
+        raise NoMarketDataError(ticker, canonical, "no balance sheet data")
 
-        # 다른 함수들과 일관되게 CSV 문자열로 변환한다
-        csv_string = data.to_csv()
+    # 다른 함수들과 일관되게 CSV 문자열로 변환한다
+    csv_string = data.to_csv()
 
-        # 헤더 정보를 추가한다
-        header = f"# Balance Sheet data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # 헤더 정보를 추가한다
+    header = f"# Balance Sheet data for {canonical} ({freq})\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + csv_string
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+    return header + csv_string
 
 
 def get_cashflow(
@@ -396,34 +404,31 @@ def get_cashflow(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
-    """yfinance에서 현금흐름표(cash flow) 데이터를 가져온다."""
+    """yfinance에서 현금흐름표(cash flow) 데이터를 가져온다.
+
+    예외는 그대로 전파합니다(라우터의 폴백·센티널 처리가 예외 기반이므로).
+    """
     canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
+    ticker_obj = yf.Ticker(canonical)
 
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_cashflow)
-        else:
-            data = yf_retry(lambda: ticker_obj.cashflow)
+    if freq.lower() == "quarterly":
+        data = yf_retry(lambda: ticker_obj.quarterly_cashflow)
+    else:
+        data = yf_retry(lambda: ticker_obj.cashflow)
 
-        data = filter_financials_by_date(data, curr_date)
+    data = filter_financials_by_date(data, curr_date)
 
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no cash flow data")
+    if data.empty:
+        raise NoMarketDataError(ticker, canonical, "no cash flow data")
 
-        # 다른 함수들과 일관되게 CSV 문자열로 변환한다
-        csv_string = data.to_csv()
+    # 다른 함수들과 일관되게 CSV 문자열로 변환한다
+    csv_string = data.to_csv()
 
-        # 헤더 정보를 추가한다
-        header = f"# Cash Flow data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # 헤더 정보를 추가한다
+    header = f"# Cash Flow data for {canonical} ({freq})\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + csv_string
-
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+    return header + csv_string
 
 
 def get_income_statement(
@@ -431,58 +436,99 @@ def get_income_statement(
     freq: Annotated[str, "frequency of data: 'annual' or 'quarterly'"] = "quarterly",
     curr_date: Annotated[str, "current date in YYYY-MM-DD format"] = None
 ):
-    """yfinance에서 손익계산서(income statement) 데이터를 가져온다."""
+    """yfinance에서 손익계산서(income statement) 데이터를 가져온다.
+
+    예외는 그대로 전파합니다(라우터의 폴백·센티널 처리가 예외 기반이므로).
+    """
     canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
+    ticker_obj = yf.Ticker(canonical)
 
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_income_stmt)
-        else:
-            data = yf_retry(lambda: ticker_obj.income_stmt)
+    if freq.lower() == "quarterly":
+        data = yf_retry(lambda: ticker_obj.quarterly_income_stmt)
+    else:
+        data = yf_retry(lambda: ticker_obj.income_stmt)
 
-        data = filter_financials_by_date(data, curr_date)
+    data = filter_financials_by_date(data, curr_date)
 
-        if data.empty:
-            raise NoMarketDataError(ticker, canonical, "no income statement data")
+    if data.empty:
+        raise NoMarketDataError(ticker, canonical, "no income statement data")
 
-        # 다른 함수들과 일관되게 CSV 문자열로 변환한다
-        csv_string = data.to_csv()
+    # 다른 함수들과 일관되게 CSV 문자열로 변환한다
+    csv_string = data.to_csv()
 
-        # 헤더 정보를 추가한다
-        header = f"# Income Statement data for {canonical} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # 헤더 정보를 추가한다
+    header = f"# Income Statement data for {canonical} ({freq})\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-        return header + csv_string
+    return header + csv_string
 
-    except NoMarketDataError:
-        raise
-    except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+
+# yfinance 내부자 거래 프레임에서 거래 날짜가 담기는 후보 컬럼 이름들.
+# 현행 yfinance는 "Start Date"를 쓰지만, 스키마 변화에 대비해 몇 가지
+# 관례적 이름을 함께 확인합니다.
+_INSIDER_DATE_COLUMNS = ("Start Date", "Transaction Date", "Date")
+
+
+def _filter_insider_transactions_by_date(
+    data: pd.DataFrame, curr_date: str | None, canonical: str
+) -> pd.DataFrame:
+    """curr_date 이후의 내부자 거래 행을 제거해 룩어헤드(look-ahead)를 방지한다.
+
+    내부자 거래는 백테스트에서 미래 매매 내역이 그대로 유입되던 경로였습니다
+    (날짜 필터 자체가 없었음). curr_date가 None이면(실시간 실행) 필터 없이
+    그대로 반환합니다. 날짜 컬럼을 찾지 못하면 fail-closed로 예외를 던집니다 —
+    미래 행이 섞이지 않았음을 증명할 수 없는 데이터를 통과시키지 않습니다.
+    """
+    if not curr_date:
+        return data
+    date_col = next((c for c in _INSIDER_DATE_COLUMNS if c in data.columns), None)
+    if date_col is None:
+        raise VendorError(
+            f"Cannot enforce look-ahead filter on insider transactions for "
+            f"{canonical!r}: no transaction-date column found "
+            f"(columns: {list(data.columns)})"
+        )
+    cutoff = pd.Timestamp(curr_date)
+    dates = pd.to_datetime(data[date_col], errors="coerce")
+    # 날짜를 파싱할 수 없는 행은 미래가 아니라고 증명할 수 없으므로 함께 제외한다.
+    return data[dates.notna() & (dates <= cutoff)]
 
 
 def get_insider_transactions(
-    ticker: Annotated[str, "ticker symbol of the company"]
+    ticker: Annotated[str, "ticker symbol of the company"],
+    curr_date: Annotated[
+        str, "current trading date, YYYY-MM-DD; transactions after this date are dropped"
+    ] = None,
 ):
-    """yfinance에서 내부자 거래(insider transactions) 데이터를 가져온다."""
+    """yfinance에서 내부자 거래(insider transactions) 데이터를 가져온다.
+
+    ``curr_date`` 가 주어지면 그 이후 날짜의 거래를 걸러내 백테스트의
+    룩어헤드를 막습니다. 예외는 그대로 전파합니다(라우터의 폴백·센티널
+    처리가 예외 기반이므로).
+    """
     canonical = normalize_symbol(ticker)
-    try:
-        ticker_obj = yf.Ticker(canonical)
-        data = yf_retry(lambda: ticker_obj.insider_transactions)
+    ticker_obj = yf.Ticker(canonical)
+    data = yf_retry(lambda: ticker_obj.insider_transactions)
 
-        # 여기서 빈 결과는 정상입니다(내부자 신고가 없는 유효한 심볼이 많음).
-        # 심볼이 잘못됐다고 취급하는 대신 그대로 알려 줍니다.
-        if data is None or data.empty:
-            return f"No insider transactions reported for symbol '{canonical}'"
+    # 여기서 빈 결과는 정상입니다(내부자 신고가 없는 유효한 심볼이 많음).
+    # 심볼이 잘못됐다고 취급하는 대신 그대로 알려 줍니다.
+    if data is None or data.empty:
+        return f"No insider transactions reported for symbol '{canonical}'"
 
-        # 다른 함수들과 일관되게 CSV 문자열로 변환한다
-        csv_string = data.to_csv()
+    data = _filter_insider_transactions_by_date(data, curr_date, canonical)
+    if data.empty:
+        return (
+            f"No insider transactions reported for symbol '{canonical}' "
+            f"on or before {curr_date}"
+        )
 
-        # 헤더 정보를 추가한다
-        header = f"# Insider Transactions data for {canonical}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    # 다른 함수들과 일관되게 CSV 문자열로 변환한다
+    csv_string = data.to_csv()
 
-        return header + csv_string
+    # 헤더 정보를 추가한다
+    header = f"# Insider Transactions data for {canonical}\n"
+    if curr_date:
+        header += f"# Filtered to transactions dated on or before {curr_date}\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
-    except Exception as e:
-        return f"Error retrieving insider transactions for {ticker}: {str(e)}"
+    return header + csv_string

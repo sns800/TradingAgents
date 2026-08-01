@@ -233,16 +233,26 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     return data
 
 
-def filter_financials_by_date(data: pd.DataFrame, curr_date: str) -> pd.DataFrame:
-    """curr_date 이후의 재무제표 컬럼(회계 기간 타임스탬프)을 제거한다.
+# 재무제표 공시 지연(disclosure lag)의 보수적 근사치(달력일). 회계 기간
+# 종료일(fiscal period end)은 실제 공시일보다 항상 앞섭니다: 미국 SEC 규정상
+# 분기 보고서(10-Q)는 분기 종료 후 40~45일, 연차 보고서(10-K)는 60~90일
+# 이내에 제출됩니다. 종료일만으로 컷오프하면 "실적 발표 전에 실적을 아는"
+# 룩어헤드가 생기므로, 10-Q 최대 제출 기한에 해당하는 45일을 종료일에 더한
+# 시점부터 해당 보고서를 볼 수 있는 것으로 간주합니다.
+FINANCIALS_DISCLOSURE_LAG_DAYS = 45
 
-    yfinance 재무제표는 회계 기간 종료일을 컬럼으로 씁니다. curr_date
-    이후의 컬럼은 미래 데이터를 나타내므로 선견 편향(look-ahead bias)을
-    막기 위해 제거합니다.
+
+def filter_financials_by_date(data: pd.DataFrame, curr_date: str) -> pd.DataFrame:
+    """curr_date 시점에 아직 공시되지 않았을 재무제표 컬럼을 제거한다.
+
+    yfinance 재무제표는 회계 기간 종료일을 컬럼으로 씁니다. 종료일이
+    curr_date 이후인 컬럼은 물론, 종료일 + 공시 지연(45일)이 curr_date보다
+    늦은 컬럼도 "그 시점엔 아직 발표되지 않은 실적"이므로 선견 편향
+    (look-ahead bias)을 막기 위해 함께 제거합니다.
     """
     if not curr_date or data.empty:
         return data
-    cutoff = pd.Timestamp(curr_date)
+    cutoff = pd.Timestamp(curr_date) - pd.Timedelta(days=FINANCIALS_DISCLOSURE_LAG_DAYS)
     mask = pd.to_datetime(data.columns, errors="coerce") <= cutoff
     return data.loc[:, mask]
 

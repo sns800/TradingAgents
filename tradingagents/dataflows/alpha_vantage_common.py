@@ -15,7 +15,12 @@ from io import StringIO
 import pandas as pd
 import requests
 
-from .errors import VendorNotConfiguredError, VendorRateLimitError
+from .errors import (
+    NoMarketDataError,
+    VendorError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
 
 API_BASE_URL = "https://www.alphavantage.co/query"
 
@@ -104,6 +109,22 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
     except json.JSONDecodeError:
         return response_text
 
+    if not isinstance(response_json, dict):
+        return response_text
+
+    # fail-closed: "Error Message"는 잘못된 심볼/함수 호출을 뜻하는 Alpha
+    # Vantage의 오류 응답이다. 예전에는 이 JSON이 정상 데이터처럼 통과해
+    # LLM 컨텍스트로 흘러갔다. 타입 있는 "데이터 없음" 오류로 바꿔 라우터가
+    # 폴백/센티널 처리를 하게 한다.
+    error_message = response_json.get("Error Message")
+    if error_message:
+        symbol_hint = str(
+            params.get("symbol") or params.get("tickers") or function_name
+        )
+        raise NoMarketDataError(
+            symbol_hint, detail=f"Alpha Vantage error: {error_message}"
+        )
+
     # Alpha Vantage는 문제를 "Information" / "Note" 필드로 알려준다. 진짜 요청 한도
     # 초과(rate limit)와 잘못된/누락된 API 키가 뒤섞이지 않도록 분류한다 (#991):
     # 한도 초과 안내문에도 "API key"라는 문구가 등장하기 때문에("your API key ...
@@ -118,6 +139,13 @@ def _make_api_request(function_name: str, params: dict) -> dict | str:
             # 요청 한도 초과로 잘못 표시되는 대신 실제로 조치 가능한 실패로
             # 드러나게 한다 (#991).
             raise AlphaVantageNotConfiguredError(f"Alpha Vantage API key invalid or missing: {notice}")
+        # fail-closed: 위 분류에 걸리지 않은 공지(notice)라도, 실제 데이터 키가
+        # 하나도 없는 응답이라면 정상 데이터처럼 통과시키지 않는다 — 공지
+        # 본문이 LLM 컨텍스트에 데이터로 유입되는 것을 막는다.
+        if not (set(response_json) - {"Information", "Note"}):
+            raise VendorError(
+                f"Alpha Vantage returned a notice instead of data: {notice}"
+            )
 
     return response_text
 
@@ -161,6 +189,10 @@ def _filter_csv_by_date_range(csv_data: str, start_date: str, end_date: str) -> 
         return filtered_df.to_csv(index=False)
 
     except Exception as e:
-        # 필터링에 실패하면 경고를 출력하고 원본 데이터를 그대로 반환한다
-        print(f"Warning: Failed to filter CSV data by date range: {e}")
-        return csv_data
+        # fail-closed: 예전에는 필터 실패 시 원본을 그대로 반환했는데, 그러면
+        # 미래 행(look-ahead)이 걸러지지 않은 채 통과합니다. 필터를 적용할 수
+        # 없는 데이터는 사용하지 않고 예외를 던져 라우터가 처리하게 합니다.
+        raise VendorError(
+            f"Failed to apply date-range filter ({start_date}..{end_date}) "
+            f"to Alpha Vantage CSV data: {e}"
+        ) from e

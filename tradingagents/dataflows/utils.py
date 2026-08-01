@@ -15,6 +15,40 @@ import pandas as pd
 
 SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
 
+# 스냅샷(snapshot) 데이터 소스 경고의 유예 일수. 펀더멘털 개요·소셜 감성처럼
+# "현재 시점" 값만 제공하는 소스는 과거 curr_date로 시점 조회가 불가능하므로,
+# curr_date가 오늘로부터 이 일수보다 오래됐으면 백테스트 실행으로 간주해
+# 결과 앞에 경고 배너를 붙입니다. 주말·휴일을 넘길 만큼만 관대한 값입니다.
+SNAPSHOT_GRACE_DAYS = 3
+
+
+def is_historical_run(curr_date, *, grace_days: int = SNAPSHOT_GRACE_DAYS) -> bool:
+    """``curr_date`` 가 과거(오늘 - grace_days 이전) 날짜인지 여부를 반환한다.
+
+    ``curr_date`` 가 None이거나 파싱할 수 없으면 False를 반환합니다 —
+    이 헬퍼는 경고 배너 부착 여부만 결정하며, 데이터 차단에는 쓰이지 않습니다.
+    """
+    if not curr_date:
+        return False
+    try:
+        target = datetime.strptime(str(curr_date), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return False
+    return target < date.today() - timedelta(days=grace_days)
+
+
+def snapshot_warning_banner(curr_date, data_label: str) -> str:
+    """과거 ``curr_date`` 실행에서 '현재 시점 스냅샷' 데이터 앞에 붙일 경고 배너.
+
+    데이터 소스가 시점(point-in-time) 조회를 지원하지 않아 차단 대신 경고로
+    완화하는 경우에 사용합니다. 배너는 LLM 컨텍스트에 그대로 들어가므로,
+    에이전트가 이 데이터를 curr_date 시점 값으로 오해하지 않게 합니다.
+    """
+    return (
+        f"⚠️ 이 {data_label} 데이터는 현재 시점 스냅샷이며 {curr_date} 시점 값이 "
+        "아님 — 백테스트 결과 해석에 주의\n\n"
+    )
+
 # 티커에는 영문자, 숫자, 점(.), 대시(-), 밑줄(_), 캐럿(^)
 # (지수 심볼 예: ^GSPC), 등호(=)(선물 예: GC=F), 플러스(+)
 # (외환/CFD 심볼 예: XAUUSD+)가 올 수 있습니다. 이 문자들은 디렉터리
