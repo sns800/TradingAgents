@@ -11,6 +11,8 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from tradingagents.dataflows.errors import NoMarketDataError
+from tradingagents.dataflows.interface import NO_DATA_SENTINEL_PREFIX
 from tradingagents.dataflows.market_data_validator import build_verified_market_snapshot
 
 
@@ -34,4 +36,18 @@ def get_verified_market_snapshot(
     price levels, Bollinger bands, RSI, MACD, moving averages, support /
     resistance, or historical comparisons, and treat it as the source of truth.
     """
-    return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    # [한국어 설명] 데이터 부재 시 크래시 대신 우아한 실패(설계분석 중기 로드맵 #4):
+    # 스냅샷 빌더는 OHLCV가 전혀 없으면 ValueError(_verified_rows) 또는
+    # NoMarketDataError(load_ohlcv의 빈 다운로드)를 던지는데, 이를 그대로 두면
+    # 도구 호출이 하드 크래시로 이어집니다. 대신 벤더 라우터와 동일한
+    # NO_DATA_AVAILABLE 센티널 텍스트를 반환해, (1) LLM은 데이터 부재를 보고하고
+    # (2) 결정론적 게이트(market_data_ok 플래그)가 센티널을 감지할 수 있게 합니다.
+    try:
+        return build_verified_market_snapshot(symbol, curr_date, look_back_days)
+    except (NoMarketDataError, ValueError) as exc:
+        return (
+            f"{NO_DATA_SENTINEL_PREFIX}: Could not build a verified market "
+            f"snapshot for '{symbol}' on {curr_date} ({exc}). No usable OHLCV "
+            "data is available for this symbol. Do not estimate or fabricate "
+            "values — report that data is unavailable."
+        )

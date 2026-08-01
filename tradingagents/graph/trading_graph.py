@@ -520,15 +520,26 @@ class TradingAgentsGraph:
 
         # 다음번 같은 티커 실행 때 수행할 지연 리플렉션(deferred reflection)을
         # 위해 이번 결정을 저장.
-        self.memory_log.store_decision(
-            ticker=company_name,
-            trade_date=trade_date,
-            final_trade_decision=final_state["final_trade_decision"],
-            asset_type=asset_type,
-            # 당시 리서치 매니저의 투자 계획 앞부분(PLAN: 섹션)을 함께 저장해,
-            # Phase B 반성이 결정의 근거를 보고 복기할 수 있게 한다.
-            investment_plan=final_state.get("investment_plan", ""),
-        )
+        # 단, NO_DATA 결정론적 게이트(중기 로드맵 #4)가 강제한 Hold는 데이터
+        # 부재의 산물이지 판단의 산물이 아니므로 학습할 가치가 없다 — 저장하면
+        # 무의미한 Hold 항목이 메모리 로그를 오염시키고 이후 실행의
+        # past_context에 노이즈로 주입되므로 건너뛴다.
+        if final_state.get("market_data_ok", True):
+            self.memory_log.store_decision(
+                ticker=company_name,
+                trade_date=trade_date,
+                final_trade_decision=final_state["final_trade_decision"],
+                asset_type=asset_type,
+                # 당시 리서치 매니저의 투자 계획 앞부분(PLAN: 섹션)을 함께 저장해,
+                # Phase B 반성이 결정의 근거를 보고 복기할 수 있게 한다.
+                investment_plan=final_state.get("investment_plan", ""),
+            )
+        else:
+            logger.info(
+                "Skipping memory log for %s on %s: deterministic Hold forced by "
+                "missing market data (nothing to learn).",
+                company_name, trade_date,
+            )
 
         # 성공적으로 완료되면 체크포인트를 지워 오래된 상태가 남지 않게 한다.
         if self.config.get("checkpoint_enabled"):

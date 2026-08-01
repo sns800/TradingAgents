@@ -77,6 +77,11 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
+            # NO_DATA 결정론적 게이트(중기 로드맵 #4)의 기계 판독 플래그.
+            # 낙관적 기본값 True로 시작하고, 시장 분석가가 도구 결과에서
+            # NO_DATA 센티널을 감지하면 False로 내립니다. 시장 분석가가
+            # 선택되지 않은 실행에서는 True로 남아 기존 흐름을 유지합니다.
+            "market_data_ok": True,
         }
 
     def get_graph_args(self, callbacks: list | None = None) -> dict[str, Any]:

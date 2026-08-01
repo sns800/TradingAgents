@@ -42,6 +42,25 @@ from .yfinance_news import get_global_news_yfinance, get_news_yfinance
 
 logger = logging.getLogger(__name__)
 
+# NO_DATA 센티널의 기계 판독용 접두사. route_to_vendor()가 "설정된 모든 벤더에
+# 데이터 없음"을 확인했을 때 반환하는 센티널 문자열이 이 접두사로 시작합니다.
+# 결정론적 게이트(설계분석 중기 로드맵 #4)가 LLM 판단 없이 이 문자열 검사만으로
+# 데이터 부재를 감지합니다: 시장 분석가가 도구 결과에서 센티널을 발견하면
+# 상태의 market_data_ok 플래그를 False로 내리고, 포트폴리오 매니저는 LLM 호출
+# 없이 강제 Hold로 분기합니다.
+NO_DATA_SENTINEL_PREFIX = "NO_DATA_AVAILABLE"
+
+
+def is_no_data_sentinel(text) -> bool:
+    """도구 결과 텍스트에 NO_DATA 센티널이 들어 있는지 결정론적으로 검사한다.
+
+    프롬프트 순응("데이터 없이 값을 지어내지 마라")은 확률적 방어일 뿐이므로,
+    자금이 걸린 결정은 이 문자열 검사 같은 결정론적 로직으로 게이트합니다.
+    선택적 부가 데이터(뉴스·매크로 등)가 쓰는 "DATA_UNAVAILABLE" 완화 센티널은
+    핵심 데이터 부재가 아니므로 여기 매칭되지 않습니다.
+    """
+    return isinstance(text, str) and NO_DATA_SENTINEL_PREFIX in text
+
 # 카테고리별로 정리한 도구 목록
 TOOLS_CATEGORIES = {
     "core_stock_apis": {
@@ -252,7 +271,7 @@ def route_to_vendor(method: str, *args, **kwargs):
         # 잘못된 심볼, 커버리지 없음, 오래된(stale) 데이터 — 를 보게 합니다.
         reason = f" ({last_no_data.detail})" if last_no_data.detail else ""
         return (
-            f"NO_DATA_AVAILABLE: No usable market data for '{sym}'{resolved} from "
+            f"{NO_DATA_SENTINEL_PREFIX}: No usable market data for '{sym}'{resolved} from "
             f"any configured vendor{reason}. The symbol may be invalid, delisted, "
             f"not covered, or the vendor returned stale data. Do not estimate or "
             f"fabricate values — report that data is unavailable for this symbol."

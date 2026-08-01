@@ -73,6 +73,17 @@ class AgentState(MessagesState):
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
 
+    # NO_DATA 결정론적 게이트(설계분석 중기 로드맵 #4)용 기계 판독 플래그.
+    # 시장 분석가 노드가 자신의 도구 결과(ToolMessage)에서 NO_DATA 센티널을
+    # 발견하면 False로 기록하고, 포트폴리오 매니저는 LLM 호출 전에 이 값을
+    # 검사해 핵심 시장 데이터 부재 시 결정론적으로 Hold를 강제합니다.
+    # LLM 판단이 아니라 센티널 문자열 검사로만 설정됩니다.
+    market_data_ok: Annotated[
+        bool,
+        "Deterministic flag: False when the market analyst's tool results "
+        "contained a NO_DATA sentinel (core market data unavailable)",
+    ]
+
     # 리서처 팀 토론 단계 — 투자 여부 토론 상태와 결과 계획
     investment_debate_state: Annotated[
         InvestDebateState, "Current state of the debate on if to invest or not"

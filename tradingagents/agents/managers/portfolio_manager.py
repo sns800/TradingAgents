@@ -32,6 +32,26 @@ from tradingagents.agents.utils.structured import (
     invoke_structured_or_freetext,
 )
 
+# [NO_DATA 결정론적 게이트 — 설계분석 중기 로드맵 #4]
+# 핵심 시장 데이터가 없을 때(market_data_ok=False) LLM 호출 없이 기록되는
+# 강제 Hold 결정문. "데이터 없이 매수하지 마라"는 프롬프트 순응은 확률적
+# 방어일 뿐이므로, 자금이 걸린 결정은 여기서 결정론적으로 차단합니다.
+# 렌더링 형식은 구조화 출력 렌더러(render_pm_decision)와 동일한
+# "**Rating**:" 헤더를 유지해, 시그널 파서(parse_rating)·CLI·보고서 저장기가
+# 정상 경로와 같은 방식으로 소비할 수 있게 합니다. (하류 소비자용 영어 유지)
+FORCED_HOLD_REASON = "Insufficient market data - deterministic hold"
+FORCED_HOLD_DECISION = (
+    "**Rating**: Hold\n\n"
+    f"**Executive Summary**: {FORCED_HOLD_REASON}. Core market data for this "
+    "instrument could not be retrieved from any configured vendor (a NO_DATA "
+    "sentinel was detected in the market analyst's tool results), so this Hold "
+    "was issued deterministically without invoking the LLM judge.\n\n"
+    "**Investment Thesis**: A money-at-risk decision requires verified market "
+    "data. Because no usable market data was available, taking no action is "
+    "the only defensible position. Re-run the analysis once market data "
+    "becomes available for this symbol."
+)
+
 
 def create_portfolio_manager(llm):
     # 구조화 출력 바인딩: LLM이 PortfolioDecision 스키마 형태로 응답하도록 감쌉니다.
@@ -40,6 +60,24 @@ def create_portfolio_manager(llm):
     # LangGraph 노드 함수: 상태(state) 딕셔너리를 입력받아
     # 갱신할 키들만 담은 딕셔너리를 반환합니다.
     def portfolio_manager_node(state) -> dict:
+        # [NO_DATA 결정론적 게이트 — 중기 로드맵 #4] LLM 호출 전 최상단 가드:
+        # 시장 분석가가 도구 결과의 NO_DATA 센티널을 감지해 내린 기계 판독
+        # 플래그(market_data_ok=False)가 있으면, LLM 판정 없이 결정론적으로
+        # Hold를 확정합니다. 조건부 엣지 추가 대신 노드 내부 가드를 택해
+        # 그래프 흐름(setup.py)을 바꾸지 않습니다. 플래그가 없는 상태
+        # (구형 체크포인트, 시장 분석가 미선택, 테스트 최소 상태)는 기본값
+        # True로 기존 동작을 유지합니다.
+        if not state.get("market_data_ok", True):
+            risk_debate_state = state["risk_debate_state"]
+            return {
+                "risk_debate_state": {
+                    **risk_debate_state,
+                    "judge_decision": FORCED_HOLD_DECISION,
+                    "latest_speaker": "Judge",
+                },
+                "final_trade_decision": FORCED_HOLD_DECISION,
+            }
+
         instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
 
         # 상태에서 리스크 토론 이력과 상위 단계 산출물들을 꺼냅니다.
