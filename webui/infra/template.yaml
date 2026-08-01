@@ -140,6 +140,14 @@ Resources:
               - Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub "${DataBucket.Arn}/runs/*"
+              # 종목 카탈로그 배치: catalog/* 쓰기 + 읽기
+              # (GetObject는 meta.json 부분 병합 갱신에 필요 - 실패한 시장의
+              #  기존 항목을 보존하려면 기존 meta를 읽어야 한다)
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "${DataBucket.Arn}/catalog/*"
 
   WorkerTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -172,6 +180,63 @@ Resources:
               awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: worker
 
+  # ---------- 종목 카탈로그 배치 스케줄 ----------
+  # 평일 22:00 KST(= 13:00 UTC)에 기존 워커 태스크 정의를 containerOverrides로
+  # 실행해 한국·일본·미국 상장 종목 카탈로그를 수집, S3 catalog/*에 저장한다.
+  # (한국 장 마감 후 + 미국 장 시작 전 시간대. 명령만 교체하므로 워커 이미지·
+  #  환경변수를 그대로 재사용하며, RUN_ID 없이 동작하는 build_catalog.py를 띄운다)
+  CatalogScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-catalog-task
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # 최소권한: 이 클러스터에서 워커 태스크 정의만 실행 가능
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref WorkerTaskDefinition
+                Condition:
+                  ArnEquals: { "ecs:cluster": !GetAtt EcsCluster.Arn }
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt TaskRole.Arn
+                  - !GetAtt TaskExecutionRole.Arn
+                Condition:
+                  StringEquals: { "iam:PassedToService": ecs-tasks.amazonaws.com }
+
+  CatalogScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: tradingagents-webui-catalog-daily
+      Description: "종목 카탈로그 일일 수집 - 평일 22:00 KST (13:00 UTC)"
+      ScheduleExpression: cron(0 13 ? * MON-FRI *)
+      State: ENABLED
+      Targets:
+        - Id: catalog-worker
+          Arn: !GetAtt EcsCluster.Arn
+          RoleArn: !GetAtt CatalogScheduleRole.Arn
+          EcsParameters:
+            TaskDefinitionArn: !Ref WorkerTaskDefinition
+            TaskCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                # 퍼블릭 서브넷 + 아웃바운드 전용 SG (api_handler의 RunTask와 동일 구성)
+                AssignPublicIp: ENABLED
+                SecurityGroups: [!Ref WorkerSecurityGroup]
+                Subnets: !Ref SubnetIds
+          Input: |
+            {"containerOverrides": [{"name": "worker", "command": ["python", "webui/catalog/build_catalog.py"]}]}
+
   # ---------- Lambda API ----------
   ApiLambdaRole:
     Type: AWS::IAM::Role
@@ -199,6 +264,10 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "${DataBucket.Arn}/runs/*"
+              # 종목 카탈로그 조회 API: 배치가 쓴 catalog/* 읽기
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${DataBucket.Arn}/catalog/*"
               - Effect: Allow
                 Action: ecs:RunTask
                 Resource: !Ref WorkerTaskDefinition

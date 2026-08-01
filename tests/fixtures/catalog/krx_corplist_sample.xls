@@ -1,0 +1,92 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=euc-kr" />
+<title>상장법인목록(EXCEL)</title>
+</head>
+<body>
+	<table cellpadding="0" cellspacing="1" class="bbs_tb" border="1">
+	
+<tr>
+		<th bgcolor="#66FF99" >회사명</th>
+		<th bgcolor="#66FF99" >시장구분</th>
+		<th bgcolor="#66FF99" >종목코드</th>
+		<th bgcolor="#66FF99" >업종</th>
+		<th bgcolor="#66FF99" >주요제품</th>
+		<th bgcolor="#66FF99" >상장일</th>
+		<th bgcolor="#66FF99" >결산월</th>
+		<th bgcolor="#66FF99" >대표자명</th>
+		<th bgcolor="#66FF99" >홈페이지</th>
+		<th bgcolor="#66FF99" >지역</th>
+	</tr>
+<tr>
+		<td>삼성전자</td>
+		<td>
+			
+				
+					유가
+				
+					
+					
+						
+			
+		</td>
+		<td style="mso-number-format:'@';text-align:center;">005930</td>
+		<td>통신 및 방송 장비 제조업</td>
+		<td>통신 및 방송 장비 제조(무선) 제품, 반도체 제조(메모리) 제품,  전자부품 제조(디스플레이) 제품, 영상 및 음향기기 제조(영상기기) 제품 등</td>
+		<td style="text-align:center;">1975-06-11</td>
+		<td style="text-align:center;">12월</td>
+		<td>전영현, 노태문</td>
+		<td>
+			http://www.samsung.com/sec
+		</td>
+		<td >경기도</td>
+	</tr>
+<tr>
+		<td>네오뷰</td>
+		<td>
+			
+				
+						
+					코스닥
+					
+					
+						
+			
+		</td>
+		<td style="mso-number-format:'@';text-align:center;">0218L0</td>
+		<td>영상 및 음향기기 제조업</td>
+		<td>카지노 모니터, 자동차 전장 모니터</td>
+		<td style="text-align:center;">2026-07-27</td>
+		<td style="text-align:center;">12월</td>
+		<td>하희조</td>
+		<td>
+			http://www.neovue.com
+		</td>
+		<td >경기도</td>
+	</tr>
+<tr>
+		<td>나노솔루션</td>
+		<td>
+			
+				
+					
+						
+					코넥스
+					
+						
+			
+		</td>
+		<td style="mso-number-format:'@';text-align:center;">238540</td>
+		<td>기타 화학제품 제조업</td>
+		<td>SWCNT, SAHD30</td>
+		<td style="text-align:center;">2026-07-28</td>
+		<td style="text-align:center;">12월</td>
+		<td>김형열</td>
+		<td>
+			
+		</td>
+		<td >전북특별자치도</td>
+	</tr>
+	</table>
+</body>
+</html>

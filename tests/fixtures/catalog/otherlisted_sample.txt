@@ -1,0 +1,10 @@
+ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+A|Agilent Technologies, Inc. Common Stock|N|A|N|100|N|A
+ABR$D|Arbor Realty Trust 6.375% Series D Cumulative Redeemable Preferred Stock, Liquidation Preference $25.00 per Share|N|ABRpD|N|100|N|ABR-D
+ATEST|Tick Pilot Test Control Common Stock|A|ATEST|N|100|Y|ATEST
+BRK.A|Berkshire Hathaway Inc. Common Stock|N|BRK.A|N|1|N|BRK.A
+BRK.B|Berkshire Hathaway Inc. New Common Stock|N|BRK.B|N|40|N|BRK.B
+BRKC|YieldMax BRK.B Option Income Strategy ETF|P|BRKC|Y|100|N|BRKC
+IBM|International Business Machines Corporation Common Stock|N|IBM|N|100|N|IBM
+SPY|State Street SPDR S&P 500 ETF Trust|P|SPY|Y|40|N|SPY
+File Creation Time: 0731202621:31||||||
