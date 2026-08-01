@@ -189,7 +189,13 @@ class TestFirstSpeakerConfig:
         ("bear", "Bear Researcher"),
     ])
     def test_graph_entry_edge_follows_first_speaker(self, first, entry_node):
-        """마지막 애널리스트의 Msg Clear 노드가 설정된 선발언자로 연결되는지 검증."""
+        """애널리스트 합류 노드가 설정된 선발언자로 연결되는지 검증.
+
+        분석가 병렬화(중기 로드맵 #6)로 토론 진입점이 "마지막 애널리스트의
+        Msg Clear 노드"에서 병렬 분기의 합류 배리어(Analyst Join)로 바뀌었다.
+        선발언자 설정이 진입 엣지를 결정한다는 계약은 동일하다.
+        """
+        from tradingagents.graph.analyst_execution import ANALYST_JOIN_NODE
         from tradingagents.graph.setup import GraphSetup
 
         logic = ConditionalLogic(debate_first_speaker=first)
@@ -201,7 +207,7 @@ class TestFirstSpeakerConfig:
         )
         workflow = setup.setup_graph(selected_analysts=("market",))
         # StateGraph.edges는 (시작, 끝) 튜플 집합 — 진입 엣지 존재를 확인한다.
-        assert ("Msg Clear Market", entry_node) in workflow.edges
+        assert (ANALYST_JOIN_NODE, entry_node) in workflow.edges
 
     def test_default_config_defaults_to_bull(self, monkeypatch):
         """DEFAULT_CONFIG 기본값이 기존 동작인 "bull"인지 검증하는 테스트."""

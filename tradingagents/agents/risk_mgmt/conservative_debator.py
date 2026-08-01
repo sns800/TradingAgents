@@ -32,6 +32,11 @@ def create_conservative_debator(llm):
         condensed_history = condense_debate_history(history)
         conservative_history = risk_debate_state.get("conservative_history", "")
 
+        # 리서처 토론과 달리 이 두 주입은 중기 로드맵 #6(이중 주입 제거)에서
+        # 의도적으로 유지합니다: 압축 이력(condense_debate_history)에는 직전
+        # 발언 하나만 전문으로 남고 그 이전 발언(다른 한 상대의 최신 발언)은
+        # 300자로 절단되므로, 3자 토론에서 두 상대의 최신 발언 전문 주입은
+        # 순수한 중복이 아닙니다.
         # 반박 대상인 다른 두 애널리스트(공격적/중립적)의 최근 발언입니다.
         current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")

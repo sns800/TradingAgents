@@ -49,11 +49,11 @@ from cli.utils import (
     select_research_depth,
     select_shallow_thinking_agent,
 )
+from tradingagents.agents.utils.agent_states import ALL_MESSAGE_CHANNELS
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.analyst_execution import (
     AnalystWallTimeTracker,
     build_analyst_execution_plan,
-    get_initial_analyst_node,
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -871,12 +871,13 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     - 현재 청크(chunk)에 새 보고서 내용이 있으면 저장
     - 상태 판정은 현재 청크가 아니라 누적된 report_sections를 기준으로 함
     - 보고서가 있는 애널리스트 = completed
-    - 보고서가 없는 첫 번째 애널리스트 = in_progress
-    - 나머지 보고서 없는 애널리스트 = pending
+    - 보고서가 없는 애널리스트 = 전부 in_progress — 분석가 병렬화(설계분석
+      중기 로드맵 #6)로 선택된 애널리스트 전원이 START에서 동시에 시작하므로,
+      예전의 "첫 번째만 실행 중, 나머지는 pending"이라는 직렬 가정을 버린다
     - 모든 애널리스트가 끝나면 Bull Researcher를 in_progress로 전환
     """
     selected = message_buffer.selected_analysts
-    found_active = False
+    any_in_progress = False
 
     if wall_time_tracker is not None:
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
@@ -897,15 +898,13 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
 
         if has_report:
             message_buffer.update_agent_status(agent_name, "completed")
-        elif not found_active:
-            message_buffer.update_agent_status(agent_name, "in_progress")
-            found_active = True
         else:
-            message_buffer.update_agent_status(agent_name, "pending")
+            message_buffer.update_agent_status(agent_name, "in_progress")
+            any_in_progress = True
 
     # 모든 애널리스트가 완료되면 리서치 팀을 in_progress로 전환
     if (
-        not found_active
+        not any_in_progress
         and selected
         and message_buffer.agent_status.get("Bull Researcher") == "pending"
     ):
@@ -1118,10 +1117,12 @@ def run_analysis(checkpoint: bool | None = None):
         )
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-        # 첫 번째 애널리스트의 상태를 in_progress로 갱신
-        first_analyst = get_initial_analyst_node(analyst_execution_plan)
-        message_buffer.update_agent_status(first_analyst, "in_progress")
-        analyst_wall_time_tracker.mark_started(selected_analyst_keys[0])
+        # 선택된 애널리스트 전원의 상태를 in_progress로 갱신 — 분석가 병렬화
+        # (설계분석 중기 로드맵 #6) 이후 모두 START에서 동시에 시작하므로,
+        # 예전처럼 첫 번째 한 명만 실행 중으로 표시하지 않습니다.
+        for spec in analyst_execution_plan.specs:
+            message_buffer.update_agent_status(spec.agent_node, "in_progress")
+            analyst_wall_time_tracker.mark_started(spec.key)
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # 스피너(spinner) 텍스트 생성
@@ -1152,24 +1153,27 @@ def run_analysis(checkpoint: bool | None = None):
         # 내보내며, 아래 루프는 청크마다 메시지/상태/화면을 갱신한다.
         trace = []
         for chunk in graph.graph.stream(init_agent_state, **args):
-            # 청크의 모든 메시지를 처리하되, 메시지 ID로 중복 제거
-            for message in chunk.get("messages", []):
-                msg_id = getattr(message, "id", None)
-                if msg_id is not None:
-                    if msg_id in message_buffer._processed_message_ids:
-                        continue
-                    message_buffer._processed_message_ids.add(msg_id)
+            # 모든 메시지 채널(공유 messages + 분석가별 전용 채널, 중기 로드맵
+            # #6)의 메시지를 처리하되, 메시지 ID로 중복 제거. 병렬 실행에서는
+            # 한 청크에 여러 애널리스트의 새 메시지가 동시에 담길 수 있다.
+            for channel in ALL_MESSAGE_CHANNELS:
+                for message in chunk.get(channel) or []:
+                    msg_id = getattr(message, "id", None)
+                    if msg_id is not None:
+                        if msg_id in message_buffer._processed_message_ids:
+                            continue
+                        message_buffer._processed_message_ids.add(msg_id)
 
-                msg_type, content = classify_message_type(message)
-                if content and content.strip():
-                    message_buffer.add_message(msg_type, content)
+                    msg_type, content = classify_message_type(message)
+                    if content and content.strip():
+                        message_buffer.add_message(msg_type, content)
 
-                if hasattr(message, "tool_calls") and message.tool_calls:
-                    for tool_call in message.tool_calls:
-                        if isinstance(tool_call, dict):
-                            message_buffer.add_tool_call(tool_call["name"], tool_call["args"])
-                        else:
-                            message_buffer.add_tool_call(tool_call.name, tool_call.args)
+                    if hasattr(message, "tool_calls") and message.tool_calls:
+                        for tool_call in message.tool_calls:
+                            if isinstance(tool_call, dict):
+                                message_buffer.add_tool_call(tool_call["name"], tool_call["args"])
+                            else:
+                                message_buffer.add_tool_call(tool_call.name, tool_call.args)
 
             # 보고서 상태 기준으로 애널리스트 상태 갱신 (모든 청크마다 실행)
             update_analyst_statuses(

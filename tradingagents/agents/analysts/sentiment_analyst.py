@@ -125,7 +125,9 @@ def create_sentiment_analyst(llm):
         # 템플릿을 구체적인 메시지 리스트로 포맷하여 구조화 경로와 자유 텍스트
         # 경로가 동일한 입력을 받도록 합니다. bind_tools는 사용하지 않습니다 —
         # 데이터가 이미 프롬프트 안에 있기 때문입니다.
-        formatted_messages = prompt.format_messages(messages=state["messages"])
+        # 전용 채널(social_messages)만 읽습니다 — 분석가 병렬화(중기 로드맵
+        # #6)로 다른 분석가의 대화와 섞이지 않습니다.
+        formatted_messages = prompt.format_messages(messages=state["social_messages"])
 
         # 구조화 출력을 우선 시도하고, 실패하면 자유 텍스트로 대체(fallback)합니다.
         report_text = invoke_structured_or_freetext(
@@ -136,10 +138,11 @@ def create_sentiment_analyst(llm):
             "Sentiment Analyst",
         )
 
-        # 상태(state) 갱신: 대화 메시지에 결과를 추가하고,
+        # 상태(state) 갱신: 전용 채널에 결과를 추가하고,
         # 완성된 보고서를 "sentiment_report" 키에 저장해 후속 단계에서 사용하게 합니다.
+        # (도구 호출이 없는 AIMessage이므로 라우터가 곧바로 합류 노드로 보냅니다.)
         return {
-            "messages": [AIMessage(content=report_text)],
+            "social_messages": [AIMessage(content=report_text)],
             "sentiment_report": report_text,
         }
 

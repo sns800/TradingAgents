@@ -23,12 +23,13 @@ from .risk_mgmt.aggressive_debator import create_aggressive_debator
 from .risk_mgmt.conservative_debator import create_conservative_debator
 from .risk_mgmt.neutral_debator import create_neutral_debator
 from .trader.trader import create_trader
+
+# create_msg_delete는 분석가 병렬화(중기 로드맵 #6)로 Msg Clear 노드가
+# 제거되면서 함께 삭제됐습니다 (agent_utils.py 참고).
 from .utils.agent_states import AgentState, InvestDebateState, RiskDebateState
-from .utils.agent_utils import create_msg_delete
 
 __all__ = [
     "AgentState",
-    "create_msg_delete",
     "InvestDebateState",
     "RiskDebateState",
     "create_bear_researcher",

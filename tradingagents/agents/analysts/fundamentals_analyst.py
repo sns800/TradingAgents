@@ -83,8 +83,9 @@ def create_fundamentals_analyst(llm):
         # 프롬프트와 파이프(|)로 이어 하나의 실행 체인(chain)을 만듭니다.
         chain = prompt | llm.bind_tools(tools)
 
-        # 지금까지 쌓인 대화 메시지(state["messages"])를 넣어 LLM을 실행합니다.
-        result = chain.invoke(state["messages"])
+        # 전용 채널(fundamentals_messages)에 쌓인 대화만 넣어 LLM을 실행합니다.
+        # 분석가 병렬화(중기 로드맵 #6)로 다른 분석가의 대화와 섞이지 않습니다.
+        result = chain.invoke(state["fundamentals_messages"])
 
         report = ""
 
@@ -93,10 +94,10 @@ def create_fundamentals_analyst(llm):
         if len(result.tool_calls) == 0:
             report = result.content
 
-        # 상태(state) 갱신: 대화 메시지에 결과를 추가하고,
+        # 상태(state) 갱신: 전용 채널에 결과를 추가하고,
         # 완성된 보고서를 "fundamentals_report" 키에 저장해 후속 단계에서 사용하게 합니다.
         return {
-            "messages": [result],
+            "fundamentals_messages": [result],
             "fundamentals_report": report,
         }
 

@@ -381,7 +381,8 @@ def _make_sentiment_state():
         "company_of_interest": "NVDA",
         "trade_date": "2026-01-15",
         "asset_type": "stock",
-        "messages": [],
+        # 감성 분석가는 병렬화(중기 로드맵 #6) 이후 전용 채널만 읽는다.
+        "social_messages": [],
     }
 
 
@@ -419,12 +420,17 @@ class TestSentimentAnalystAgent:
         assert "Mixed signals across sources." in sr
 
     def test_sentiment_report_also_in_messages(self):
-        """감성 보고서가 messages에도 동일하게 포함되는지 검증하는 테스트."""
+        """감성 보고서가 전용 메시지 채널에도 동일하게 포함되는지 검증하는 테스트.
+
+        병렬화(중기 #6) 이후 감성 분석가는 공유 messages가 아니라 전용
+        채널(social_messages)에 결과를 기록한다 — 라우터가 이 마지막
+        메시지를 보고 합류 노드로 보낸다.
+        """
         captured = {}
         analyst = create_sentiment_analyst(_structured_sentiment_llm(captured))
         result = analyst(_make_sentiment_state())
-        assert len(result["messages"]) == 1
-        assert result["sentiment_report"] == result["messages"][0].content
+        assert len(result["social_messages"]) == 1
+        assert result["sentiment_report"] == result["social_messages"][0].content
 
     def test_prompt_contains_ticker(self):
         """프롬프트에 대상 티커(NVDA)가 포함되는지 검증하는 테스트."""

@@ -138,12 +138,15 @@ class _ReportOnlyLLM:
 
 
 def _analyst_state(tool_content: str, asset_type: str = "stock") -> dict:
+    # 시장 분석가는 병렬화(중기 로드맵 #6) 이후 공유 messages 채널이 아니라
+    # 전용 채널(market_messages)만 읽으므로, 테스트 상태도 그 채널에 도구
+    # 결과를 담는다.
     return {
         "trade_date": "2026-01-01",
         "company_of_interest": "FAKE",
         "asset_type": asset_type,
         "instrument_context": "Instrument: FAKE",
-        "messages": [
+        "market_messages": [
             HumanMessage(content="FAKE"),
             AIMessage(
                 content="",

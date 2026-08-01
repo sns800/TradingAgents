@@ -11,6 +11,8 @@
 
 from tradingagents.agents.utils.agent_states import AgentState
 
+from .analyst_execution import ANALYST_JOIN_NODE
+
 
 class ConditionalLogic:
     """그래프 흐름을 결정하는 조건부 로직을 담당하는 클래스."""
@@ -47,47 +49,52 @@ class ConditionalLogic:
             )
         self.debate_first_speaker = normalized_first_speaker
 
+    # ------------------------------------------------------------------
+    # 애널리스트 도구 루프 라우터 (중기 로드맵 #6 — 분석가 병렬화).
+    # 각 라우터는 해당 애널리스트의 "전용" 메시지 채널만 검사합니다.
+    # 예전에는 4종이 공유 messages 채널을 봤기 때문에 병렬 실행 시 다른
+    # 애널리스트의 도구 호출을 자기 것으로 오인할 수 있어 직렬 실행이
+    # 강제됐습니다. 분석이 끝나면(도구 호출 없음) 합류 노드(Analyst Join)로
+    # 보내고, 모든 분기가 끝난 뒤 토론 단계가 시작됩니다.
+    # ------------------------------------------------------------------
+
     def should_continue_market(self, state: AgentState):
         """시장(market) 분석을 계속할지 판단한다.
 
-        마지막 메시지에 도구 호출(tool call)이 남아 있으면 도구 노드로 보내고,
-        없으면(분석이 끝났으면) 메시지 정리 노드로 보내 다음 단계로 넘어갑니다.
+        시장 채널의 마지막 메시지에 도구 호출(tool call)이 남아 있으면 도구
+        노드로 보내고, 없으면(분석이 끝났으면) 합류 노드로 보냅니다.
         """
-        messages = state["messages"]
-        last_message = messages[-1]
+        last_message = state["market_messages"][-1]
         if last_message.tool_calls:
             return "tools_market"
-        return "Msg Clear Market"
+        return ANALYST_JOIN_NODE
 
     def should_continue_social(self, state: AgentState):
         """감성(sentiment) 애널리스트의 도구 호출 라운드를 계속할지 판단한다.
 
         메서드 이름은 저장된 설정과의 하위 호환을 위해 기존
         ``AnalystType.SOCIAL = "social"`` 값에 맞춰 ``social`` 접미사를
-        유지합니다. 반환하는 ``clear_node`` 라벨은 v0.2.5에서 바뀐 이름을
-        사용해, 실행 계획(execution plan)이 등록한 노드 이름과 일치합니다.
+        유지합니다 (전용 채널 이름 ``social_messages``도 동일한 이유로
+        social 접두사를 사용합니다).
         """
-        messages = state["messages"]
-        last_message = messages[-1]
+        last_message = state["social_messages"][-1]
         if last_message.tool_calls:
             return "tools_social"
-        return "Msg Clear Sentiment"
+        return ANALYST_JOIN_NODE
 
     def should_continue_news(self, state: AgentState):
         """뉴스(news) 분석을 계속할지 판단한다."""
-        messages = state["messages"]
-        last_message = messages[-1]
+        last_message = state["news_messages"][-1]
         if last_message.tool_calls:
             return "tools_news"
-        return "Msg Clear News"
+        return ANALYST_JOIN_NODE
 
     def should_continue_fundamentals(self, state: AgentState):
         """재무(fundamentals) 분석을 계속할지 판단한다."""
-        messages = state["messages"]
-        last_message = messages[-1]
+        last_message = state["fundamentals_messages"][-1]
         if last_message.tool_calls:
             return "tools_fundamentals"
-        return "Msg Clear Fundamentals"
+        return ANALYST_JOIN_NODE
 
     def should_continue_debate(self, state: AgentState) -> str:
         """강세/약세(bull/bear) 투자 토론을 계속할지 판단한다.

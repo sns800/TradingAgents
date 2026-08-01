@@ -24,3 +24,23 @@ def test_market_toolnode_can_execute_verified_snapshot():
     )
     # 다른 핵심 시장 도구들도 그대로 남아 있어야 함
     assert {"get_stock_data", "get_indicators"} <= market_tools
+
+
+@pytest.mark.unit
+def test_tool_nodes_are_wired_to_their_own_message_channels():
+    """각 ToolNode가 담당 애널리스트의 전용 메시지 채널에 연결됐는지 검증하는 테스트.
+
+    분석가 병렬화(설계분석 중기 로드맵 #6): ToolNode가 공유 messages 채널을
+    쓰면 병렬 실행 중 다른 애널리스트의 도구 호출/결과와 섞이므로,
+    messages_key가 애널리스트별 채널로 지정되어 있어야 한다.
+    """
+    from tradingagents.agents.utils.agent_states import ANALYST_MESSAGE_CHANNELS
+
+    nodes = TradingAgentsGraph._create_tool_nodes(None)
+    for analyst_key, channel in ANALYST_MESSAGE_CHANNELS.items():
+        # langgraph의 ToolNode는 messages_key를 비공개 속성(_messages_key)으로
+        # 보관한다 — 공개 접근자가 없어 여기서는 그 속성을 직접 확인한다.
+        assert nodes[analyst_key]._messages_key == channel, (
+            f"ToolNode for {analyst_key!r} must read/write its dedicated "
+            f"channel {channel!r}, not the shared messages channel"
+        )

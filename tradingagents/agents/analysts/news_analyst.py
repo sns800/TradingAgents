@@ -86,8 +86,10 @@ def create_news_analyst(llm):
 
         # 툴 바인딩: llm.bind_tools(tools)로 LLM이 위 도구들을 호출할 수 있게 연결하고,
         # 프롬프트와 파이프(|)로 이어 하나의 실행 체인(chain)을 만든 뒤 실행합니다.
+        # 전용 채널(news_messages)만 읽고 씁니다 — 분석가 병렬화(중기 로드맵
+        # #6)로 다른 분석가의 대화와 섞이지 않습니다.
         chain = prompt | llm.bind_tools(tools)
-        result = chain.invoke(state["messages"])
+        result = chain.invoke(state["news_messages"])
 
         report = ""
 
@@ -96,10 +98,10 @@ def create_news_analyst(llm):
         if len(result.tool_calls) == 0:
             report = result.content
 
-        # 상태(state) 갱신: 대화 메시지에 결과를 추가하고,
+        # 상태(state) 갱신: 전용 채널에 결과를 추가하고,
         # 완성된 보고서를 "news_report" 키에 저장해 후속 단계에서 사용하게 합니다.
         return {
-            "messages": [result],
+            "news_messages": [result],
             "news_report": report,
         }
 

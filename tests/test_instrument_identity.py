@@ -1,18 +1,18 @@
-# 이 파일은 종목의 정체성(회사명·섹터 등)을 결정론적으로 해석하는 기능(#814)과,
-# 메시지 삭제 후 남기는 자리표시자에 종목 컨텍스트를 담는 기능(#888)을
+# 이 파일은 종목의 정체성(회사명·섹터 등)을 결정론적으로 해석하는 기능(#814)을
 # 검증하는 테스트 모음입니다.
-"""결정론적 종목 정체성(instrument-identity) 해석(#814)과
-컨텍스트가 고정된(context-anchored) 메시지 자리표시자(#888) 테스트."""
+# (예전에 함께 있던 #888 자리표시자 테스트는 분석가 병렬화 — 설계분석 중기
+# 로드맵 #6 — 로 Msg Clear 노드와 create_msg_delete 헬퍼가 제거되면서 함께
+# 삭제했습니다. 자리표시자가 필요했던 "공유 대화 비우기" 단계 자체가 더 이상
+# 존재하지 않습니다.)
+"""결정론적 종목 정체성(instrument-identity) 해석(#814) 테스트."""
 
 import unittest
 from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
-    create_msg_delete,
     get_instrument_context_from_state,
     resolve_instrument_identity,
 )
@@ -136,58 +136,6 @@ class GetInstrumentContextFromStateTests(unittest.TestCase):
             {"company_of_interest": "BTC-USD", "asset_type": "crypto"}
         )
         self.assertIn("crypto asset", context)
-
-
-@pytest.mark.unit
-class ContextAnchoredPlaceholderTests(unittest.TestCase):
-    """#888 — 메시지 삭제 후 자리표시자가 맨몸의 'Continue'여서는 안 됨을 검증하는 테스트 묶음."""
-
-    def _run(self, state_extra):
-        state = {
-            "messages": [
-                HumanMessage(content="old", id="h1"),
-                AIMessage(content="reply", id="a1"),
-            ],
-            **state_extra,
-        }
-        return create_msg_delete()(state)
-
-    def test_placeholder_is_not_bare_continue(self):
-        """자리표시자 메시지가 단순 "Continue"가 아닌지 검증하는 테스트."""
-        result = self._run(
-            {"company_of_interest": "EC", "asset_type": "stock", "trade_date": "2026-05-28"}
-        )
-        placeholder = result["messages"][-1]
-        self.assertIsInstance(placeholder, HumanMessage)
-        self.assertNotEqual(placeholder.content.strip(), "Continue")
-
-    def test_placeholder_carries_resolved_identity(self):
-        """자리표시자에 해석된 정체성(회사명)과 거래 날짜가 담기는지 검증하는 테스트."""
-        result = self._run(
-            {
-                "company_of_interest": "EC",
-                "instrument_context": "The instrument to analyze is `EC`. Resolved identity: Company: Ecopetrol.",
-                "trade_date": "2026-05-28",
-            }
-        )
-        content = result["messages"][-1].content
-        self.assertIn("Ecopetrol", content)
-        self.assertIn("2026-05-28", content)
-
-    def test_old_messages_are_removed(self):
-        """기존 메시지는 모두 삭제되고 자리표시자 하나만 남는지 검증하는 테스트."""
-        result = self._run({"company_of_interest": "EC", "trade_date": "2026-05-28"})
-        removals = [m for m in result["messages"] if isinstance(m, RemoveMessage)]
-        humans = [m for m in result["messages"] if isinstance(m, HumanMessage)]
-        self.assertEqual(len(removals), 2)
-        self.assertEqual(len(humans), 1)
-
-    def test_safe_defaults_when_state_minimal(self):
-        """상태 정보가 최소한일 때도 안전한 기본값으로 동작하는지 검증하는 테스트."""
-        result = create_msg_delete()({"messages": [], "company_of_interest": "EC"})
-        placeholder = result["messages"][-1]
-        self.assertNotEqual(placeholder.content.strip(), "Continue")
-        self.assertIn("EC", placeholder.content)
 
 
 if __name__ == "__main__":

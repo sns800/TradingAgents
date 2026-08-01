@@ -129,7 +129,8 @@ def test_sentiment_prompt_states_constraint(monkeypatch):
     ))
     sentiment.create_sentiment_analyst(llm)({
         "company_of_interest": "NVDA", "trade_date": "2026-01-15",
-        "asset_type": "stock", "messages": [],
+        # 병렬화(중기 #6) 이후 감성 분석가는 전용 채널만 읽는다.
+        "asset_type": "stock", "social_messages": [],
     })
     text = _prompt_text(captured["prompt"])
     assert NO_EXTERNAL_TOOLS in text

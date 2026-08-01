@@ -19,6 +19,11 @@ from typing import Any
 import yfinance as yf
 from langgraph.prebuilt import ToolNode
 
+from tradingagents.agents.utils.agent_states import (
+    ALL_MESSAGE_CHANNELS,
+    ANALYST_MESSAGE_CHANNELS,
+)
+
 # agent_utils에서 추상화된 도구(tool) 함수들을 임포트
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
@@ -202,7 +207,13 @@ class TradingAgentsGraph:
         return kwargs
 
     def _create_tool_nodes(self) -> dict[str, ToolNode]:
-        """추상화된 도구 함수들로 데이터 소스별 도구 노드(tool node)를 만든다."""
+        """추상화된 도구 함수들로 데이터 소스별 도구 노드(tool node)를 만든다.
+
+        각 ToolNode는 ``messages_key``로 담당 애널리스트의 전용 메시지 채널에
+        연결됩니다 (중기 로드맵 #6 — 분석가 병렬화). 도구 호출을 읽는 곳도,
+        도구 결과(ToolMessage)를 쓰는 곳도 그 채널이므로, 병렬로 실행되는
+        다른 애널리스트의 대화와 절대 섞이지 않습니다.
+        """
         return {
             "market": ToolNode(
                 [
@@ -215,13 +226,15 @@ class TradingAgentsGraph:
                     # 여기서 실행 가능해야 합니다. 없으면 호출이 실패하고
                     # 모델이 "사용 불가"라고 보고하게 됩니다).
                     get_verified_market_snapshot,
-                ]
+                ],
+                messages_key=ANALYST_MESSAGE_CHANNELS["market"],
             ),
             "social": ToolNode(
                 [
                     # 소셜 미디어 감성 분석용 뉴스 도구
                     get_news,
-                ]
+                ],
+                messages_key=ANALYST_MESSAGE_CHANNELS["social"],
             ),
             "news": ToolNode(
                 [
@@ -231,7 +244,8 @@ class TradingAgentsGraph:
                     get_insider_transactions,
                     get_macro_indicators,
                     get_prediction_markets,
-                ]
+                ],
+                messages_key=ANALYST_MESSAGE_CHANNELS["news"],
             ),
             "fundamentals": ToolNode(
                 [
@@ -240,7 +254,8 @@ class TradingAgentsGraph:
                     get_balance_sheet,
                     get_cashflow,
                     get_income_statement,
-                ]
+                ],
+                messages_key=ANALYST_MESSAGE_CHANNELS["fundamentals"],
             ),
         }
 
@@ -404,6 +419,14 @@ class TradingAgentsGraph:
             # 선발언자는 토론 진입 엣지(그래프 모양)를 바꾸므로 시그니처에 포함.
             f"first={self.config.get('debate_first_speaker', 'bull')}",
             f"asset={asset_type}",
+            # 그래프 토폴로지 버전(중기 로드맵 #6). selected_analysts만으로는
+            # 부족합니다: 같은 애널리스트 선택이라도 병렬화 이전(직렬 체인 +
+            # Msg Clear 노드)과 이후(START fan-out + Analyst Join)의 그래프
+            # 모양·상태 스키마(분석가별 채널)가 완전히 다르므로, 구버전
+            # 코드가 남긴 체크포인트에서 조용히 재개하다 실패하는 대신 이
+            # 정적 토큰으로 스레드 ID를 갈라 처음부터 새로 시작하게 합니다.
+            # 토폴로지를 다시 바꾸는 변경을 하게 되면 이 버전을 올리세요.
+            "topology=parallel-analysts-v1",
         ])
 
     def propagate(self, company_name, trade_date, asset_type: str = "stock"):
@@ -492,19 +515,23 @@ class TradingAgentsGraph:
         if self.debug:
             # 디버그 모드: 그래프를 스트리밍하며 각 노드의 메시지를 화면에 출력.
             trace = []
-            last_printed = None
+            # 분석가 병렬화(중기 #6) 이후 대화는 공유 messages 채널과
+            # 분석가별 전용 채널에 나뉘어 쌓이므로, 채널별로 마지막에 출력한
+            # 메시지 시그니처를 따로 기억하며 모든 채널을 훑는다. 같은
+            # 마지막 메시지가 여러 청크(chunk)에 걸쳐 반복되면 내용이
+            # 바뀌었을 때만 출력한다 (#1027). 트레이스/상태 병합 로직은 그대로다.
+            last_printed: dict[str, tuple] = {}
             for chunk in self.graph.stream(init_agent_state, **args):
-                if chunk["messages"]:
-                    msg = chunk["messages"][-1]
-                    # 트레이더 이후의 노드들은 messages에 추가하지 않으므로,
-                    # 같은 마지막 메시지가 여러 청크(chunk)에 걸쳐 반복된다.
-                    # 내용이 바뀌었을 때만 출력한다 (#1027). 트레이스/상태
-                    # 병합 로직은 그대로다.
+                for channel in ALL_MESSAGE_CHANNELS:
+                    channel_messages = chunk.get(channel) or []
+                    if not channel_messages:
+                        continue
+                    msg = channel_messages[-1]
                     signature = (type(msg).__name__, getattr(msg, "content", None))
-                    if signature != last_printed:
+                    if signature != last_printed.get(channel):
                         msg.pretty_print()
-                        last_printed = signature
-                    trace.append(chunk)
+                        last_printed[channel] = signature
+                trace.append(chunk)
             # 스트리밍된 청크는 노드별 증분(delta)이다. 이를 병합해서
             # 비(非)디버그 경로의 graph.invoke()가 내놓는 상태와 같게 만든다.
             final_state = {}

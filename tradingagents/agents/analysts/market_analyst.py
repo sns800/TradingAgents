@@ -28,12 +28,14 @@ from tradingagents.dataflows.interface import is_no_data_sentinel
 def _market_data_ok(messages) -> bool:
     """시장 도구 결과에 NO_DATA 센티널이 없으면 True를 반환한다 (결정론적 검사).
 
-    [NO_DATA 결정론적 게이트 — 설계분석 중기 로드맵 #4] 시장 분석가의 메시지
-    채널에 쌓인 도구 결과(ToolMessage)를 훑어, 벤더 라우터나 검증 스냅샷
-    도구가 반환한 NO_DATA 센티널이 하나라도 있으면 핵심 시장 데이터가
-    확보되지 않은 것으로 판정합니다. LLM 판단이 아니라 문자열 검사만
-    사용하므로 결과가 결정론적입니다. 이 플래그는 포트폴리오 매니저가
-    LLM 호출 없이 강제 Hold로 분기하는 근거가 됩니다.
+    [NO_DATA 결정론적 게이트 — 설계분석 중기 로드맵 #4] 시장 분석가의 전용
+    메시지 채널(market_messages, 중기 #6에서 분리)에 쌓인 도구 결과
+    (ToolMessage)를 훑어, 벤더 라우터나 검증 스냅샷 도구가 반환한 NO_DATA
+    센티널이 하나라도 있으면 핵심 시장 데이터가 확보되지 않은 것으로
+    판정합니다. 전용 채널에는 시장 도구의 결과만 쌓이므로 다른 분석가의
+    도구 출력이 판정을 오염시키지 않습니다. LLM 판단이 아니라 문자열
+    검사만 사용하므로 결과가 결정론적입니다. 이 플래그는 포트폴리오
+    매니저가 LLM 호출 없이 강제 Hold로 분기하는 근거가 됩니다.
     """
     for message in messages:
         if not isinstance(message, ToolMessage):
@@ -48,10 +50,10 @@ def _market_data_ok(messages) -> bool:
 def _extract_verified_snapshot(messages) -> str:
     """도구 메시지에서 검증 스냅샷(get_verified_market_snapshot 출력)을 찾아 반환한다.
 
-    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] Msg Clear가 분석가의 도구
-    메시지를 전량 파기하므로, 하류(토론자·트레이더·PM)가 수치 인용의
-    기준점으로 쓸 수 있도록 스냅샷 원문을 별도 상태 필드로 옮기기 위한
-    결정론적 추출입니다. 식별 기준은 두 가지입니다:
+    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] 하류(토론자·트레이더·PM)는
+    시장 분석가의 전용 메시지 채널(market_messages)을 읽지 않으므로, 수치
+    인용의 기준점으로 쓸 수 있도록 스냅샷 원문을 별도 상태 필드로 옮기기
+    위한 결정론적 추출입니다. 식별 기준은 두 가지입니다:
     (1) ToolNode가 채우는 ToolMessage.name == "get_verified_market_snapshot",
     (2) name이 없는 환경(일부 프레임워크 버전·테스트)을 위한 폴백으로
         스냅샷 렌더러의 고정 헤더 접두사.
@@ -170,8 +172,10 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         # 프롬프트와 파이프(|)로 이어 하나의 실행 체인(chain)을 만듭니다.
         chain = prompt | llm.bind_tools(tools)
 
-        # 지금까지 쌓인 대화 메시지(state["messages"])를 넣어 LLM을 실행합니다.
-        result = chain.invoke(state["messages"])
+        # 전용 채널(market_messages)에 쌓인 대화만 넣어 LLM을 실행합니다.
+        # 공유 messages 채널 대신 전용 채널을 쓰는 것이 분석가 병렬화의
+        # 핵심입니다 (중기 로드맵 #6) — 다른 분석가의 대화와 섞이지 않습니다.
+        result = chain.invoke(state["market_messages"])
 
         report = ""
 
@@ -180,18 +184,19 @@ Write a very detailed and nuanced report of the trends you observe. Provide spec
         if len(result.tool_calls) == 0:
             report = result.content
 
-        # 상태(state) 갱신: 대화 메시지에 결과를 추가하고,
+        # 상태(state) 갱신: 전용 채널에 결과를 추가하고,
         # 완성된 보고서를 "market_report" 키에 저장해 후속 단계에서 사용하게 합니다.
         # market_data_ok와 verified_snapshot은 매 방문마다 현재까지의 도구
-        # 결과로 재계산됩니다 — 마지막 방문(도구 호출 없음, 보고서 완성)
-        # 시점의 값이 도구 루프 전체의 결과를 반영한 최종값이 되어 하류로
-        # 전달됩니다. verified_snapshot은 Msg Clear에서 파기되는 도구
-        # 메시지와 달리 별도 상태 필드라 그래프 끝까지 생존합니다(중기 #5).
+        # 결과(자기 채널 기준 — 중기 #6)로 재계산됩니다 — 마지막 방문(도구
+        # 호출 없음, 보고서 완성) 시점의 값이 도구 루프 전체의 결과를 반영한
+        # 최종값이 되어 하류로 전달됩니다. verified_snapshot은 하류가 읽지
+        # 않는 분석가 채널과 달리 별도 상태 필드라 하류 프롬프트 주입과
+        # 사후 수치 감사에 쓰입니다(중기 #5).
         return {
-            "messages": [result],
+            "market_messages": [result],
             "market_report": report,
-            "market_data_ok": _market_data_ok(state["messages"]),
-            "verified_snapshot": _extract_verified_snapshot(state["messages"]),
+            "market_data_ok": _market_data_ok(state["market_messages"]),
+            "verified_snapshot": _extract_verified_snapshot(state["market_messages"]),
         }
 
     return market_analyst_node

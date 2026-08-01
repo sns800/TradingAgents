@@ -11,6 +11,7 @@
 from typing import Any
 
 from tradingagents.agents.utils.agent_states import (
+    ANALYST_MESSAGE_CHANNELS,
     InvestDebateState,
     RiskDebateState,
 )
@@ -40,7 +41,18 @@ class Propagator:
         컨텍스트로 대체(fallback)합니다.
         """
         return {
+            # 공유 messages 채널: 하위 호환용으로 유지(트레이더가 결과를
+            # 기록하고 디버그/CLI 표시가 읽음). 분석가 단계는 더 이상 이
+            # 채널을 쓰지 않습니다 (중기 로드맵 #6).
             "messages": [("human", company_name)],
+            # 분석가별 전용 메시지 채널 시드(중기 로드맵 #6 — 병렬화).
+            # 각 분석가의 대화가 티커 요청으로 시작하도록 채널마다 동일한
+            # 휴먼 메시지를 넣습니다. 선택되지 않은 분석가의 채널은 시드만
+            # 남고 사용되지 않습니다(무해).
+            **{
+                channel: [("human", company_name)]
+                for channel in ANALYST_MESSAGE_CHANNELS.values()
+            },
             "company_of_interest": company_name,
             "asset_type": asset_type,
             "instrument_context": instrument_context,
@@ -83,8 +95,8 @@ class Propagator:
             # 선택되지 않은 실행에서는 True로 남아 기존 흐름을 유지합니다.
             "market_data_ok": True,
             # 검증 스냅샷 보존(중기 로드맵 #5). 시장 분석가가 도구 결과에서
-            # get_verified_market_snapshot 출력을 발견하면 여기에 복사해
-            # Msg Clear 이후에도 하류가 원본 수치 기준점을 갖게 합니다.
+            # get_verified_market_snapshot 출력을 발견하면 여기에 복사해,
+            # 분석가 채널을 읽지 않는 하류도 원본 수치 기준점을 갖게 합니다.
             "verified_snapshot": "",
         }
 

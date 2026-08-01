@@ -5,7 +5,7 @@
 # 1) 각 데이터 툴 파일에 흩어져 있는 LangChain 툴들을 한곳에서 재수출(re-export)해서
 #    에이전트와 그래프가 모두 이 모듈에서 import하도록 하는 공개 창구 역할.
 # 2) 분석 대상 종목의 정체성(instrument identity) 확인, 출력 언어 지시문,
-#    메시지 정리(delete) 헬퍼 등 에이전트 실행에 필요한 보조 함수 제공.
+#    검증 스냅샷 프롬프트 블록 등 에이전트 실행에 필요한 보조 함수 제공.
 # =============================================================================
 
 import functools
@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from typing import Any
 
 import yfinance as yf
-from langchain_core.messages import HumanMessage, RemoveMessage
 
 # 별도 유틸리티 파일들에서 툴을 가져온다(재수출용)
 from tradingagents.agents.utils.core_stock_tools import get_stock_data
@@ -54,7 +53,6 @@ __all__ = [
     "get_instrument_context_from_state",
     "get_language_instruction",
     "get_verified_snapshot_block",
-    "create_msg_delete",
 ]
 
 logger = logging.getLogger(__name__)
@@ -78,11 +76,11 @@ def get_language_instruction() -> str:
 def get_verified_snapshot_block(state: Mapping[str, Any]) -> str:
     """하류 프롬프트에 넣을 검증 스냅샷 섹션을 반환한다. 스냅샷이 없으면 빈 문자열.
 
-    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] Msg Clear가 원본 도구
-    데이터를 파기한 뒤에도 하류 에이전트(리서처/리스크 토론자, 트레이더,
-    리서치 매니저, 포트폴리오 매니저)가 정확한 가격·지표 수치의 기준점을
-    갖도록, 시장 분석가가 보존한 스냅샷(verified_snapshot 상태 필드)을
-    프롬프트 섹션으로 감쌉니다. 스냅샷은 수백 자 수준의 마크다운 표라
+    [검증 스냅샷 보존 — 설계분석 중기 로드맵 #5] 하류 에이전트(리서처/
+    리스크 토론자, 트레이더, 리서치 매니저, 포트폴리오 매니저)는 시장
+    분석가의 전용 메시지 채널을 읽지 않으므로, 정확한 가격·지표 수치의
+    기준점을 갖도록 시장 분석가가 보존한 스냅샷(verified_snapshot 상태
+    필드)을 프롬프트 섹션으로 감쌉니다. 스냅샷은 수백 자 수준의 마크다운 표라
     전문을 그대로 주입해도 토큰 부담이 작습니다. 비어 있으면(스냅샷 도구
     미호출, NO_DATA, 구형 체크포인트) 섹션 전체를 생략해 빈 섹션이
     존재하지 않는 수치를 지어내게 유도하지 않습니다(past_context의 빈 값
@@ -220,27 +218,9 @@ def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:
     )
 
 
-def create_msg_delete():
-    def delete_messages(state):
-        """메시지들을 비우고 컨텍스트에 고정된 자리표시자(placeholder)를 추가한다.
-
-        자리표시자는 단순한 ``"Continue"``여서는 안 된다: 일부 OpenAI 호환
-        공급자(provider)는 그것을 문자 그대로 사용자 과제로 해석해 종목 분석
-        대신 "continue"라는 단어에 대한 출력을 생성한다(#888). 확인된 종목
-        컨텍스트와 날짜에 자리표시자를 고정해 두면, 공급자가 자리표시자를
-        독립된 요청으로 취급하더라도 다음 분석가가 과제에서 벗어나지 않는다.
-        """
-        messages = state["messages"]
-        removal_operations = [RemoveMessage(id=m.id) for m in messages]
-
-        instrument_context = get_instrument_context_from_state(state)
-        trade_date = state.get("trade_date", "the requested date")
-        placeholder = HumanMessage(
-            content=(
-                f"Proceed with your assigned analysis for this workflow. "
-                f"{instrument_context} The analysis date is {trade_date}."
-            )
-        )
-        return {"messages": removal_operations + [placeholder]}
-
-    return delete_messages
+# (제거됨) create_msg_delete — 분석가 병렬화(설계분석 중기 로드맵 #6)로
+# Msg Clear 노드가 불필요해져 삭제했습니다. 분석가마다 전용 메시지 채널을
+# 쓰므로 "다음 분석가를 위해 공유 대화를 비우는" 우회책이 사라졌고, 그
+# 과정에서 원본 도구 데이터가 파기되던 문제(설계분석-보고서 2.2절)도 함께
+# 해소됐습니다. 예전 #888 자리표시자 이슈(placeholder가 "Continue"면 일부
+# 공급자가 오작동)는 Msg Clear 자체가 없어졌으므로 더 이상 해당되지 않습니다.

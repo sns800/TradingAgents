@@ -1,13 +1,14 @@
 """[모듈 개요] 검증 스냅샷 보존(설계분석 중기 로드맵 #5) 테스트.
 
-Msg Clear가 분석가의 도구 메시지(원본 데이터)를 전량 파기해 하류 검증의
-기준점이 사라지는 문제(설계분석-보고서 2.2절)에 대한 보존 경로를 검증한다:
+하류 에이전트가 시장 분석가의 원본 도구 데이터에 접근하지 못하는 문제
+(설계분석-보고서 2.2절 — 원래는 Msg Clear의 파기, 병렬화 이후에는 하류가
+분석가 전용 채널을 읽지 않는 구조)에 대한 보존 경로를 검증한다:
 
   1. 시장 분석가가 도구 결과 중 검증 스냅샷(get_verified_market_snapshot
      출력)을 찾아 별도 상태 필드(verified_snapshot)로 보존하는지
      (NO_DATA 센티널이면 빈 문자열)
-  2. Msg Clear(create_msg_delete)가 메시지만 지우고 verified_snapshot
-     상태 필드는 건드리지 않는지 (생존 보장)
+  2. 애널리스트 합류 배리어(analyst_join_node — 중기 #6에서 Msg Clear를
+     대체)가 verified_snapshot을 포함해 어떤 상태도 건드리지 않는지
   3. 하류 에이전트 8종(리서처 토론자 2, 리스크 토론자 3, 트레이더,
      리서치 매니저, PM)의 프롬프트에 스냅샷 섹션이 주입되고, 스냅샷이
      비어 있으면 섹션이 통째로 생략되는지 (past_context 빈 값 가드와
@@ -37,10 +38,7 @@ from tradingagents.agents.risk_mgmt.aggressive_debator import create_aggressive_
 from tradingagents.agents.risk_mgmt.conservative_debator import create_conservative_debator
 from tradingagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
 from tradingagents.agents.trader.trader import create_trader
-from tradingagents.agents.utils.agent_utils import (
-    create_msg_delete,
-    get_verified_snapshot_block,
-)
+from tradingagents.agents.utils.agent_utils import get_verified_snapshot_block
 from tradingagents.agents.utils.market_data_validation_tools import (
     VERIFIED_SNAPSHOT_HEADER_PREFIX,
 )
@@ -138,7 +136,7 @@ class TestSnapshotExtraction:
 
 
 # ---------------------------------------------------------------------------
-# 2. 시장 분석가 노드의 보존 + Msg Clear 생존
+# 2. 시장 분석가 노드의 보존 + 합류 배리어의 무간섭
 # ---------------------------------------------------------------------------
 
 
@@ -150,12 +148,14 @@ class _ReportOnlyLLM:
 
 
 def _analyst_state(tool_message: ToolMessage) -> dict:
+    # 시장 분석가는 병렬화(중기 로드맵 #6) 이후 전용 채널(market_messages)만
+    # 읽으므로, 테스트 상태도 그 채널에 도구 결과를 담는다.
     return {
         "trade_date": "2026-01-01",
         "company_of_interest": "NVDA",
         "asset_type": "stock",
         "instrument_context": "Instrument: NVDA",
-        "messages": [
+        "market_messages": [
             HumanMessage(content="NVDA"),
             AIMessage(
                 content="",
@@ -191,14 +191,17 @@ class TestMarketAnalystPreservation:
         state = Propagator().create_initial_state("NVDA", "2026-01-01")
         assert state["verified_snapshot"] == ""
 
-    def test_survives_msg_clear(self):
-        """Msg Clear(create_msg_delete)가 메시지만 지우고 verified_snapshot은 건드리지 않는지 검증.
+    def test_survives_analyst_join(self):
+        """합류 배리어(analyst_join_node)가 verified_snapshot을 건드리지 않는지 검증.
 
-        LangGraph는 노드가 반환한 키만 상태에 병합하므로, 반환 dict에
-        verified_snapshot이 없으면 기존 값이 그대로 생존한다.
+        중기 #6에서 Msg Clear가 합류 배리어로 대체됐다. LangGraph는 노드가
+        반환한 키만 상태에 병합하므로, 배리어가 빈 갱신을 반환하는 한
+        verified_snapshot(과 도구 원본 메시지)은 그대로 생존한다.
         """
+        from tradingagents.graph.setup import analyst_join_node
+
         state = {
-            "messages": [
+            "market_messages": [
                 HumanMessage(content="NVDA"),
                 _snapshot_tool_message(SNAPSHOT_BODY),
             ],
@@ -208,9 +211,9 @@ class TestMarketAnalystPreservation:
             "trade_date": "2026-01-01",
             "verified_snapshot": SNAPSHOT_BODY,
         }
-        update = create_msg_delete()(state)
-        assert set(update.keys()) == {"messages"}, (
-            "Msg Clear must only touch the messages channel"
+        update = analyst_join_node(state)
+        assert update == {}, (
+            "the analyst join barrier must not mutate any state channel"
         )
 
 

@@ -3,9 +3,9 @@
 # [모듈 개요 - 초보자용]
 # 이 파일은 LangGraph의 StateGraph를 이용해 에이전트 워크플로 그래프
 # (graph, 에이전트들의 실행 순서를 정의한 흐름도)를 실제로 "조립"하는 곳입니다.
-# 애널리스트들 -> 강세/약세 연구원 토론 -> 리서치 매니저 -> 트레이더 ->
-# 리스크 토론(3인) -> 포트폴리오 매니저 순서로 노드(node, 실행 단위)와
-# 엣지(edge, 노드 사이의 이동 경로)를 등록합니다.
+# 애널리스트들(병렬) -> 합류(join) -> 강세/약세 연구원 토론 -> 리서치 매니저 ->
+# 트레이더 -> 리스크 토론(3인) -> 포트폴리오 매니저 순서로 노드(node, 실행
+# 단위)와 엣지(edge, 노드 사이의 이동 경로)를 등록합니다.
 # trading_graph.py가 초기화될 때 이 GraphSetup.setup_graph()를 호출해
 # 컴파일 전의 워크플로 객체를 받아 갑니다.
 
@@ -21,7 +21,6 @@ from tradingagents.agents import (
     create_conservative_debator,
     create_fundamentals_analyst,
     create_market_analyst,
-    create_msg_delete,
     create_neutral_debator,
     create_news_analyst,
     create_portfolio_manager,
@@ -31,7 +30,7 @@ from tradingagents.agents import (
 )
 from tradingagents.agents.utils.agent_states import AgentState
 
-from .analyst_execution import build_analyst_execution_plan
+from .analyst_execution import ANALYST_JOIN_NODE, build_analyst_execution_plan
 from .conditional_logic import ConditionalLogic
 
 # 공유 조건부 라우터(conditional router)가 반환할 수 있는 모든 목적지 목록.
@@ -49,6 +48,22 @@ RISK_ANALYSIS_PATH_MAP = {
     "Neutral Analyst": "Neutral Analyst",
     "Portfolio Manager": "Portfolio Manager",
 }
+
+
+def analyst_join_node(state: AgentState) -> dict:
+    """애널리스트 병렬 분기의 합류(join) 배리어 노드 — 상태를 바꾸지 않는다.
+
+    [중기 로드맵 #6] setup_graph()가 이 노드를 ``defer=True``로 등록하므로,
+    LangGraph는 선택된 애널리스트 분기 전원(각자의 도구 호출 루프 포함)이
+    끝날 때까지 실행을 미뤘다가 정확히 한 번만 이 노드를 실행하고 토론
+    단계로 넘어갑니다. 예전 Msg Clear 노드가 하던 "다음 애널리스트를 위한
+    대화 비우기"는 채널 분리로 불필요해졌고, 토론 단계는 애널리스트 채널을
+    아예 읽지 않으므로 토론 진입 전 정리도 필요 없습니다 — 오히려 도구
+    원본 데이터가 상태에 보존되는 것이 설계 목표입니다(원본 파기 문제 해소,
+    설계분석-보고서 2.2절). 따라서 이 노드는 의도적으로 아무 갱신도 하지
+    않는 순수 배리어입니다.
+    """
+    return {}
 
 
 class GraphSetup:
@@ -106,13 +121,20 @@ class GraphSetup:
         workflow = StateGraph(AgentState)
 
         # 애널리스트 노드들을 그래프에 추가.
-        # 애널리스트 한 명당 노드 3개가 등록됩니다:
-        #   agent_node(분석 담당 LLM) / clear_node(대화 메시지 정리) /
-        #   tool_node(데이터 조회 도구 실행)
+        # 애널리스트 한 명당 노드 2개가 등록됩니다:
+        #   agent_node(분석 담당 LLM) / tool_node(데이터 조회 도구 실행)
+        # 예전의 clear_node(Msg Clear)는 중기 로드맵 #6에서 제거 — 애널리스트
+        # 별 전용 메시지 채널 덕분에 다음 애널리스트를 위해 대화를 비울
+        # 필요가 없어졌습니다.
         for spec in plan.specs:
             workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
-            workflow.add_node(spec.clear_node, create_msg_delete())
             workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+
+        # 합류 배리어 노드. defer=True가 핵심입니다: LangGraph는 다른 실행
+        # 가능한 태스크가 남아 있는 동안 이 노드를 미루므로, 도구 루프 횟수가
+        # 제각각인 병렬 분기들이 전부 끝난 뒤에야 한 번 실행됩니다(map-reduce
+        # 합류 패턴).
+        workflow.add_node(ANALYST_JOIN_NODE, analyst_join_node, defer=True)
 
         # 나머지 노드 추가
         workflow.add_node("Bull Researcher", bull_researcher_node)
@@ -136,34 +158,27 @@ class GraphSetup:
             else "Bull Researcher"
         )
 
-        # 엣지(edge) 정의
-        # START(그래프 시작점)에서 첫 번째 애널리스트로 진입
-        workflow.add_edge(START, plan.specs[0].agent_node)
-
-        # 애널리스트들을 순서대로 연결.
-        # 각 애널리스트는 "도구 호출이 남아 있으면 tool_node로 갔다가 다시
-        # 자신에게 돌아오고(루프), 분석이 끝나면 clear_node를 거쳐 다음
-        # 애널리스트로 넘어가는" 구조입니다.
-        for i, spec in enumerate(plan.specs):
-            current_analyst = spec.agent_node
-            current_tools = spec.tool_node
-            current_clear = spec.clear_node
-
-            # 현재 애널리스트에 대한 조건부 엣지 추가
-            # (conditional_logic의 should_continue_<key> 메서드가 라우터 역할)
+        # 엣지(edge) 정의 (중기 로드맵 #6 — 분석가 병렬화)
+        #
+        # START에서 선택된 애널리스트 전원으로 동시에 진입(fan-out)합니다.
+        # 각 애널리스트는 자기 전용 메시지 채널 기준으로 "도구 호출이 남아
+        # 있으면 tool_node로 갔다가 자신에게 돌아오는(루프)" 구조를 유지하고,
+        # 분석이 끝나면 합류 노드(Analyst Join)로 향합니다. 합류 노드는
+        # defer=True 배리어라 모든 분기(각자 루프 길이가 달라도)가 끝난 뒤
+        # 정확히 한 번 실행되며, 애널리스트가 1명뿐이어도 동일하게 동작합니다.
+        for spec in plan.specs:
+            workflow.add_edge(START, spec.agent_node)
+            # 애널리스트별 조건부 엣지: conditional_logic의
+            # should_continue_<key> 메서드가 전용 채널을 보고 라우팅합니다.
             workflow.add_conditional_edges(
-                current_analyst,
+                spec.agent_node,
                 getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [current_tools, current_clear],
+                [spec.tool_node, ANALYST_JOIN_NODE],
             )
-            workflow.add_edge(current_tools, current_analyst)
+            workflow.add_edge(spec.tool_node, spec.agent_node)
 
-            # 다음 애널리스트로 연결하고, 마지막 애널리스트라면 리서처 토론의
-            # 선발언자(debate_first_speaker 설정, 기본 Bull Researcher)로 연결
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, first_debater_node)
+        # 합류 후 리서처 토론의 선발언자로 진입합니다.
+        workflow.add_edge(ANALYST_JOIN_NODE, first_debater_node)
 
         # 연구 토론 엣지 두 개는 완전한 DEBATE_PATH_MAP을 공유한다 (#1088).
         for debate_node in ("Bull Researcher", "Bear Researcher"):
