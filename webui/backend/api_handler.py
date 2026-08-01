@@ -6,10 +6,12 @@
 #  - GET  /api/runs            실행 목록 (최신순 최대 50건)
 #  - GET  /api/runs/{id}       실행 상세 + 보고서 파일 목록
 #  - GET  /api/runs/{id}/report?name=...  보고서 마크다운 내용
+#  - GET  /api/catalog         종목 카탈로그 조회 (검색/업종/정렬/페이지네이션)
 #
 # 의존성은 boto3(런타임 내장)뿐이라 별도 패키징 없이 zip 한 장으로 배포됩니다.
 # ============================================================
 import base64
+import gzip
 import json
 import os
 import re
@@ -19,6 +21,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
@@ -87,6 +90,119 @@ def check_auth(event) -> bool:
 TICKER_RE = re.compile(r"^[A-Za-z0-9._\-^=]{1,32}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# ---------------- 종목 카탈로그 (S3 → 컨테이너 전역 캐시) ----------------
+# 다른 워커가 catalog/{US|KR|JP}.json.gz 로 생성해 둔 시장별 종목 목록.
+# 수천 종목짜리 JSON이라 매 요청 S3를 읽지 않도록 Lambda 컨테이너 전역에
+# 시장별 (데이터, S3 ETag, 로드 시각)을 캐시하고 TTL이 지나면 재로드한다.
+CATALOG_MARKETS = ("US", "KR", "JP")
+CATALOG_PAGE_SIZE = 50
+_catalog_cache: dict[str, dict] = {}
+_CATALOG_CACHE_TTL = 600  # 10분
+
+# 카탈로그 없이 통과시키는 야후 특수자산의 암호화폐 호가 통화 접미사
+_CRYPTO_SUFFIXES = ("-USD", "-USDT", "-USDC", "-KRW", "-EUR", "-BTC", "-ETH")
+
+
+def _load_catalog(market: str):
+    """시장별 카탈로그를 S3에서 읽어 캐시한다. 파일이 없으면 None.
+
+    TTL 이내면 S3를 건드리지 않고 캐시를 그대로 반환하고, TTL이 지나면
+    저장해 둔 ETag로 조건부 GET(IfNoneMatch)을 보내 변경이 없을 때는
+    본문 재다운로드 없이 TTL만 연장한다.
+    """
+    now = time.time()
+    cached = _catalog_cache.get(market)
+    if cached and now - cached["loaded_at"] < _CATALOG_CACHE_TTL:
+        return cached["data"]
+
+    key = f"catalog/{market}.json.gz"
+    kwargs = {"Bucket": DATA_BUCKET, "Key": key}
+    if cached and cached.get("etag"):
+        kwargs["IfNoneMatch"] = cached["etag"]
+    try:
+        obj = s3.get_object(**kwargs)
+        data = json.loads(gzip.decompress(obj["Body"].read()).decode("utf-8"))
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code in ("304", "NotModified") and cached:
+            # 파일이 그대로면 캐시 유지, TTL만 갱신
+            cached["loaded_at"] = now
+            return cached["data"]
+        if code in ("NoSuchKey", "404"):
+            return None
+        print(f"catalog load failed ({market}): {e}")
+        return cached["data"] if cached else None
+    except Exception as e:
+        # S3 장애 등: 만료된 캐시라도 있으면 그것으로 버틴다
+        print(f"catalog load failed ({market}): {e}")
+        return cached["data"] if cached else None
+
+    _catalog_cache[market] = {"data": data, "etag": obj.get("ETag"), "loaded_at": now}
+    return data
+
+
+def _is_special_asset(ticker: str) -> bool:
+    """카탈로그에 없어도 통과시키는 야후 특수자산 패턴 화이트리스트.
+
+    암호화폐(-USD 등 호가 통화 접미사), 선물(=F), 외환(=X), 지수(^) 표기.
+    """
+    if ticker.startswith("^"):
+        return True
+    if ticker.endswith(("=F", "=X")):
+        return True
+    return ticker.endswith(_CRYPTO_SUFFIXES)
+
+
+def _validate_ticker(ticker: str):
+    """카탈로그 기반 티커 검증. (정규 티커, 오류 응답) 튜플을 반환한다.
+
+    - 특수자산 패턴이면 카탈로그 조회 없이 통과
+    - 3개 시장 카탈로그에서 정확 일치하면 카탈로그의 정규 티커로 교체
+      ('.'을 '-'로 바꾼 변형도 함께 대조: brk.b → BRK-B)
+    - 카탈로그가 하나도 로드되지 않으면 검증을 건너뛴다 (fail-open)
+    - 그 외에는 400 + 후보 제안 (티커 접두 일치 → 종목명 부분 일치 순)
+    """
+    if _is_special_asset(ticker):
+        return ticker, None
+
+    catalogs = [_load_catalog(m) for m in CATALOG_MARKETS]
+    loaded = [c for c in catalogs if c]
+    if not loaded:
+        # 첫 배치 전이거나 S3 오류: 기존 동작대로 통과시킨다
+        print(f"warning: no catalog loaded, skipping ticker validation for {ticker}")
+        return ticker, None
+
+    # 정확 일치 검색 (입력은 이미 대문자 정규화된 상태)
+    exact_keys = {ticker, ticker.replace(".", "-")}
+    for data in loaded:
+        for item in data.get("items", []):
+            if str(item.get("ticker") or "").upper() in exact_keys:
+                return str(item.get("ticker")), None
+
+    # 후보 제안: (a) 티커 접두 일치 → (b) 종목명 부분 일치, 최대 5건
+    suggestions: list[dict] = []
+    seen: set[str] = set()
+
+    def _collect(match_fn):
+        for data in loaded:
+            for item in data.get("items", []):
+                if len(suggestions) >= 5:
+                    return
+                t = str(item.get("ticker") or "")
+                if t.upper() in seen or not match_fn(item):
+                    continue
+                seen.add(t.upper())
+                suggestions.append({"ticker": t, "name": item.get("name")})
+
+    needle = ticker.lower()
+    _collect(lambda i: str(i.get("ticker") or "").upper().startswith(ticker))
+    _collect(lambda i: needle in str(i.get("name") or "").lower())
+
+    return None, _resp(400, {
+        "error": "카탈로그에 없는 티커입니다. 종목 코드를 확인해 주세요.",
+        "suggestions": suggestions,
+    })
+
 RUN_FIELDS = (
     "run_id", "ticker", "analysis_date", "depth", "status",
     "decision", "error", "created_at", "updated_at", "started_at", "finished_at",
@@ -123,6 +239,65 @@ def _run_view(item):
     return {k: _plain(item.get(k)) for k in RUN_FIELDS}
 
 
+def get_catalog(query):
+    """종목 카탈로그 조회: 검색(q)·업종(sector) 필터, 정렬, 50건 페이지네이션."""
+    market = str(query.get("market") or "").strip().upper()
+    if market not in CATALOG_MARKETS:
+        return _err(400, "market 파라미터는 US, KR, JP 중 하나여야 합니다.")
+
+    sort = str(query.get("sort") or "name").strip().lower()
+    if sort not in ("name", "price", "market_cap"):
+        return _err(400, "sort는 name, price, market_cap 중 하나여야 합니다.")
+    order = str(query.get("order") or "asc").strip().lower()
+    if order not in ("asc", "desc"):
+        return _err(400, "order는 asc 또는 desc여야 합니다.")
+    try:
+        page = int(query.get("page") or 1)
+    except (TypeError, ValueError):
+        return _err(400, "page는 1 이상의 정수여야 합니다.")
+    if page < 1:
+        return _err(400, "page는 1 이상의 정수여야 합니다.")
+
+    data = _load_catalog(market)
+    if data is None:
+        return _err(404, "카탈로그가 아직 생성되지 않았습니다. 잠시 후 다시 시도해 주세요.")
+
+    items = list(data.get("items", []))
+    # 업종 목록은 필터 적용 전, 해당 시장 전체 기준
+    sectors = sorted({str(i["sector"]) for i in items if i.get("sector")})
+
+    q = str(query.get("q") or "").strip().lower()
+    if q:
+        items = [
+            i for i in items
+            if q in str(i.get("ticker") or "").lower() or q in str(i.get("name") or "").lower()
+        ]
+    sector = str(query.get("sector") or "").strip()
+    if sector:
+        items = [i for i in items if i.get("sector") == sector]
+
+    reverse = order == "desc"
+    if sort == "name":
+        items.sort(key=lambda i: str(i.get("name") or i.get("ticker") or "").lower(), reverse=reverse)
+    else:
+        # 숫자 정렬: 값이 없는(null) 종목은 정렬 방향과 무관하게 항상 뒤로
+        present = [i for i in items if i.get(sort) is not None]
+        missing = [i for i in items if i.get(sort) is None]
+        present.sort(key=lambda i: i[sort], reverse=reverse)
+        items = present + missing
+
+    total = len(items)
+    start = (page - 1) * CATALOG_PAGE_SIZE
+    return _resp(200, {
+        "items": items[start:start + CATALOG_PAGE_SIZE],
+        "total": total,
+        "page": page,
+        "page_size": CATALOG_PAGE_SIZE,
+        "generated_at": data.get("generated_at"),
+        "sectors": sectors,
+    })
+
+
 def create_run(body):
     ticker = str(body.get("ticker", "")).strip().upper()
     analysis_date = str(body.get("analysis_date", "")).strip()
@@ -143,6 +318,12 @@ def create_run(body):
         return _err(400, "분석 날짜는 미래일 수 없습니다.")
     if depth not in (1, 3, 5):
         return _err(400, "분석 깊이(depth)는 1, 3, 5 중 하나여야 합니다.")
+
+    # 카탈로그 기반 티커 검증: 통과 시 카탈로그의 정규 티커로 실행한다
+    canonical, ticker_error = _validate_ticker(ticker)
+    if ticker_error:
+        return ticker_error
+    ticker = canonical
 
     # 동시 실행 수 제한 (테이블이 작아 scan으로 충분)
     active = table.scan(
@@ -254,6 +435,9 @@ def handler(event, _context):
 
         if method == "GET" and path == "/api/runs":
             return list_runs()
+
+        if method == "GET" and path == "/api/catalog":
+            return get_catalog(query)
 
         m = re.match(r"^/api/runs/([a-f0-9]{12})$", path)
         if method == "GET" and m:
