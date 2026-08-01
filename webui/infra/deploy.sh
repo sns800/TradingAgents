@@ -39,7 +39,8 @@ aws cloudformation deploy \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     "VpcId=$VPC_ID" \
-    "SubnetIds=$SUBNET_IDS"
+    "SubnetIds=$SUBNET_IDS" \
+    "MaxActiveRuns=${MAX_ACTIVE_RUNS:-10}"
 
 outputs() {
   aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \

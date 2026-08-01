@@ -15,6 +15,12 @@ Parameters:
     Type: String
     Default: 11ikj0bqsifr90tf4b37h4t14p
     Description: "인증에 사용할 Cognito User Pool 앱 클라이언트 ID (household-ledger-users 풀의 tradingagents-web 클라이언트)"
+  MaxActiveRuns:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 50
+    Description: "동시에 진행할 수 있는 분석 실행(큐 대기 포함) 최대 개수 - Fargate/Bedrock 비용 상한 안전장치"
   BedrockDeepModel:
     Type: String
     Default: us.anthropic.claude-sonnet-4-5-20250929-v1:0
@@ -212,7 +218,7 @@ Resources:
           SUBNET_IDS: !Join [",", !Ref SubnetIds]
           SECURITY_GROUP: !Ref WorkerSecurityGroup
           CONTAINER_NAME: worker
-          MAX_ACTIVE_RUNS: "3"
+          MAX_ACTIVE_RUNS: !Ref MaxActiveRuns
           COGNITO_CLIENT_ID: !Ref CognitoClientId
       Code:
         # 자리표시자 - 실제 코드는 deploy.sh가 update-function-code로 배포
