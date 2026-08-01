@@ -434,3 +434,112 @@ class TestSentimentAnalystAgent:
         llm.with_structured_output.return_value = structured
         llm.invoke.return_value = MagicMock(content=plain)
         assert create_sentiment_analyst(llm)(_make_sentiment_state())["sentiment_report"] == plain
+
+
+# ---------------------------------------------------------------------------
+# 자유 텍스트 폴백의 영어 등급 줄 강제 (설계분석 단기 로드맵 #1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestFallbackRatingLine:
+    """require_rating_line이 폴백 프롬프트에 영어 등급 지시를 덧붙이는지 검증.
+
+    구조화 출력 실패 + 한국어 출력 언어 조합에서 등급 파서가 기본값(Hold)에
+    고착되는 것을 막는 안전장치다.
+    """
+
+    def _failing_structured(self):
+        structured = MagicMock()
+        structured.invoke.side_effect = ValueError("provider glitch")
+        return structured
+
+    def test_fallback_prompt_gets_rating_instruction(self):
+        """폴백 시 문자열 프롬프트 끝에 등급 지시문이 붙는지 검증하는 테스트."""
+        from tradingagents.agents.utils.structured import (
+            RATING_LINE_INSTRUCTION,
+            invoke_structured_or_freetext,
+        )
+
+        plain = MagicMock()
+        plain.invoke.return_value = MagicMock(content="자유 텍스트 결정문\n\nRating: Sell")
+
+        out = invoke_structured_or_freetext(
+            self._failing_structured(), plain, "원래 프롬프트",
+            render=lambda r: "unused", agent_name="PM",
+            require_rating_line=True,
+        )
+        sent_prompt = plain.invoke.call_args[0][0]
+        assert sent_prompt.startswith("원래 프롬프트")
+        assert sent_prompt.endswith(RATING_LINE_INSTRUCTION)
+        assert out.endswith("Rating: Sell")
+
+    def test_message_list_prompt_gets_extra_user_message(self):
+        """메시지 리스트 프롬프트에는 지시가 별도 user 메시지로 추가되는지 검증."""
+        from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+        plain = MagicMock()
+        plain.invoke.return_value = MagicMock(content="ok")
+        messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+
+        invoke_structured_or_freetext(
+            self._failing_structured(), plain, messages,
+            render=lambda r: "unused", agent_name="PM",
+            require_rating_line=True,
+        )
+        sent = plain.invoke.call_args[0][0]
+        assert len(sent) == 3 and sent[2]["role"] == "user"
+        assert "Rating:" in sent[2]["content"]
+        # 원본 리스트는 변형되지 않아야 한다
+        assert len(messages) == 2
+
+    def test_structured_success_path_unmodified(self):
+        """구조화 경로가 성공하면 프롬프트에 지시가 붙지 않는지 검증하는 테스트."""
+        from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+        structured = MagicMock()
+        structured.invoke.return_value = MagicMock()
+        plain = MagicMock()
+
+        invoke_structured_or_freetext(
+            structured, plain, "원래 프롬프트",
+            render=lambda r: "rendered", agent_name="PM",
+            require_rating_line=True,
+        )
+        sent_prompt = structured.invoke.call_args[0][0]
+        assert sent_prompt == "원래 프롬프트"
+        plain.invoke.assert_not_called()
+
+    def test_korean_fallback_decision_extracts_correct_signal(self):
+        """통합 시나리오: 한국어 자유 텍스트 폴백에서 Sell이 Sell로 추출되는지 검증.
+
+        (1) 모델이 지시를 따라 영어 Rating 줄을 붙인 경우와
+        (2) 지시를 무시하고 한국어 등급 라벨만 쓴 경우 모두 커버한다.
+        """
+        from tradingagents.agents.utils.rating import parse_rating
+        from tradingagents.agents.utils.structured import invoke_structured_or_freetext
+
+        obedient = "시장 과열로 매도가 타당합니다. (상세 근거...)\n\nRating: Sell"
+        disobedient = "**등급**: 매도\n\n**요약**: 포지션 청산을 권고합니다."
+
+        for content in (obedient, disobedient):
+            plain = MagicMock()
+            plain.invoke.return_value = MagicMock(content=content)
+            decision = invoke_structured_or_freetext(
+                self._failing_structured(), plain, "프롬프트",
+                render=lambda r: "unused", agent_name="PM",
+                require_rating_line=True,
+            )
+            assert parse_rating(decision) == "Sell"
+
+    def test_portfolio_manager_opts_in(self):
+        """포트폴리오 매니저 호출부가 require_rating_line=True를 쓰는지 검증.
+
+        PM 출력만 시그널 파서·메모리 태그로 소비되므로 PM은 반드시 옵트인해야
+        한다. 리팩터링으로 조용히 빠지는 것을 소스 검사로 방지한다.
+        """
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1] / "tradingagents" / "agents"
+               / "managers" / "portfolio_manager.py").read_text(encoding="utf-8")
+        assert "require_rating_line=True" in src

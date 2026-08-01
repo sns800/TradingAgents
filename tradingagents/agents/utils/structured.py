@@ -47,6 +47,17 @@ NO_EXTERNAL_TOOLS = (
     "or search the web; if something is missing, say so explicitly."
 )
 
+# 자유 텍스트 폴백에서 등급 추출을 보장하기 위한 지시문. 구조화 출력이
+# 실패하고 출력 언어가 영어가 아니면(이 포크 기본값: 한국어), 하류의
+# 등급 파서가 인식할 어휘가 응답에 없을 수 있다. 폴백 프롬프트에 영어
+# 등급 한 줄을 강제해 시그널/메모리 태그의 Hold 고착을 차단한다.
+# (LLM 프롬프트에 그대로 들어가므로 영어 원문 유지)
+RATING_LINE_INSTRUCTION = (
+    "\n\nIMPORTANT: Regardless of the language of your response, end it with "
+    "one final line of exactly `Rating: <X>` where <X> is one of Buy, "
+    "Overweight, Hold, Underweight, Sell (English word only)."
+)
+
 
 def bind_structured(llm: Any, schema: type[T], agent_name: str) -> Any | None:
     """``llm.with_structured_output(schema)``를 반환하고, 미지원이면 ``None``을 반환한다.
@@ -71,6 +82,7 @@ def invoke_structured_or_freetext(
     prompt: Any,
     render: Callable[[T], str],
     agent_name: str,
+    require_rating_line: bool = False,
 ) -> str:
     """구조화 호출을 실행해 마크다운으로 렌더링하고, 실패 시 자유 텍스트로 대체한다.
 
@@ -78,6 +90,11 @@ def invoke_structured_or_freetext(
     그런 형태를 받는 채팅 모델이면 메시지 딕셔너리 리스트). 같은 값이
     자유 텍스트 경로에도 그대로 전달되므로, 대체(fallback) 호출도 구조화
     호출과 동일한 입력을 본다.
+
+    ``require_rating_line``: 출력이 하류의 등급 파서(parse_rating)로
+    소비되는 에이전트(포트폴리오 매니저)는 True로 설정한다. 폴백 프롬프트에
+    영어 등급 마지막 줄을 강제해, 비영어 출력 언어에서도 등급 추출이
+    가능하게 한다. (구조화 경로는 렌더러가 항상 Rating 헤더를 붙이므로 불필요)
     """
     if structured_llm is not None:
         try:
@@ -93,6 +110,13 @@ def invoke_structured_or_freetext(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
                 agent_name, exc,
             )
+
+    if require_rating_line:
+        if isinstance(prompt, str):
+            prompt = prompt + RATING_LINE_INSTRUCTION
+        elif isinstance(prompt, list):
+            # 메시지 리스트 형식이면 마지막에 사용자 지시를 하나 덧붙인다.
+            prompt = [*prompt, {"role": "user", "content": RATING_LINE_INSTRUCTION.strip()}]
 
     response = plain_llm.invoke(prompt)
     return response.content

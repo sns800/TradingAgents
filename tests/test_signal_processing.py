@@ -102,3 +102,60 @@ class TestSignalProcessor:
         """등급이 없는 본문에서 기본값(Hold)을 반환하는지 검증하는 테스트."""
         sp = SignalProcessor()
         assert sp.process_signal("Plain prose without a recommendation.") == "Hold"
+
+
+@pytest.mark.unit
+class TestKoreanRatingParsing:
+    """한국어 결정문에서의 등급 추출 (설계분석 단기 로드맵 #1).
+
+    이 포크는 기본 출력 언어가 한국어라, 구조화 출력 실패 시 자유 텍스트
+    결정문이 한국어로 생성된다. 영어 어휘만 알던 파서는 그 경우 무조건
+    기본값 Hold를 반환해 실제 결정(예: Sell)을 조용히 뒤집었다.
+    """
+
+    def test_korean_label_and_value(self):
+        """"등급: 매도" 형태를 Sell로 추출하는지 검증하는 테스트."""
+        assert parse_rating("등급: 매도\n근거는 다음과 같습니다.") == "Sell"
+
+    def test_korean_label_with_markdown_bold(self):
+        """"**등급**: 비중축소" 형태를 Underweight로 추출하는지 검증하는 테스트."""
+        assert parse_rating("**등급**: 비중축소\n포지션을 줄이세요.") == "Underweight"
+
+    def test_english_label_korean_value(self):
+        """"Rating: 매수" (영어 라벨 + 한국어 값) 조합을 검증하는 테스트."""
+        assert parse_rating("**Rating**: 매수\n상승 여력이 큽니다.") == "Buy"
+
+    def test_all_korean_tiers_recognised(self):
+        """한국어 5단계 어휘가 모두 표준 영어 등급으로 매핑되는지 검증하는 테스트."""
+        pairs = [
+            ("매수", "Buy"), ("비중확대", "Overweight"), ("보유", "Hold"),
+            ("비중축소", "Underweight"), ("매도", "Sell"),
+        ]
+        for ko, expected in pairs:
+            assert parse_rating(f"등급: {ko}") == expected
+
+    def test_prose_fallback_korean_token(self):
+        """라벨 없이 본문의 독립된 한국어 등급 단어를 인식하는지 검증하는 테스트."""
+        assert parse_rating("결론적으로 **매도** 판단입니다.") == "Sell"
+
+    def test_spaced_two_word_form(self):
+        """"비중 확대"처럼 띄어 쓴 형태를 인식하는지 검증하는 테스트."""
+        assert parse_rating("포트폴리오에서 비중 축소를 권고합니다.") == "Underweight"
+
+    def test_compound_word_not_mistaken(self):
+        """"매도세" 같은 복합어가 등급으로 오인되지 않는지 검증하는 테스트."""
+        assert parse_rating("매도세가 강하지만 아직 판단 보류.") == "Hold"
+
+    def test_missing_rating_logs_warning(self, caplog):
+        """등급 어휘가 없으면 기본값과 함께 경고를 남기는지 검증하는 테스트.
+
+        조용한 Hold 고착은 시그널을 무의미하게 만들므로 반드시 로그 흔적이
+        필요하다 (설계분석 발견 #2).
+        """
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="tradingagents.agents.utils.rating"):
+            result = parse_rating("등급 어휘가 전혀 없는 문장.", context="unit test")
+        assert result == "Hold"
+        assert any("no rating vocabulary" in r.message and "unit test" in r.message
+                   for r in caplog.records)

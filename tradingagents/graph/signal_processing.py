@@ -35,4 +35,4 @@ class SignalProcessor:
 
     def process_signal(self, full_signal: str) -> str:
         """Buy / Overweight / Hold / Underweight / Sell 중 하나를 반환한다."""
-        return parse_rating(full_signal)
+        return parse_rating(full_signal, context="portfolio decision signal")

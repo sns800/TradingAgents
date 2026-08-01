@@ -98,6 +98,9 @@ Be decisive and ground every conclusion in specific evidence from the analysts.
             prompt,
             render_pm_decision,
             "Portfolio Manager",
+            # PM의 출력은 시그널 파서와 메모리 태그가 소비하므로, 자유 텍스트
+            # 폴백에서도 영어 등급 줄을 강제해 등급 추출을 보장한다.
+            require_rating_line=True,
         )
 
         # 리스크 토론 상태(risk_debate_state)를 갱신합니다: 최종 결정을

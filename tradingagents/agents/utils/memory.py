@@ -52,7 +52,7 @@ class TradingMemoryLog:
             for line in raw.splitlines():
                 if line.startswith(f"[{trade_date} | {ticker} |") and line.endswith("| pending]"):
                     return
-        rating = parse_rating(final_trade_decision)
+        rating = parse_rating(final_trade_decision, context="memory log entry")
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
         entry = f"{tag}\n\nDECISION:\n{final_trade_decision}{self._SEPARATOR}"
         with open(self._log_path, "a", encoding="utf-8") as f:
