@@ -49,6 +49,25 @@ def create_trader(llm):
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
 
+        # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 실행 계획 수립용
+        # 지시문과 함께 프롬프트에 포함합니다. 비어 있으면 섹션 전체를 생략해,
+        # 빈 섹션이 존재하지 않는 과거 교훈을 지어내게(hallucinate) 유도하는 것을
+        # 막는 #572 트레이드오프를 그대로 유지합니다 (PM과 동일한 패턴).
+        past_context = state.get("past_context", "")
+        # [한국어 요약] 아래 lessons 블록은 LLM에게 다음을 지시합니다:
+        # "이미 결과가 확정된 과거 결정들의 교훈이다. 실행 계획(진입/청산 규율,
+        # 포지션 크기, 리스크 통제)을 세울 때 참고해 과거에 지적된 실행 실수를
+        # 반복하지 말라. 과거 등급이 이번 추천을 좌우하게 하지는 말라."
+        lessons_block = (
+            "Lessons from past decisions and their outcomes (reflections from "
+            "already-resolved calls — apply them when constructing the execution plan: "
+            "entry/exit discipline, position sizing, and risk controls; avoid repeating "
+            "the execution mistakes flagged below, and do not let past ratings dictate "
+            f"your new recommendation):\n{past_context}\n\n"
+            if past_context
+            else ""
+        )
+
         # [한국어 요약] 아래 메시지들은 LLM에게 다음을 지시하는 프롬프트입니다:
         # - system: "당신은 시장 데이터를 분석해 투자 결정을 내리는 트레이딩 에이전트다.
         #   분석에 근거해 매수/매도/보유 중 하나의 구체적 추천을 제시하고,
@@ -58,6 +77,7 @@ def create_trader(llm):
         #   아래에 계획의 근거가 된 분석가 원본 보고서 4종을 제공하니
         #   계획의 주장을 검증하고 누락된 신호를 확인하는 데 사용하라
         #   (해당 분석가가 실행되지 않았으면 보고서가 비어 있을 수 있다).
+        #   (있다면) 과거 결정의 교훈이 이어지며, 실행 계획 수립 시 참고하라.
         #   이를 토대로 다음 거래 결정을 평가하라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         messages = [
@@ -86,6 +106,7 @@ def create_trader(llm):
                     f"Social Media Sentiment Report: {sentiment_report}\n"
                     f"Latest World Affairs Report: {news_report}\n"
                     f"Company Fundamentals Report: {fundamentals_report}\n\n"
+                    f"{lessons_block}"
                     f"Proposed Investment Plan: {investment_plan}\n\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),

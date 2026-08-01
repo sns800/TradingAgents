@@ -357,6 +357,9 @@ class TradingAgentsGraph:
                 alpha_return=alpha,
                 benchmark_name=benchmark,
                 actual_days=days,
+                # 당시 investment_plan 요약(PLAN: 섹션). 반성이 "무엇을 근거로
+                # 판단했는지"를 알 수 있게 한다. 구형 항목엔 없어 빈 문자열.
+                investment_plan=entry.get("plan", ""),
             )
             updates.append({
                 "ticker": ticker,
@@ -460,8 +463,9 @@ class TradingAgentsGraph:
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """그래프를 실행하고 결과 상태를 디스크와 메모리 로그에 기록한다."""
-        # 상태 초기화 — 포트폴리오 매니저(PM)용 메모리 로그 컨텍스트와,
-        # 모든 에이전트용으로 결정적으로 해석된 종목 정체성을 함께 주입한다.
+        # 상태 초기화 — 리서치 매니저·트레이더·포트폴리오 매니저(PM)용 메모리
+        # 로그 컨텍스트(past_context)와, 모든 에이전트용으로 결정적으로 해석된
+        # 종목 정체성을 함께 주입한다.
         past_context = self.memory_log.get_past_context(company_name, asset_type=asset_type)
         instrument_context = self.resolve_instrument_context(company_name, asset_type)
         init_agent_state = self.propagator.create_initial_state(
@@ -516,6 +520,9 @@ class TradingAgentsGraph:
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
             asset_type=asset_type,
+            # 당시 리서치 매니저의 투자 계획 앞부분(PLAN: 섹션)을 함께 저장해,
+            # Phase B 반성이 결정의 근거를 보고 복기할 수 있게 한다.
+            investment_plan=final_state.get("investment_plan", ""),
         )
 
         # 성공적으로 완료되면 체크포인트를 지워 오래된 상태가 남지 않게 한다.

@@ -26,10 +26,16 @@ class TradingMemoryLog:
     _REFLECTION_RE = re.compile(r"REFLECTION:\n(.*?)$", re.DOTALL)
     # 자산군(asset class) 태그 줄. DECISION 본문 앞 헤더 영역에서만 찾는다.
     _ASSET_RE = re.compile(r"^ASSET:\s*(\S+)\s*$", re.MULTILINE)
+    # 당시 investment_plan 요약 섹션. ASSET처럼 DECISION 앞 헤더 영역에서만 찾는다.
+    _PLAN_RE = re.compile(r"PLAN:\n(.*)", re.DOTALL)
     # past_context에 주입할 때 DECISION 원문을 자르는 길이(문자 수, 결정론적).
     # 교훈의 핵심은 REFLECTION이므로 결정문 전문 주입은 토큰만 낭비하고
     # 직전 등급에 앵커링(anchoring)시키는 부작용이 있다.
     _DECISION_SNIPPET_CHARS = 300
+    # PLAN: 섹션에 저장할 investment_plan 앞부분 길이(문자 수, 결정론적 절단).
+    # 반성(reflection)이 "당시 무엇을 근거로 판단했는지"를 알 수 있게 하는
+    # 용도이므로 계획 전문이 아니라 핵심 앞부분만 보존한다.
+    _PLAN_SNIPPET_CHARS = 500
 
     def __init__(self, config: dict = None):
         cfg = config or {}
@@ -49,12 +55,18 @@ class TradingMemoryLog:
         trade_date: str,
         final_trade_decision: str,
         asset_type: str = "stock",
+        investment_plan: str = "",
     ) -> None:
         """propagate() 종료 시점에 대기(pending) 항목을 추가한다. LLM 호출 없음.
 
         ``asset_type``(stock/crypto)은 항목 헤더의 ``ASSET:`` 줄로 저장되어,
         나중에 cross-ticker 교훈을 같은 자산군으로만 선별하는 데 쓰입니다.
         태그가 없는 구형 항목은 파싱 시 stock으로 간주됩니다(하위 호환).
+
+        ``investment_plan``(리서치 매니저의 당시 투자 계획)이 주어지면 앞부분을
+        결정론적으로 절단해 ``PLAN:`` 섹션으로 함께 저장합니다. Phase B 반성이
+        "당시 무엇을 근거로 판단했는지"를 볼 수 있게 하는 용도이며, 섹션이 없는
+        구형 항목은 파싱 시 빈 문자열로 간주됩니다(하위 호환).
         """
         if not self._log_path:
             return
@@ -66,8 +78,13 @@ class TradingMemoryLog:
                     return
         rating = parse_rating(final_trade_decision, context="memory log entry")
         tag = f"[{trade_date} | {ticker} | {rating} | pending]"
+        plan_section = (
+            f"PLAN:\n{self._truncate_plan(investment_plan.strip())}\n\n"
+            if investment_plan.strip()
+            else ""
+        )
         entry = (
-            f"{tag}\n\nASSET: {asset_type}\n\n"
+            f"{tag}\n\nASSET: {asset_type}\n\n{plan_section}"
             f"DECISION:\n{final_trade_decision}{self._SEPARATOR}"
         )
         with open(self._log_path, "a", encoding="utf-8") as f:
@@ -323,6 +340,10 @@ class TradingMemoryLog:
         asset_match = self._ASSET_RE.search(header)
         # 태그가 없는 구형 항목은 stock으로 간주(하위 호환)
         entry["asset_type"] = asset_match.group(1).lower() if asset_match else "stock"
+        # PLAN 섹션도 헤더 영역에서만 찾는다 — 결정문 안의 "PLAN:" 문자열 오인 방지.
+        # 섹션이 없는 구형 항목은 빈 문자열(하위 호환).
+        plan_match = self._PLAN_RE.search(header)
+        entry["plan"] = plan_match.group(1).strip() if plan_match else ""
         decision_match = self._DECISION_RE.search(body)
         reflection_match = self._REFLECTION_RE.search(body)
         entry["decision"] = decision_match.group(1).strip() if decision_match else ""
@@ -334,6 +355,12 @@ class TradingMemoryLog:
         if len(text) <= self._DECISION_SNIPPET_CHARS:
             return text
         return text[: self._DECISION_SNIPPET_CHARS].rstrip() + "..."
+
+    def _truncate_plan(self, text: str) -> str:
+        # investment_plan 원문을 결정론적으로 앞부분만 자른다(PLAN: 섹션 저장용).
+        if len(text) <= self._PLAN_SNIPPET_CHARS:
+            return text
+        return text[: self._PLAN_SNIPPET_CHARS].rstrip() + "..."
 
     def _format_condensed(self, e: dict) -> str:
         # 같은 종목의 과거 항목용 축약 포맷: 태그 + REFLECTION 전문 +

@@ -47,6 +47,25 @@ def create_research_manager(llm):
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
 
+        # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 판정용 지시문과 함께
+        # 프롬프트에 포함합니다. 비어 있으면 섹션 전체를 생략합니다 — 빈 섹션이
+        # 존재하지 않는 과거 교훈을 지어내게(hallucinate) 유도하는 것을 막는
+        # #572 트레이드오프를 그대로 유지합니다 (PM과 동일한 패턴).
+        past_context = state.get("past_context", "")
+        # [한국어 요약] 아래 lessons 블록은 LLM에게 다음을 지시합니다:
+        # "이미 결과가 확정된 과거 결정들의 반성(REFLECTION)이다. 판정 시 참고하라 —
+        # 어느 쪽 토론자가 과거에 지적된 실수를 반복하고 있는지 확인하고 그에 따라
+        # 논거의 무게를 조정하라. 과거 등급이 이번 등급을 앵커링하게 하지는 말라."
+        lessons_block = (
+            "**Lessons from past decisions and their outcomes** (reflections from "
+            "already-resolved calls — consult them when judging this debate: check "
+            "whether either side is repeating a mistake flagged below and weigh their "
+            "arguments accordingly; do not let past ratings anchor your new rating):\n"
+            f"{past_context}\n\n---\n\n"
+            if past_context
+            else ""
+        )
+
         # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
         # "리서치 매니저이자 토론 진행자로서 이번 토론 라운드를 비판적으로 평가하고,
         # 트레이더를 위한 명확하고 실행 가능한 투자 계획을 제시하라.
@@ -54,10 +73,10 @@ def create_research_manager(llm):
         # Underweight(비중 축소)/Sell(매도) 중 정확히 하나를 사용하라.
         # 토론의 가장 강한 논거가 뒷받침될 때는 분명한 입장을 취하고,
         # Hold는 양측 근거가 진정으로 균형일 때만 남겨 두라.
-        # 분석가 원본 보고서 4종과 토론 이력이 컨텍스트로 주어진다.
-        # 토론자의 주장은 원본 보고서와 대조해 검증하고, 보고서에 근거가 없는
-        # 주장은 낮게 평가하라 (해당 분석가가 실행되지 않았으면 보고서가
-        # 비어 있을 수 있다). 외부 도구는 사용하지 말라."
+        # 분석가 원본 보고서 4종과 토론 이력, (있다면) 과거 교훈이 컨텍스트로
+        # 주어진다. 토론자의 주장은 원본 보고서와 대조해 검증하고, 보고서에
+        # 근거가 없는 주장은 낮게 평가하라 (해당 분석가가 실행되지 않았으면
+        # 보고서가 비어 있을 수 있다). 외부 도구는 사용하지 말라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -84,7 +103,7 @@ Company Fundamentals Report: {fundamentals_report}
 
 ---
 
-**Debate History:**
+{lessons_block}**Debate History:**
 {history}
 
 {NO_EXTERNAL_TOOLS}""" + get_language_instruction()
