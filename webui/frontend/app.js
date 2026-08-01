@@ -41,6 +41,18 @@
     5: '깊게'
   };
 
+  var MARKET_LABEL = {
+    KR: '한국',
+    JP: '일본',
+    US: '미국'
+  };
+
+  var CURRENCY_SYMBOL = {
+    KRW: '₩',
+    JPY: '¥',
+    USD: '$'
+  };
+
   var REPORT_LABEL = {
     'complete_report.md': '전체 보고서',
     '1_analysts/market.md': '시장 분석',
@@ -83,7 +95,28 @@
     loginError: document.getElementById('login-error'),
     headerUser: document.getElementById('header-user'),
     userEmail: document.getElementById('user-email'),
-    btnLogout: document.getElementById('btn-logout')
+    btnLogout: document.getElementById('btn-logout'),
+    appNav: document.getElementById('app-nav'),
+    navAnalysis: document.getElementById('nav-analysis'),
+    navCatalog: document.getElementById('nav-catalog'),
+    formSuggest: document.getElementById('form-suggest'),
+    formSuggestList: document.getElementById('form-suggest-list'),
+    viewCatalog: document.getElementById('view-catalog'),
+    marketToggle: document.getElementById('market-toggle'),
+    catalogSearch: document.getElementById('catalog-search'),
+    catalogSector: document.getElementById('catalog-sector'),
+    catalogSort: document.getElementById('catalog-sort'),
+    catalogOrder: document.getElementById('catalog-order'),
+    catalogStatus: document.getElementById('catalog-status'),
+    catalogTableWrap: document.getElementById('catalog-table-wrap'),
+    catalogBody: document.getElementById('catalog-body'),
+    catalogEmpty: document.getElementById('catalog-empty'),
+    catalogFooter: document.getElementById('catalog-footer'),
+    catalogPrev: document.getElementById('catalog-prev'),
+    catalogNext: document.getElementById('catalog-next'),
+    catalogPageInfo: document.getElementById('catalog-pageinfo'),
+    catalogGenerated: document.getElementById('catalog-generated'),
+    toast: document.getElementById('toast')
   };
 
   // ---------- 상태 ----------
@@ -95,6 +128,19 @@
     tickTimer: null,
     currentReport: null,
     reportsLoaded: false
+  };
+
+  // 종목 탐색 화면 상태
+  var catalog = {
+    market: 'KR',
+    q: '',
+    sector: '',
+    sort: 'name',
+    order: 'asc',
+    page: 1,
+    pageSize: 50,
+    reqId: 0,
+    debounceTimer: null
   };
 
   // ---------- 유틸 ----------
@@ -137,6 +183,57 @@
 
   function reportLabel(name) {
     return REPORT_LABEL[name] || name;
+  }
+
+  function formatNumber(value, decimals) {
+    return Number(value).toLocaleString('ko-KR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  }
+
+  function formatPrice(price, currency) {
+    if (price === null || price === undefined || isNaN(Number(price))) return '-';
+    var cur = currency || '';
+    var decimals = (cur === 'KRW' || cur === 'JPY') ? 0 : 2;
+    var num = formatNumber(price, decimals);
+    var sym = CURRENCY_SYMBOL[cur];
+    if (sym) return sym + num;
+    return cur ? num + ' ' + cur : num;
+  }
+
+  // 시총 축약 단위 계수: 100 이상은 정수, 그 미만은 소수 1자리
+  function formatCapUnit(v) {
+    if (v >= 100) return formatNumber(Math.round(v), 0);
+    var s = v.toFixed(1);
+    return s.slice(-2) === '.0' ? s.slice(0, -2) : s;
+  }
+
+  function formatMarketCap(cap, currency) {
+    if (cap === null || cap === undefined || isNaN(Number(cap))) return '-';
+    var v = Number(cap);
+    if (v < 0) return '-';
+    if (currency === 'USD') {
+      if (v >= 1e9) return '$' + formatCapUnit(v / 1e9) + 'B';
+      if (v >= 1e6) return '$' + formatCapUnit(v / 1e6) + 'M';
+      return '$' + formatNumber(v, 0);
+    }
+    var sym = CURRENCY_SYMBOL[currency] || '';
+    if (v >= 1e12) return sym + formatCapUnit(v / 1e12) + '조';
+    if (v >= 1e8) return sym + formatCapUnit(v / 1e8) + '억';
+    return sym + formatNumber(v, 0);
+  }
+
+  var toastTimer = null;
+
+  function showToast(msg) {
+    el.toast.textContent = msg;
+    el.toast.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.toast.hidden = true;
+      toastTimer = null;
+    }, 2500);
   }
 
   function elem(tag, className, text) {
@@ -359,6 +456,7 @@
           var msg = (data && data.error) ? data.error : ('서버 오류 (HTTP ' + res.status + ')');
           var err = new Error(msg);
           err.status = res.status;
+          err.data = data;
           throw err;
         }
         if (data === null) {
@@ -460,9 +558,35 @@
     }
   }
 
+  function clearSuggestions() {
+    el.formSuggestList.textContent = '';
+    el.formSuggest.hidden = true;
+  }
+
+  // POST /runs 400 응답의 suggestions로 "혹시 이 종목인가요?" 후보 버튼 표시
+  function renderSuggestions(suggestions) {
+    clearSuggestions();
+    if (!Array.isArray(suggestions) || suggestions.length === 0) return;
+    suggestions.forEach(function (s) {
+      if (!s || !s.ticker) return;
+      var label = s.name ? s.name + ' (' + s.ticker + ')' : String(s.ticker);
+      var btn = elem('button', 'suggest-btn', label);
+      btn.type = 'button';
+      btn.addEventListener('click', function () {
+        el.inputTicker.value = String(s.ticker).toUpperCase();
+        setFormError(null);
+        clearSuggestions();
+        el.inputTicker.focus();
+      });
+      el.formSuggestList.appendChild(btn);
+    });
+    el.formSuggest.hidden = el.formSuggestList.children.length === 0;
+  }
+
   el.form.addEventListener('submit', function (e) {
     e.preventDefault();
     setFormError(null);
+    clearSuggestions();
 
     var ticker = el.inputTicker.value.trim().toUpperCase();
     var date = el.inputDate.value;
@@ -497,6 +621,9 @@
       }
     }).catch(function (err) {
       setFormError(err.message);
+      if (err.status === 400 && err.data) {
+        renderSuggestions(err.data.suggestions);
+      }
     }).finally(function () {
       el.btnSubmit.disabled = false;
       el.btnSubmit.textContent = '분석 시작';
@@ -650,6 +777,210 @@
     }, 1000);
   }
 
+  // ---------- 종목 탐색 화면 ----------
+
+  function setCatalogLoading(loading) {
+    if (loading) {
+      el.catalogStatus.textContent = '';
+      el.catalogStatus.appendChild(elem('span', 'spinner'));
+      el.catalogStatus.appendChild(document.createTextNode(' 불러오는 중…'));
+      el.catalogStatus.hidden = false;
+    } else {
+      el.catalogStatus.textContent = '';
+      el.catalogStatus.hidden = true;
+    }
+  }
+
+  function setCatalogEmpty(msg) {
+    if (msg) {
+      el.catalogEmpty.textContent = msg;
+      el.catalogEmpty.hidden = false;
+      el.catalogTableWrap.hidden = true;
+      el.catalogFooter.hidden = true;
+    } else {
+      el.catalogEmpty.textContent = '';
+      el.catalogEmpty.hidden = true;
+      el.catalogTableWrap.hidden = false;
+    }
+  }
+
+  // 응답의 sectors로 업종 드롭다운 채움 (현재 선택 유지)
+  function fillSectors(sectors) {
+    if (!Array.isArray(sectors)) return;
+    var current = el.catalogSector.value;
+    el.catalogSector.textContent = '';
+    var optAll = elem('option', null, '전체 업종');
+    optAll.value = '';
+    el.catalogSector.appendChild(optAll);
+    sectors.forEach(function (s) {
+      if (!s) return;
+      var opt = elem('option', null, String(s));
+      opt.value = String(s);
+      el.catalogSector.appendChild(opt);
+    });
+    el.catalogSector.value = current;
+    if (el.catalogSector.value !== current) {
+      // 목록에 없는 업종이면 전체로 되돌림
+      el.catalogSector.value = '';
+      catalog.sector = '';
+    }
+  }
+
+  // 카탈로그 행 클릭 → 분석 화면으로 전환하며 티커 자동 입력
+  function pickTickerForAnalysis(ticker) {
+    var t = String(ticker).toUpperCase();
+    el.inputTicker.value = t;
+    setFormError(null);
+    clearSuggestions();
+    location.hash = '#/';
+    // hashchange로 화면 전환이 끝난 뒤 강조 표시
+    setTimeout(function () {
+      el.inputTicker.focus();
+      el.inputTicker.classList.add('input-flash');
+      setTimeout(function () {
+        el.inputTicker.classList.remove('input-flash');
+      }, 1500);
+    }, 50);
+    showToast('종목 코드 ' + t + '을(를) 분석 폼에 입력했습니다.');
+  }
+
+  function renderCatalog(data) {
+    var items = Array.isArray(data.items) ? data.items : [];
+    fillSectors(data.sectors);
+
+    el.catalogBody.textContent = '';
+    if (items.length === 0) {
+      setCatalogEmpty('조건에 맞는 종목이 없습니다.');
+    } else {
+      setCatalogEmpty(null);
+      items.forEach(function (item) {
+        var tr = elem('tr', 'catalog-row');
+        tr.setAttribute('role', 'button');
+        tr.tabIndex = 0;
+
+        tr.appendChild(elem('td', 'cat-name', item.name || '-'));
+        tr.appendChild(elem('td', 'cat-ticker', item.ticker || '-'));
+        tr.appendChild(elem('td', 'cat-market', MARKET_LABEL[item.market] || item.market || '-'));
+        tr.appendChild(elem('td', 'cat-sector', item.sector || '-'));
+        tr.appendChild(elem('td', 'num', formatPrice(item.price, item.currency)));
+        tr.appendChild(elem('td', 'num', formatMarketCap(item.market_cap, item.currency)));
+
+        function pick() {
+          if (item.ticker) pickTickerForAnalysis(item.ticker);
+        }
+        tr.addEventListener('click', pick);
+        tr.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            pick();
+          }
+        });
+
+        el.catalogBody.appendChild(tr);
+      });
+    }
+
+    var total = Number(data.total) || 0;
+    catalog.pageSize = Number(data.page_size) || 50;
+    var pages = Math.max(1, Math.ceil(total / catalog.pageSize));
+    if (catalog.page > pages) catalog.page = pages;
+
+    el.catalogPageInfo.textContent =
+      catalog.page + ' / ' + pages + ' 페이지 · 전체 ' + formatNumber(total, 0) + '건';
+    el.catalogPrev.disabled = catalog.page <= 1;
+    el.catalogNext.disabled = catalog.page >= pages;
+    el.catalogGenerated.textContent = data.generated_at
+      ? '데이터 기준: ' + formatKST(data.generated_at) + ' KST'
+      : '';
+    el.catalogFooter.hidden = false;
+  }
+
+  function loadCatalog() {
+    var reqId = ++catalog.reqId;
+    setCatalogLoading(true);
+
+    var params = [
+      'market=' + encodeURIComponent(catalog.market),
+      'sort=' + encodeURIComponent(catalog.sort),
+      'order=' + encodeURIComponent(catalog.order),
+      'page=' + encodeURIComponent(catalog.page)
+    ];
+    if (catalog.q) params.push('q=' + encodeURIComponent(catalog.q));
+    if (catalog.sector) params.push('sector=' + encodeURIComponent(catalog.sector));
+
+    apiFetch('/catalog?' + params.join('&')).then(function (data) {
+      if (state.route.view !== 'catalog' || reqId !== catalog.reqId) return;
+      setCatalogLoading(false);
+      renderCatalog(data);
+    }).catch(function (err) {
+      if (state.route.view !== 'catalog' || reqId !== catalog.reqId) return;
+      setCatalogLoading(false);
+      el.catalogBody.textContent = '';
+      if (err.status === 404) {
+        setCatalogEmpty('종목 카탈로그가 아직 생성되지 않았습니다. 일 1회 배치로 생성될 예정이니 잠시 후 다시 확인해 주세요.');
+      } else {
+        setCatalogEmpty('종목 목록을 불러오지 못했습니다: ' + err.message);
+      }
+    });
+  }
+
+  function catalogReload(resetPage) {
+    if (resetPage) catalog.page = 1;
+    loadCatalog();
+  }
+
+  el.marketToggle.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-market]');
+    if (!btn) return;
+    var market = btn.dataset.market;
+    if (market === catalog.market) return;
+    catalog.market = market;
+    catalog.sector = '';
+    el.catalogSector.value = '';
+    Array.prototype.forEach.call(
+      el.marketToggle.querySelectorAll('button[data-market]'),
+      function (b) { b.classList.toggle('active', b.dataset.market === market); }
+    );
+    catalogReload(true);
+  });
+
+  el.catalogSearch.addEventListener('input', function () {
+    if (catalog.debounceTimer) clearTimeout(catalog.debounceTimer);
+    catalog.debounceTimer = setTimeout(function () {
+      catalog.debounceTimer = null;
+      var q = el.catalogSearch.value.trim();
+      if (q === catalog.q) return;
+      catalog.q = q;
+      catalogReload(true);
+    }, 400);
+  });
+
+  el.catalogSector.addEventListener('change', function () {
+    catalog.sector = el.catalogSector.value;
+    catalogReload(true);
+  });
+
+  el.catalogSort.addEventListener('change', function () {
+    catalog.sort = el.catalogSort.value;
+    catalogReload(true);
+  });
+
+  el.catalogOrder.addEventListener('change', function () {
+    catalog.order = el.catalogOrder.value;
+    catalogReload(true);
+  });
+
+  el.catalogPrev.addEventListener('click', function () {
+    if (catalog.page <= 1) return;
+    catalog.page -= 1;
+    loadCatalog();
+  });
+
+  el.catalogNext.addEventListener('click', function () {
+    catalog.page += 1;
+    loadCatalog();
+  });
+
   // ---------- 라우팅 ----------
 
   function parseHash() {
@@ -658,16 +989,26 @@
     if (m) {
       return { view: 'detail', runId: decodeURIComponent(m[1]) };
     }
+    if (/^#\/catalog(?:[\/?#]|$)/.test(hash)) {
+      return { view: 'catalog', runId: null };
+    }
     return { view: 'list', runId: null };
+  }
+
+  function updateNav() {
+    el.navAnalysis.classList.toggle('active', state.route.view !== 'catalog');
+    el.navCatalog.classList.toggle('active', state.route.view === 'catalog');
   }
 
   function applyRoute() {
     if (!state.authed) return;
     stopPolling();
     state.route = parseHash();
+    updateNav();
 
     if (state.route.view === 'detail') {
       el.viewList.hidden = true;
+      el.viewCatalog.hidden = true;
       el.viewDetail.hidden = false;
       state.currentReport = null;
       state.reportsLoaded = false;
@@ -677,8 +1018,14 @@
       el.reportNav.textContent = '';
       el.reportContent.textContent = '';
       loadDetail(state.route.runId);
+    } else if (state.route.view === 'catalog') {
+      el.viewList.hidden = true;
+      el.viewDetail.hidden = true;
+      el.viewCatalog.hidden = false;
+      loadCatalog();
     } else {
       el.viewDetail.hidden = true;
+      el.viewCatalog.hidden = true;
       el.viewList.hidden = false;
       el.runsList.textContent = '';
       el.runsList.appendChild(elem('p', 'empty-msg', '불러오는 중…'));
@@ -706,6 +1053,8 @@
     stopPolling();
     el.viewList.hidden = true;
     el.viewDetail.hidden = true;
+    el.viewCatalog.hidden = true;
+    el.appNav.hidden = true;
     el.headerUser.hidden = true;
     el.userEmail.textContent = '';
     el.viewLogin.hidden = false;
@@ -721,6 +1070,7 @@
     var payload = decodeJwtPayload(localStorage.getItem(KEY_ID));
     el.userEmail.textContent = (payload && payload.email) ? payload.email : '';
     el.headerUser.hidden = false;
+    el.appNav.hidden = false;
 
     applyRoute();
   }

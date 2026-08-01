@@ -22,6 +22,12 @@
   </header>
 
   <main id="app" class="container">
+    <!-- 화면 전환 탭 -->
+    <nav id="app-nav" class="app-nav" hidden>
+      <a href="#/" id="nav-analysis" class="nav-tab active">분석</a>
+      <a href="#/catalog" id="nav-catalog" class="nav-tab">종목 탐색</a>
+    </nav>
+
     <!-- 로그인 화면 -->
     <section id="view-login" hidden>
       <div class="card login-card">
@@ -69,6 +75,10 @@
             </div>
           </div>
           <p id="form-error" class="form-error" hidden></p>
+          <div id="form-suggest" class="form-suggest" hidden>
+            <p class="form-suggest-title">혹시 이 종목인가요?</p>
+            <div id="form-suggest-list" class="form-suggest-list"></div>
+          </div>
         </form>
       </section>
 
@@ -95,7 +105,61 @@
         </div>
       </section>
     </section>
+
+    <!-- 종목 탐색 화면 -->
+    <section id="view-catalog" hidden>
+      <section class="card">
+        <h2>종목 탐색</h2>
+        <div class="catalog-toolbar">
+          <div id="market-toggle" class="market-toggle" role="group" aria-label="시장 선택">
+            <button type="button" data-market="KR" class="active">한국</button>
+            <button type="button" data-market="JP">일본</button>
+            <button type="button" data-market="US">미국</button>
+          </div>
+          <input type="text" id="catalog-search" class="catalog-search" placeholder="종목명 또는 티커 검색" autocomplete="off" aria-label="종목 검색">
+          <select id="catalog-sector" aria-label="업종 필터">
+            <option value="">전체 업종</option>
+          </select>
+          <select id="catalog-sort" aria-label="정렬 기준">
+            <option value="name">이름순</option>
+            <option value="price">종가순</option>
+            <option value="market_cap">시총순</option>
+          </select>
+          <select id="catalog-order" aria-label="정렬 방향">
+            <option value="asc">오름차순</option>
+            <option value="desc">내림차순</option>
+          </select>
+        </div>
+        <div id="catalog-status" class="catalog-status" hidden></div>
+        <div id="catalog-table-wrap" class="catalog-table-wrap">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>종목명</th>
+                <th>티커</th>
+                <th>시장</th>
+                <th>업종</th>
+                <th class="num">종가</th>
+                <th class="num">시총</th>
+              </tr>
+            </thead>
+            <tbody id="catalog-body"></tbody>
+          </table>
+        </div>
+        <p id="catalog-empty" class="empty-msg" hidden></p>
+        <div id="catalog-footer" class="catalog-footer" hidden>
+          <div class="catalog-pager">
+            <button type="button" id="catalog-prev" class="btn btn-ghost btn-pager">← 이전</button>
+            <span id="catalog-pageinfo" class="catalog-pageinfo"></span>
+            <button type="button" id="catalog-next" class="btn btn-ghost btn-pager">다음 →</button>
+          </div>
+          <span id="catalog-generated" class="catalog-generated"></span>
+        </div>
+      </section>
+    </section>
   </main>
+
+  <div id="toast" class="toast" hidden></div>
 
   <footer class="site-footer">
     <p>TradingAgents — 멀티 에이전트 LLM 트레이딩 연구 프레임워크</p>

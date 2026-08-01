@@ -542,6 +542,270 @@ input:focus, select:focus {
   margin: 1.2em 0;
 }
 
+/* ---------- 화면 전환 탭 ---------- */
+.app-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-tab {
+  display: inline-block;
+  padding: 8px 18px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.nav-tab.active {
+  color: var(--accent-hover);
+  border-bottom-color: var(--accent);
+}
+
+/* ---------- 종목 탐색 ---------- */
+.catalog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.market-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.market-toggle button {
+  background: var(--bg);
+  border: none;
+  color: var(--text-muted);
+  padding: 9px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.market-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.market-toggle button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.market-toggle button.active {
+  background: var(--blue-bg);
+  color: var(--accent-hover);
+}
+
+.catalog-search {
+  flex: 1 1 200px;
+  min-width: 160px;
+}
+
+.catalog-toolbar select {
+  width: auto;
+  flex-shrink: 0;
+}
+
+.catalog-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+
+.catalog-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.catalog-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 640px;
+}
+
+.catalog-table th,
+.catalog-table td {
+  padding: 9px 14px;
+  font-size: 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.catalog-table th {
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.catalog-table th.num,
+.catalog-table td.num {
+  text-align: right;
+  font-family: var(--mono);
+}
+
+.catalog-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.catalog-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.catalog-row:hover,
+.catalog-row:focus {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.cat-name {
+  font-weight: 600;
+  white-space: normal;
+  min-width: 140px;
+}
+
+.cat-ticker {
+  font-family: var(--mono);
+  color: var(--accent-hover);
+}
+
+.cat-market,
+.cat-sector {
+  color: var(--text-muted);
+}
+
+.catalog-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.catalog-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-pager {
+  margin-bottom: 0;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.catalog-pageinfo {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.catalog-generated {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+/* ---------- 티커 후보 제안 ---------- */
+.form-suggest {
+  margin-top: 12px;
+  background: var(--blue-bg);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.form-suggest-title {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-hover);
+}
+
+.form-suggest-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.suggest-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  padding: 5px 14px;
+  font-size: 0.85rem;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.suggest-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+/* ---------- 토스트 / 입력 강조 ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  max-width: calc(100vw - 40px);
+  animation: toast-in 0.2s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.input-flash {
+  animation: input-flash 1.5s ease-out;
+}
+
+@keyframes input-flash {
+  0%   { border-color: var(--accent); box-shadow: 0 0 0 3px var(--blue-bg); }
+  70%  { border-color: var(--accent); box-shadow: 0 0 0 3px var(--blue-bg); }
+  100% { border-color: var(--border); box-shadow: none; }
+}
+
 /* ---------- 푸터 ---------- */
 .site-footer {
   border-top: 1px solid var(--border);
@@ -590,5 +854,24 @@ input:focus, select:focus {
 
   .report-content {
     padding: 14px;
+  }
+
+  .catalog-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .market-toggle {
+    align-self: flex-start;
+  }
+
+  .catalog-search,
+  .catalog-toolbar select {
+    width: 100%;
+  }
+
+  .catalog-footer {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
