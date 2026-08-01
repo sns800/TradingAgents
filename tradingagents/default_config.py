@@ -22,6 +22,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_OUTPUT_LANGUAGE":      "output_language",
     "TRADINGAGENTS_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
+    "TRADINGAGENTS_HOLDING_DAYS":         "holding_days",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
@@ -85,11 +86,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
     # 매매 결정·리플렉션이 누적되는 메모리 로그(memory log) 파일 경로
     "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
-    # 해소된(resolved) 메모리 로그 항목 개수의 상한(선택). 값을 설정하면
-    # 이 한도를 넘었을 때 가장 오래된 해소 항목부터 정리(prune)됩니다.
-    # 아직 결과 대기 중(pending)인 항목은 절대 정리되지 않습니다.
-    # None이면 로테이션(rotation)을 완전히 끕니다.
-    "memory_log_max_entries": None,
+    # 해소된(resolved) 메모리 로그 항목 개수의 상한. 이 한도를 넘으면
+    # 가장 오래된 해소 항목부터 정리(prune)됩니다. 아직 결과 대기 중(pending)인
+    # 항목은 절대 정리되지 않습니다. None이면 로테이션(rotation)을 완전히
+    # 끄지만, 그러면 로그가 무한히 자라므로 기본값은 유한한 200입니다.
+    "memory_log_max_entries": 200,
+    # 리플렉션(회고) 평가용 보유 기간(거래일 수). 결정일 이후 실제 거래일이
+    # 이만큼 쌓여야 결과(수익률)를 확정합니다 — 데이터가 모자라면 항목을
+    # pending으로 남겨 다음 실행 때 재시도하므로, 5일 보유 의도가 1일
+    # 수익률(노이즈)로 조기 확정되는 것을 막습니다.
+    "holding_days": 5,
     # ----- LLM 설정 -----
     # 사용할 LLM 제공자(provider): "openai", "google", "anthropic" 등
     "llm_provider": "openai",
@@ -122,8 +128,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # 체크포인트/재개(resume): True면 LangGraph가 노드 하나가 끝날 때마다
     # 상태를 저장하므로, 도중에 죽은 실행을 마지막 성공 단계부터 재개할 수 있습니다.
     "checkpoint_enabled": False,
-    # 애널리스트 보고서와 최종 결정의 출력 언어.
-    # 내부 에이전트 토론은 추론 품질을 위해 영어로 유지됩니다.
+    # 출력 언어. 언어 지시는 보고서를 생성하는 모든 에이전트에 주입되므로
+    # 내부 토론(리서처/리스크)도 이 언어로 진행된다 — 프롬프트 자체만 영어다.
     # ※ 한글화 포크: 원본의 기본값은 "English"이지만 이 포크는 "Korean"입니다.
     #    TRADINGAGENTS_OUTPUT_LANGUAGE 환경변수로 언제든 바꿀 수 있습니다.
     "output_language": "Korean",

@@ -75,6 +75,21 @@ def test_bool_coercion(monkeypatch, raw, expected):
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
 
 
+def test_holding_days_default_and_override(monkeypatch):
+    """holding_days가 기본값 5를 갖고 TRADINGAGENTS_HOLDING_DAYS로 덮어써지는지 검증하는 테스트."""
+    dc = _reload_with_env(monkeypatch)
+    assert dc.DEFAULT_CONFIG["holding_days"] == 5
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_HOLDING_DAYS="10")
+    assert dc.DEFAULT_CONFIG["holding_days"] == 10
+    assert isinstance(dc.DEFAULT_CONFIG["holding_days"], int)
+
+
+def test_memory_log_max_entries_finite_default(monkeypatch):
+    """메모리 로그 로테이션 상한 기본값이 무한(None)이 아닌 유한값(200)인지 검증하는 테스트."""
+    dc = _reload_with_env(monkeypatch)
+    assert dc.DEFAULT_CONFIG["memory_log_max_entries"] == 200
+
+
 def test_reasoning_thinking_overrides(monkeypatch):
     """제공자별 추론/사고(reasoning/thinking) 옵션이 환경 변수로 설정 가능한지 검증하는 테스트 (비대화형 실행용)."""
     dc = _reload_with_env(

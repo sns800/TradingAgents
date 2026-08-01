@@ -272,6 +272,11 @@ class TradingAgentsGraph:
         actual_holding_days)``를 반환하며, 가격 데이터를 구할 수 없으면
         (너무 최근이거나, 상장 폐지되었거나, 네트워크 오류)
         ``(None, None, None)``을 반환합니다.
+
+        조기 확정 가드: 결정일 이후 실제 확보된 거래일 수가 ``holding_days``에
+        못 미치면 (None, None, None)을 반환해 항목이 pending으로 남게 합니다.
+        다음 날 재실행 시 5일 보유 의도가 1일 수익률(노이즈)로 영구 확정되던
+        문제를 막고, 데이터가 충분히 쌓인 다음 실행에서 확정하게 합니다.
         """
         from tradingagents.dataflows.symbol_utils import normalize_symbol
 
@@ -289,7 +294,17 @@ class TradingAgentsGraph:
             if len(stock) < 2 or len(bench) < 2:
                 return None, None, None
 
-            actual_days = min(holding_days, len(stock) - 1, len(bench) - 1)
+            # 종목과 벤치마크 모두 보유 기간만큼의 거래일이 쌓였을 때만 확정.
+            # 부족하면 pending으로 남겨 다음 실행에서 재시도한다.
+            available_days = min(len(stock) - 1, len(bench) - 1)
+            if available_days < holding_days:
+                logger.info(
+                    "Deferring outcome for %s on %s: only %d of %d trading days available",
+                    ticker, trade_date, available_days, holding_days,
+                )
+                return None, None, None
+
+            actual_days = holding_days
             raw = float(
                 (stock["Close"].iloc[actual_days] - stock["Close"].iloc[0])
                 / stock["Close"].iloc[0]
@@ -328,18 +343,20 @@ class TradingAgentsGraph:
             return
 
         benchmark = self._resolve_benchmark(ticker)
+        holding_days = self.config.get("holding_days", 5)
         updates = []
         for entry in pending:
             raw, alpha, days = self._fetch_returns(
-                ticker, entry["date"], benchmark=benchmark,
+                ticker, entry["date"], holding_days=holding_days, benchmark=benchmark,
             )
             if raw is None:
-                continue  # 가격을 아직 구할 수 없음 — 다음 실행 때 다시 시도
+                continue  # 가격/거래일이 아직 부족함 — 다음 실행 때 다시 시도
             reflection = self.reflector.reflect_on_final_decision(
                 final_decision=entry.get("decision", ""),
                 raw_return=raw,
                 alpha_return=alpha,
                 benchmark_name=benchmark,
+                actual_days=days,
             )
             updates.append({
                 "ticker": ticker,
@@ -445,7 +462,7 @@ class TradingAgentsGraph:
         """그래프를 실행하고 결과 상태를 디스크와 메모리 로그에 기록한다."""
         # 상태 초기화 — 포트폴리오 매니저(PM)용 메모리 로그 컨텍스트와,
         # 모든 에이전트용으로 결정적으로 해석된 종목 정체성을 함께 주입한다.
-        past_context = self.memory_log.get_past_context(company_name)
+        past_context = self.memory_log.get_past_context(company_name, asset_type=asset_type)
         instrument_context = self.resolve_instrument_context(company_name, asset_type)
         init_agent_state = self.propagator.create_initial_state(
             company_name,
@@ -498,6 +515,7 @@ class TradingAgentsGraph:
             ticker=company_name,
             trade_date=trade_date,
             final_trade_decision=final_state["final_trade_decision"],
+            asset_type=asset_type,
         )
 
         # 성공적으로 완료되면 체크포인트를 지워 오래된 상태가 남지 않게 한다.

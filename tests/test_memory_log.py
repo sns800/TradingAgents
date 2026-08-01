@@ -480,7 +480,10 @@ class TestDeferredReflection:
         assert e["alpha"] == "+2.1%"
         assert e["holding"] == "5d"
         raw_text = (tmp_path / "trading_memory.md").read_text(encoding="utf-8")
-        assert "[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]\n\nDECISION:" in raw_text
+        assert (
+            "[2026-01-10 | NVDA | Buy | +4.2% | +2.1% | 5d]\n\nASSET: stock\n\nDECISION:"
+            in raw_text
+        )
 
     # Reflector.reflect_on_final_decision
 
@@ -548,7 +551,8 @@ class TestDeferredReflection:
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_spy_shorter_than_stock(self):
-        """벤치마크(SPY) 데이터가 종목보다 짧아도 IndexError가 나지 않는지 검증하는 테스트."""
+        """벤치마크(SPY)의 거래일이 보유 기간보다 적으면 부분 수익률로 조기
+        확정하지 않고 (None, None, None)을 반환해 pending을 유지하는지 검증하는 테스트."""
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
@@ -559,8 +563,7 @@ class TestDeferredReflection:
                 return m
             mock_ticker_cls.side_effect = _make_ticker
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
-        assert raw is not None and alpha is not None and days is not None
-        assert days == 2
+        assert raw is None and alpha is None and days is None
 
     # TradingAgentsGraph._resolve_benchmark — 알파 계산용 지수를 선택
 
@@ -681,6 +684,7 @@ class TestDeferredReflection:
         mock_graph = MagicMock(spec=TradingAgentsGraph)
         mock_graph.memory_log = log
         mock_graph.reflector = mock_reflector
+        mock_graph.config = {"holding_days": 5}
         mock_graph._fetch_returns = MagicMock(return_value=(0.05, 0.02, 5))
         TradingAgentsGraph._resolve_pending_entries(mock_graph, "NVDA")
         assert log.get_pending_entries() == []

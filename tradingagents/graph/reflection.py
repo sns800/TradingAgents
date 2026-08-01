@@ -49,6 +49,7 @@ class Reflector:
         raw_return: float,
         alpha_return: float,
         benchmark_name: str = "SPY",
+        actual_days: int | None = None,
     ) -> str:
         """최종 매매 결정에 대해 결과(수익률) 맥락을 곁들여 리플렉션을 한 번 수행한다.
 
@@ -59,15 +60,25 @@ class Reflector:
         표기에 쓰이는 라벨입니다(예: 미국 티커는 ``"SPY"``, ``.T`` 도쿄
         상장 종목은 ``"^N225"``). 벤치마크를 넘겨주지 않는 기존 호출자를
         위해 기본값은 SPY입니다.
+
+        ``actual_days``는 수익률이 계산된 실제 보유 거래일 수입니다. 값이
+        주어지면 LLM이 며칠짜리 수익률로 판정하는지 알 수 있도록 프롬프트에
+        포함합니다(몇 일치인지 모른 채 방향성 정오를 판정하던 문제 완화).
+        값을 넘기지 않는 기존 호출자를 위해 기본값은 None(생략)입니다.
         """
+        outcome_lines = [
+            f"Raw return: {raw_return:+.1%}",
+            f"Alpha vs {benchmark_name}: {alpha_return:+.1%}",
+        ]
+        if actual_days is not None:
+            outcome_lines.append(f"Holding period: {actual_days} trading days")
         messages = [
             ("system", self.log_reflection_prompt),
             (
                 "human",
                 (
-                    f"Raw return: {raw_return:+.1%}\n"
-                    f"Alpha vs {benchmark_name}: {alpha_return:+.1%}\n\n"
-                    f"Final Decision:\n{final_decision}"
+                    "\n".join(outcome_lines)
+                    + f"\n\nFinal Decision:\n{final_decision}"
                 ),
             ),
         ]
