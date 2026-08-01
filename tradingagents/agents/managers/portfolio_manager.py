@@ -124,8 +124,14 @@ def create_portfolio_manager(llm):
         # 수치·사실로 뒷받침되는가(추적 불가한 주장은 할인), (2) 응답성 —
         # 상대의 최강 논거에 실제로 응답했는가(무응답 논거는 유효, 도전받고도
         # 무응답인 주장은 할인), (3) 리스크 비대칭 — 각 관점이 틀렸을 때의
-        # 손실 크기를 가중하라. 단호하게 결정하고
-        # 모든 결론을 분석가 보고서와 토론의 구체적 근거에 기반하라.
+        # 손실 크기를 가중하라.
+        # [편향검증 Phase 2] 기존의 "단호하게 결정하라" 지시를 "증거에 비례해
+        # 등급을 매겨라"로 교체 — 대형주의 수많은 종목-일 단위에서 양(+)의
+        # 알파와 음(-)의 알파는 대략 비슷하게 흔하고, 증거가 진정으로 균형이면
+        # Hold도 정당한 판정이다. 등급 척도도 대칭화: Sell에 Buy와 같은
+        # "강한 확신(strong conviction)" 프레임을 부여하고, Underweight의
+        # 이익 실현 문구(이익을 전제하는 프레임)를 중립 표현으로 수정.
+        # 모든 결론은 분석가 보고서와 토론의 구체적 근거에 기반하라.
         # 외부 도구는 사용하지 말라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
@@ -138,8 +144,8 @@ def create_portfolio_manager(llm):
 - **Buy**: Strong conviction to enter or add to position
 - **Overweight**: Favorable outlook, gradually increase exposure
 - **Hold**: Maintain current position, no action needed
-- **Underweight**: Reduce exposure, take partial profits
-- **Sell**: Exit position or avoid entry
+- **Underweight**: Cautious outlook, gradually reduce exposure
+- **Sell**: Strong conviction to exit the position or avoid entry
 
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
@@ -161,7 +167,7 @@ Company Fundamentals Report: {fundamentals_report}
 2. **Responsiveness**: Did each analyst actually engage with the strongest opposing argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
 3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the aggressive view fails versus the opportunity cost if the cautious view fails — not merely the number of arguments raised.
 
-Be decisive and ground every conclusion in specific evidence from the analyst reports and the debate.
+Rate in proportion to the evidence and ground every conclusion in specific evidence from the analyst reports and the debate. Across many large-cap stock-days, positive and negative alpha are roughly equally common — do not let optimism or the urge to act set your rating. Hold is a legitimate finding when the evidence is genuinely balanced.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 

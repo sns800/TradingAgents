@@ -117,6 +117,13 @@ class TestRenderResearchPlan:
         추가되어, 생성 시 bull/bear_case_assessment도 함께 채운다.
         """
         p = ResearchPlan(
+            # 루브릭 점수 6종은 편향검증 Phase 2에서 추가된 필수 필드.
+            bull_evidence_score=4,
+            bear_evidence_score=1,
+            bull_responsiveness_score=3,
+            bear_responsiveness_score=-1,
+            bull_risk_asymmetry_score=2,
+            bear_risk_asymmetry_score=0,
             recommendation=PortfolioRating.OVERWEIGHT,
             bull_case_assessment="Bull's growth claim is grounded in the fundamentals report.",
             bear_case_assessment="Bear never answered the margin-expansion point.",
@@ -129,11 +136,22 @@ class TestRenderResearchPlan:
         assert "**Bear Case Assessment**: Bear never answered" in md
         assert "**Rationale**: Bull case carried" in md
         assert "**Strategic Actions**: Build position" in md
+        # 루브릭 점수 표(편향검증 Phase 2)가 렌더링에 포함된다.
+        assert "**Rubric Scores**" in md
+        assert "| Evidence grounding | +4 | +1 |" in md
+        assert "| Responsiveness | +3 | -1 |" in md
+        assert "| Risk asymmetry | +2 | +0 |" in md
 
     def test_all_5_tier_ratings_render(self):
         """5단계 등급 전부가 렌더링되는지 검증하는 테스트."""
         for rating in PortfolioRating:
             p = ResearchPlan(
+                bull_evidence_score=0,
+                bear_evidence_score=0,
+                bull_responsiveness_score=0,
+                bear_responsiveness_score=0,
+                bull_risk_asymmetry_score=0,
+                bear_risk_asymmetry_score=0,
                 recommendation=rating,
                 bull_case_assessment="bull-assess",
                 bear_case_assessment="bear-assess",
@@ -260,8 +278,15 @@ def _make_rm_state():
 
 def _structured_rm_llm(captured: dict, plan: ResearchPlan | None = None):
     if plan is None:
-        # bull/bear_case_assessment는 중기 로드맵 #3에서 추가된 필수 필드.
+        # bull/bear_case_assessment는 중기 로드맵 #3, 루브릭 점수 6종은
+        # 편향검증 Phase 2에서 추가된 필수 필드.
         plan = ResearchPlan(
+            bull_evidence_score=2,
+            bear_evidence_score=2,
+            bull_responsiveness_score=1,
+            bear_responsiveness_score=1,
+            bull_risk_asymmetry_score=0,
+            bear_risk_asymmetry_score=0,
             recommendation=PortfolioRating.HOLD,
             bull_case_assessment="Bull evidence is grounded but incomplete.",
             bear_case_assessment="Bear raised valid risks, partially answered.",
@@ -283,6 +308,12 @@ class TestResearchManagerAgent:
         """구조화 경로가 렌더링된 마크다운 투자 계획을 생성하는지 검증하는 테스트."""
         captured = {}
         plan = ResearchPlan(
+            bull_evidence_score=4,
+            bear_evidence_score=2,
+            bull_responsiveness_score=3,
+            bear_responsiveness_score=0,
+            bull_risk_asymmetry_score=2,
+            bear_risk_asymmetry_score=1,
             recommendation=PortfolioRating.OVERWEIGHT,
             bull_case_assessment="Bull's AI-demand claim is backed by the market report.",
             bear_case_assessment="Bear's valuation concern went unanswered but is secondary.",

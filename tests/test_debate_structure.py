@@ -253,6 +253,13 @@ def _make_research_plan():
     from tradingagents.agents.schemas import PortfolioRating, ResearchPlan
 
     return ResearchPlan(
+        # 루브릭 점수 6종은 편향검증 Phase 2에서 추가된 필수 필드.
+        bull_evidence_score=3,
+        bear_evidence_score=1,
+        bull_responsiveness_score=2,
+        bear_responsiveness_score=-2,
+        bull_risk_asymmetry_score=1,
+        bear_risk_asymmetry_score=0,
         recommendation=PortfolioRating.BUY,
         bull_case_assessment="Bull's demand claim is traceable to the market report.",
         bear_case_assessment="Bear's margin concern was never rebutted by the bull.",

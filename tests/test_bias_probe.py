@@ -124,6 +124,34 @@ def test_order_swap_prompt_swaps_history_only(state):
     assert swapped.split("**Debate History:**")[0] == control.split("**Debate History:**")[0]
 
 
+def test_corrected_condition_registered():
+    """corrected 조건(편향검증 Phase 2 — 교정된 운영 프롬프트)이 등록돼 있다."""
+    assert "corrected" in bias_probe.CONDITIONS
+
+
+def test_corrected_prompt_uses_live_corrected_wording(state):
+    """corrected 조건이 교정된 실제 운영 프롬프트(live prompt)를 쓰는지 검증.
+
+    build_research_manager_prompt를 직접 호출하므로, 교정 문구(기저율 균형)가
+    있고 반Hold 문구가 없으며, 루브릭 점수 표 섹션이 Recommendation보다 앞에
+    온다 (편향검증 Phase 2).
+    """
+    prompt = bias_probe.build_prompt(state, "corrected")
+    # 교정 문구 — research_manager.py의 현행 프롬프트에서 직접 온다.
+    assert "Rate in proportion to the evidence" in prompt
+    assert "roughly equally common" in prompt
+    # 반Hold 문구(Phase 0 발견 2곳)는 없어야 한다.
+    assert bias_probe.ANTI_HOLD_SENTENCE not in prompt
+    assert bias_probe.SCHEMA_ANTI_HOLD_SENTENCE not in prompt
+    # 점수 선출력: 루브릭 점수 섹션이 Recommendation 섹션보다 앞에 온다.
+    assert prompt.index("**Rubric Scores**") < prompt.index("**Recommendation**")
+    # 증거·토론 이력이 live 빌더를 통해 포함된다.
+    assert state["market_report"] in prompt
+    assert "개시 강세 주장입니다" in prompt
+    # 자유 텍스트 등급 파싱을 위한 마지막 등급 줄 지시가 있다.
+    assert "Rating: <X>" in prompt
+
+
 def test_score_first_prompt_forbids_rating_words(state):
     prompt = bias_probe.build_prompt(state, "score-first")
     # 등급 척도·결단 문구·형식 지시(Recommendation)가 없어야 한다.

@@ -11,12 +11,17 @@
 # Bull/Bear 토론 전체 이력)을 로드해, **리서치 매니저의 판정 프롬프트만**
 # 5가지 조건으로 재구성해 LLM을 다시 호출하고 등급 분포를 비교한다.
 #
-#   1. control      — 현행 research_manager.py 프롬프트를 최대한 그대로 재현
+#   1. control      — Phase 2 교정 이전의 research_manager.py 프롬프트를 재현
+#                     (역사적 대조군 — 아래 상수들은 의도적으로 동결됨)
 #   2. order-swap   — 토론 이력의 Bull/Bear 발언 블록 제시 순서만 반전
 #   3. no-anti-hold — Hold 회피/결단 강요 문구(Phase 0 발견 2곳) 제거
 #   4. neutral-label— Bull/Bear 라벨과 bull/bear 어휘를 Analyst A/B로 중립화
 #   5. score-first  — 등급 단어를 먼저 말하지 못하게 루브릭 3항목별 -5~+5
 #                     점수(JSON)만 받고 스크립트가 결정론적으로 등급 변환
+#   6. corrected    — [편향검증 Phase 2] 교정된 실제 운영 프롬프트
+#                     (research_manager.build_research_manager_prompt를 직접
+#                     호출 = live prompt) + 교정된 스키마(점수 필드가
+#                     recommendation보다 앞)를 자유 텍스트로 재현한 형식 지시
 #
 # 재현에 관한 명시적 참고 사항 (control 조건의 알려진 편차):
 #   - past_context(과거 교훈)와 verified_snapshot(검증 스냅샷)은 상태 로그에
@@ -77,14 +82,17 @@ CONDITIONS: tuple[str, ...] = (
     "no-anti-hold",
     "neutral-label",
     "score-first",
+    "corrected",
 )
 
-# 기본 호출 예산: 27표본 × 5조건 = 135. 시작 전에 출력하고 절대 초과하지 않는다.
-DEFAULT_MAX_CALLS = 135
+# 기본 호출 예산: 27표본 × 6조건 = 162. 시작 전에 출력하고 절대 초과하지 않는다.
+DEFAULT_MAX_CALLS = 162
 
 # ---------------------------------------------------------------------------
-# 프롬프트 구성 요소 — research_manager.py의 f-string을 그대로 옮긴 원문.
-# (LLM 프롬프트이므로 영어 원문 유지. research_manager.py가 바뀌면 함께 갱신할 것)
+# 프롬프트 구성 요소 — Phase 2 교정 *이전*의 research_manager.py f-string 원문.
+# (LLM 프롬프트이므로 영어 원문 유지. Phase 1 대조군 재현을 위해 의도적으로
+# 동결한다 — 현행 운영 프롬프트는 corrected 조건이
+# research_manager.build_research_manager_prompt에서 직접 가져온다.)
 # ---------------------------------------------------------------------------
 
 RM_PREAMBLE = (
@@ -142,6 +150,20 @@ Respond in markdown with exactly these sections, in this order:
 **Bull Case Assessment**: the bull side's strongest claim, whether it is backed by specific evidence from the analyst reports, and whether they actually answered the bear's strongest counterargument. Two to four sentences.
 **Bear Case Assessment**: the same assessment for the bear side. Two to four sentences.
 **Rationale**: why the winning side's argument quality earned the recommendation, citing the decisive evidence.
+**Strategic Actions**: concrete, actionable steps for the trader."""
+
+# [편향검증 Phase 2] 교정된 ResearchPlan 스키마(schemas.py)를 자유 텍스트로
+# 재현하는 출력 형식 지시. 핵심: 루브릭 점수 표가 Recommendation보다 먼저
+# 오고(스키마 필드 순서와 동일), recommendation은 점수와 정합해야 한다는
+# 소프트 결합 지시를 싣는다. schemas.py의 ResearchPlan이 바뀌면 함께 갱신할 것.
+CORRECTED_FORMAT_TEMPLATE = """
+
+Respond in markdown with exactly these sections, in this order:
+**Rubric Scores**: before stating any rating, score BOTH sides on each rubric criterion (evidence grounding, responsiveness, risk asymmetry) as an integer from -5 (completely fails the criterion) to +5 (excels at it). Format as a markdown table with columns Criterion / Bull / Bear.
+**Recommendation**: exactly one of Buy / Overweight / Hold / Underweight / Sell. Rate in proportion to the evidence and keep it consistent with the rubric scores above: Hold is a legitimate finding when the evidence is genuinely balanced, and a directional rating requires the scores to show a clear advantage for that side. If the score totals are roughly even, a directional rating requires explicit justification in the rationale.
+**Bull Case Assessment**: the bull side's strongest claim, whether it is backed by specific evidence from the analyst reports, and whether they actually answered the bear's strongest counterargument. Two to four sentences.
+**Bear Case Assessment**: the same assessment for the bear side. Two to four sentences.
+**Rationale**: why the recommendation follows from the rubric scores and the decisive evidence.
 **Strategic Actions**: concrete, actionable steps for the trader."""
 
 
@@ -302,6 +324,21 @@ def build_prompt(state: dict[str, Any], condition: str) -> str:
     """상태 로그 하나로부터 지정 조건의 리서치 매니저 판정 프롬프트를 만든다."""
     if condition not in CONDITIONS:
         raise ValueError(f"unknown condition: {condition}")
+
+    if condition == "corrected":
+        # [편향검증 Phase 2] 교정된 실제 운영 프롬프트(live prompt)를 그대로
+        # 사용한다: research_manager의 프롬프트 빌더를 직접 호출하고, 구조화
+        # 출력 스키마(점수 필드 → recommendation 순서)는 자유 텍스트 형식
+        # 지시로 재현한다. 다른 조건과 동일하게 등급 줄 지시를 덧붙인다.
+        from tradingagents.agents.managers.research_manager import (
+            build_research_manager_prompt,
+        )
+
+        return (
+            build_research_manager_prompt(state)
+            + CORRECTED_FORMAT_TEMPLATE
+            + RATING_LINE_INSTRUCTION
+        )
 
     instrument_context = get_instrument_context_from_state(state)
     history = state["investment_debate_state"].get("history", "")

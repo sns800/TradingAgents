@@ -66,8 +66,12 @@ def test_research_manager_prompt_states_constraint():
     captured = {}
     llm = _capturing_llm(
         captured,
-        # bull/bear_case_assessment는 중기 로드맵 #3에서 추가된 필수 필드.
+        # bull/bear_case_assessment는 중기 로드맵 #3, 루브릭 점수 6종은
+        # 편향검증 Phase 2에서 추가된 필수 필드.
         ResearchPlan(
+            bull_evidence_score=0, bear_evidence_score=0,
+            bull_responsiveness_score=0, bear_responsiveness_score=0,
+            bull_risk_asymmetry_score=0, bear_risk_asymmetry_score=0,
             recommendation=PortfolioRating.BUY,
             bull_case_assessment="ba", bear_case_assessment="be",
             rationale="x", strategic_actions="y",

@@ -101,6 +101,10 @@ class TraderAction(str, Enum):
 # 만드는 구조화된 투자 계획. 트레이더에게 넘기는 인수인계 문서로,
 # recommendation은 방향성 판단, rationale은 어느 쪽 논리가 이겼는지의 근거,
 # strategic_actions는 트레이더가 실행할 구체적 지침입니다.
+# [편향검증 Phase 2] 필드 순서는 의도적입니다: 루브릭 점수 6종이
+# recommendation보다 앞에 와서, 모델이 등급 단어를 말하기 전에 항목별
+# 판정을 먼저 확정하게 합니다 (분리 실험에서 점수 선출력이 증거 비례
+# 판정에 가장 가까웠음 — ~/.tradingagents/logs/bias_probe/run_main/summary.md).
 class ResearchPlan(BaseModel):
     """Structured investment plan produced by the Research Manager.
 
@@ -108,16 +112,85 @@ class ResearchPlan(BaseModel):
     the rationale captures which side of the bull/bear debate carried the
     argument, and the strategic actions translate that into concrete
     instructions the trader can execute against.
+
+    Field order is deliberate: the six rubric scores come before the
+    recommendation so the model commits to per-criterion judgments before it
+    names a rating (bias-probe Phase 2).
     """
 
-    # [한국어] 투자 추천 등급. 5개 중 정확히 하나. 양쪽 근거가 정말 팽팽할 때만
-    # Hold를 쓰고, 아니면 더 강한 쪽에 확실히 손을 들라는 지시.
+    # [한국어] 루브릭 점수 6종 (편향검증 Phase 2): 증거 접지/응답성/리스크
+    # 비대칭 각각에 대해 Bull·Bear 측을 -5~+5 정수로 채점. recommendation보다
+    # 먼저 선언되어 있어 구조화 출력에서 점수가 등급보다 먼저 생성됩니다.
+    bull_evidence_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Evidence grounding score for the bull case, integer -5 to +5: how "
+            "well the bull side's core claims are backed by specific numbers or "
+            "facts from the analyst reports (-5 = no traceable support, +5 = "
+            "fully grounded). Score every rubric criterion for both sides "
+            "before choosing the recommendation."
+        ),
+    )
+    bear_evidence_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Evidence grounding score for the bear case, integer -5 to +5, "
+            "judged by the same standard as the bull score."
+        ),
+    )
+    bull_responsiveness_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Responsiveness score for the bull case, integer -5 to +5: how "
+            "directly the bull side engaged with the bear's strongest argument "
+            "(-5 = dodged or ignored it, +5 = answered it head-on)."
+        ),
+    )
+    bear_responsiveness_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Responsiveness score for the bear case, integer -5 to +5, judged "
+            "by the same standard as the bull score."
+        ),
+    )
+    bull_risk_asymmetry_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Risk asymmetry score for the bull case, integer -5 to +5: how well "
+            "the bull case accounts for the magnitude of being wrong — the "
+            "downside if the bull thesis fails (-5 = ignores a severe downside, "
+            "+5 = downside convincingly bounded)."
+        ),
+    )
+    bear_risk_asymmetry_score: int = Field(
+        ge=-5,
+        le=5,
+        description=(
+            "Risk asymmetry score for the bear case, integer -5 to +5: how well "
+            "the bear case accounts for the opportunity cost if the bear thesis "
+            "fails, judged by the same standard as the bull score."
+        ),
+    )
+    # [한국어] 투자 추천 등급. 5개 중 정확히 하나. [편향검증 Phase 2] 증거에
+    # 비례해 판정하라: 위 루브릭 점수와 정합해야 하고, 증거가 진정으로
+    # 균형이면 Hold가 정당한 판정이며, 방향성 등급은 점수가 그 방향의 뚜렷한
+    # 우위를 보일 때 준다. 점수 합계가 대등한데 방향 등급을 주려면 rationale에
+    # 명시적 근거가 필요하다. (기존 "아니면 더 강한 쪽에 손을 들라" 문구는
+    # 분리 실험에서 강세 편향 유발이 확인되어 제거됨)
     recommendation: PortfolioRating = Field(
         description=(
             "The investment recommendation. Exactly one of Buy / Overweight / "
-            "Hold / Underweight / Sell. Reserve Hold for situations where the "
-            "evidence on both sides is genuinely balanced; otherwise commit to "
-            "the side with the stronger arguments."
+            "Hold / Underweight / Sell. Rate in proportion to the evidence and "
+            "keep it consistent with the rubric scores above: Hold is a "
+            "legitimate finding when the evidence is genuinely balanced, and a "
+            "directional rating requires the scores to show a clear advantage "
+            "for that side. If the score totals are roughly even, a directional "
+            "rating requires explicit justification in the rationale."
         ),
     )
     # [한국어] 강세(Bull) 측 논거 평가. 심판 루브릭(중기 로드맵 #3)을 구조화
@@ -169,8 +242,19 @@ def render_research_plan(plan: ResearchPlan) -> str:
     기존 섹션 헤더(**Recommendation** / **Rationale** / **Strategic Actions**)와
     순서는 다운스트림 소비자(트레이더 프롬프트, 저장 보고서)와의 하위 호환을
     위해 그대로 유지하고, 양측 논거 평가(중기 로드맵 #3)를 그 사이에 추가한다.
+    루브릭 점수 표(편향검증 Phase 2)는 생성 순서 그대로 맨 앞에 붙여, 하류
+    소비자(트레이더·저장 보고서)도 등급이 어떤 항목별 판정에서 나왔는지
+    확인할 수 있게 한다.
     """
     return "\n".join([
+        "**Rubric Scores** (each -5 to +5):",
+        "",
+        "| Criterion | Bull | Bear |",
+        "|---|---:|---:|",
+        f"| Evidence grounding | {plan.bull_evidence_score:+d} | {plan.bear_evidence_score:+d} |",
+        f"| Responsiveness | {plan.bull_responsiveness_score:+d} | {plan.bear_responsiveness_score:+d} |",
+        f"| Risk asymmetry | {plan.bull_risk_asymmetry_score:+d} | {plan.bear_risk_asymmetry_score:+d} |",
+        "",
         f"**Recommendation**: {plan.recommendation.value}",
         "",
         f"**Bull Case Assessment**: {plan.bull_case_assessment}",
@@ -384,13 +468,17 @@ class SentimentReport(BaseModel):
     """
 
     # [한국어] 전체 심리 방향. 6개 등급 중 정확히 하나. 소스들이 서로 다른
-    # 방향을 가리키면 Mixed, 모든 소스가 무의미할 때만 Neutral을 쓰라는 지시.
+    # 방향을 가리키면 Mixed. [편향검증 Phase 2] "모든 소스가 무의미할 때만
+    # Neutral"이라는 과도한 제한을 완화 — 신호가 약하거나 혼재하면 Neutral이
+    # 정당한 판정이며, 피해야 할 등급이 아니라는 지시로 교체.
     overall_band: SentimentBand = Field(
         description=(
             "Overall sentiment direction. Exactly one of: "
             "Bullish / Mildly Bullish / Neutral / Mixed / Mildly Bearish / Bearish. "
             "Use Mixed when sources point in clearly different directions. "
-            "Use Neutral only when all sources are genuinely silent or non-committal."
+            "Neutral is a legitimate call when the overall signal is weak, "
+            "sparse, or non-committal — do not force a directional band onto "
+            "faint evidence."
         ),
     )
     # [한국어] 0~10 척도의 심리 강도 점수. 0=극단적 약세, 5=중립, 10=극단적

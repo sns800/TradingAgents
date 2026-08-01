@@ -54,16 +54,22 @@ def create_aggressive_debator(llm):
         trader_decision = state["trader_investment_plan"]
 
         # [프롬프트 요약 - 한국어] 공격적 리스크 애널리스트 역할 지시문:
-        # 트레이더의 결정에 대해 상방 잠재력·성장성·혁신 이점을 강조하고,
+        # 증거의 가장 공격적인(고수익 추구) 해석을 옹호하되, 트레이더의 계획이
+        # 증거 대비 위험을 과소·과대하게 지고 있으면 그 방향으로 비판하고,
         # 보수적/중립적 애널리스트의 각 논점에 데이터 기반으로 반박하며,
         # 고위험 접근이 최선인 이유를 대화체(서식 없이)로 설득하라는 내용.
         # 아래에 4종 분석 보고서와 토론 이력을 근거 자료로 제공합니다.
+        # [편향검증 Phase 2] 기존 "트레이더의 결정을 옹호하는 설득력 있는
+        # 논거를 만들라" 문구는 트레이더 결정 방향과 무관하게 무조건 옹호하는
+        # 에코 루프(echo loop)를 만들므로, 결정이 아니라 '증거의 공격적 해석'을
+        # 옹호하는 역할로 교체 — 계획이 과소 위험이면 더 대담하게, 과대
+        # 위험이면 그 지점을 비판하게 한다.
         # (LLM 프롬프트이므로 영어 원문 유지)
         prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
 
 {trader_decision}
 
-Your task is to create a compelling case for the trader's decision by questioning and critiquing the conservative and neutral stances to demonstrate why your high-reward perspective offers the best path forward. Incorporate insights from the following sources into your arguments:
+Your task is to champion the most aggressive, highest-reward reading of the evidence — not the trader's decision itself. If the trader's plan takes on less risk than the evidence justifies, argue for the bolder position; if the plan overreaches beyond what the evidence supports, criticize it in that direction and point to where the real opportunity lies. Question and critique the conservative and neutral stances to demonstrate why your high-reward perspective offers the best path forward. Incorporate insights from the following sources into your arguments:
 
 {instrument_context}
 Market Research Report: {market_research_report}
