@@ -23,6 +23,7 @@ from tradingagents.agents.schemas import (
     SentimentReport,
     TraderAction,
     TraderProposal,
+    render_pm_decision,
     render_research_plan,
     render_sentiment_report,
     render_trader_proposal,
@@ -100,6 +101,9 @@ class TestNullishFloatCoercion:
     def test_pm_nullish_price_target_coerces_to_none(self):
         """포트폴리오 결정의 목표 주가(price_target)도 널 유사 문자열이 None으로 변환되는지 검증하는 테스트."""
         d = PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.OVERWEIGHT,
+            override_action="confirm",
+            override_rationale="Risk debate adds nothing new.",
             rating=PortfolioRating.OVERWEIGHT,
             executive_summary="s",
             investment_thesis="t",
@@ -595,3 +599,141 @@ class TestFallbackRatingLine:
         src = (Path(__file__).resolve().parents[1] / "tradingagents" / "agents"
                / "managers" / "portfolio_manager.py").read_text(encoding="utf-8")
         assert "require_rating_line=True" in src
+
+
+# ---------------------------------------------------------------------------
+# 포트폴리오 매니저 리스크 감독 게이트 재프레이밍 (BACKLOG.md B2 옵션 b)
+# ---------------------------------------------------------------------------
+
+
+def _oversight_decision(**overrides):
+    """감독(oversight) 필드를 갖춘 PortfolioDecision을 만드는 헬퍼."""
+    base = {
+        "rm_proposed_rating": PortfolioRating.OVERWEIGHT,
+        "override_action": "downgrade",
+        "override_rationale": "Concentration and liquidity risk left unresolved.",
+        "rating": PortfolioRating.HOLD,
+        "executive_summary": "Trim into strength; wait for a clearer setup.",
+        "investment_thesis": "Risk debate revealed material downside.",
+    }
+    base.update(overrides)
+    return PortfolioDecision(**base)
+
+
+@pytest.mark.unit
+class TestPortfolioDecisionOversightSchema:
+    """감독 게이트 재프레이밍으로 추가된 필드의 존재·순서·타입을 검증."""
+
+    def test_override_fields_exist(self):
+        fields = PortfolioDecision.model_fields
+        for name in ("rm_proposed_rating", "override_action", "override_rationale"):
+            assert name in fields, f"missing oversight field {name!r}"
+
+    def test_oversight_fields_ordered_before_rating(self):
+        """감독 필드 3종은 최종 rating보다 앞 순서여야 한다.
+
+        모델이 최종 등급을 말하기 전에 RM 앵커와 감독 판정을 먼저 확정하게
+        하는 것이 재프레이밍의 핵심이므로, 필드 선언 순서가 곧 출력 순서다.
+        """
+        fields = list(PortfolioDecision.model_fields.keys())
+        assert (
+            fields.index("rm_proposed_rating")
+            < fields.index("override_action")
+            < fields.index("override_rationale")
+            < fields.index("rating")
+        )
+
+    def test_override_action_accepts_the_three_verdicts(self):
+        for action in ("confirm", "upgrade", "downgrade"):
+            d = _oversight_decision(override_action=action)
+            assert d.override_action == action
+
+    def test_override_action_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            _oversight_decision(override_action="maybe")
+
+    def test_rm_proposed_rating_must_be_5tier(self):
+        with pytest.raises(ValidationError):
+            _oversight_decision(rm_proposed_rating="Strong Buy")
+
+
+@pytest.mark.unit
+class TestRenderPMDecisionOversight:
+    """render_pm_decision이 감독 판정 섹션을 포함하면서 parse_rating 호환을 유지."""
+
+    def test_render_includes_oversight_verdict_section(self):
+        md = render_pm_decision(_oversight_decision())
+        assert "**리스크 감독 판정**: downgrade (RM Overweight → 최종 Hold)" in md
+        assert "**감독 근거**: Concentration and liquidity risk left unresolved." in md
+
+    def test_rating_header_remains_first_line(self):
+        # parse_rating은 라인 순서상 처음 매칭되는 등급을 반환하므로 **Rating**이
+        # 반드시 맨 앞에 와야 최종 등급이 뽑힌다.
+        md = render_pm_decision(_oversight_decision())
+        assert md.startswith("**Rating**: Hold")
+
+    def test_final_rating_wins_over_rm_anchor_in_parsing(self):
+        """감독 근거에 등급 어휘가 섞여도 parse_rating은 최종 등급을 뽑는다."""
+        from tradingagents.agents.utils.rating import parse_rating
+
+        md = render_pm_decision(_oversight_decision(
+            override_rationale="리스크 등급: Sell 수준의 하방은 아직 아니다.",
+        ))
+        # RM 앵커(Overweight)나 근거의 Sell이 아니라 최종 등급(Hold)이 뽑혀야 한다.
+        assert parse_rating(md) == "Hold"
+
+
+def _oversight_pm_state():
+    return {
+        "company_of_interest": "NVDA",
+        "risk_debate_state": {
+            "history": "Aggressive/Conservative/Neutral risk debate here.",
+            "aggressive_history": "a", "conservative_history": "c",
+            "neutral_history": "n", "current_aggressive_response": "",
+            "current_conservative_response": "", "current_neutral_response": "",
+            "latest_speaker": "Neutral", "count": 1,
+        },
+        "investment_plan": (
+            "**Recommendation**: Overweight\n\n"
+            "**Rationale**: Bull case carried.\n\n**Strategic Actions**: Build."
+        ),
+        "trader_investment_plan": "trader plan",
+    }
+
+
+@pytest.mark.unit
+class TestPortfolioManagerOversightPrompt:
+    """build_portfolio_manager_prompt가 감독 게이트로 재프레이밍됐는지 검증."""
+
+    def test_prompt_reframes_as_risk_oversight_gate(self):
+        from tradingagents.agents.managers.portfolio_manager import (
+            build_portfolio_manager_prompt,
+        )
+
+        p = build_portfolio_manager_prompt(_oversight_pm_state())
+        assert "RISK-OVERSIGHT gate" in p
+        assert "not a re-synthesizer" in p
+        # 확정/상향/하향 판정 어휘가 모두 프롬프트에 있다.
+        assert "CONFIRM" in p and "UPGRADE" in p and "DOWNGRADE" in p
+        # 자본 보호 우선의 비대칭 override 기준이 명시된다.
+        assert "capital preservation" in p
+
+    def test_prompt_presents_rm_rating_as_explicit_anchor(self):
+        """RM 등급을 investment_plan에서 추출해 별도 앵커로 제시한다."""
+        from tradingagents.agents.managers.portfolio_manager import (
+            build_portfolio_manager_prompt,
+        )
+
+        p = build_portfolio_manager_prompt(_oversight_pm_state())
+        assert "The Research Manager proposed: Overweight" in p
+
+    def test_prompt_preserves_rubric_and_base_rate_wording(self):
+        """평가 루브릭·기저율 균형 문구(편향검증 Phase 2)는 보존된다."""
+        from tradingagents.agents.managers.portfolio_manager import (
+            build_portfolio_manager_prompt,
+        )
+
+        p = build_portfolio_manager_prompt(_oversight_pm_state())
+        assert "Evaluation Rubric" in p
+        assert "left unanswered" in p
+        assert "roughly equally common" in p

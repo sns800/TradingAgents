@@ -27,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_verified_snapshot_block,
 )
+from tradingagents.agents.utils.rating import parse_rating
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -54,6 +55,132 @@ FORCED_HOLD_DECISION = (
 )
 
 
+def build_portfolio_manager_prompt(state) -> str:
+    """포트폴리오 매니저의 판정 프롬프트를 상태(state)로부터 구성해 반환한다.
+
+    노드 본체와 scripts/pm_probe.py가 공유하는 단일 소스(single source of
+    truth)다 — 프로브가 실제 운영 프롬프트와 어긋난 문구로 검증하는 일을 막는다.
+
+    [리스크 감독 게이트 재프레이밍 — BACKLOG.md B2 옵션 b]
+    전수 조사 결과 리서치 매니저(RM) → PM의 최종 등급 밴드 변경이 0/40이었다
+    (편향검증-실험-결과.md, BACKLOG.md B2). 즉 PM은 RM 판정을 그대로 통과시키는
+    "고무도장"이었다. 이를 교정하기 위해 PM을 재종합자(re-synthesizer)에서
+    **리스크 감독 게이트**로 재정의한다: RM 등급을 명시적 앵커로 제시하고,
+    리스크 토론의 관점에서 그 등급을 확정(confirm)/상향(upgrade)/하향(downgrade)할지
+    판정하게 한다. override 기준은 자본 보호 우선의 비대칭 구조다(하향 사유가
+    상향 사유보다 넓다).
+    """
+    instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
+
+    # 상태에서 리스크 토론 이력과 상위 단계 산출물들을 꺼냅니다.
+    # 주의: 리스크 토론자들은 토큰 절약을 위해 압축 이력(debate_context
+    # 참고)을 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체
+    # 이력을 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
+    history = state["risk_debate_state"]["history"]  # 리스크 분석가 토론 전체 이력
+    research_plan = state["investment_plan"]  # 리서치 매니저의 투자 계획
+    trader_plan = state["trader_investment_plan"]  # 트레이더의 거래 제안
+
+    # [리스크 감독 게이트] RM 제안 등급을 investment_plan 텍스트에서 결정론적으로
+    # 추출해 별도 앵커로 제시한다. 지금까지는 등급이 투자 계획 본문에 묻혀 있어
+    # PM이 "무엇을 확정/변경하는지"의 기준점을 명시적으로 인지하지 못했다.
+    rm_rating = parse_rating(research_plan, context="portfolio_manager:rm_anchor")
+
+    # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 프롬프트에 포함합니다.
+    past_context = state.get("past_context", "")
+    lessons_line = (
+        f"- Lessons from prior decisions and outcomes:\n{past_context}\n"
+        if past_context
+        else ""
+    )
+
+    # 분석가 4종 원본 보고서: 최종 판정자가 토론자들의 주장을 원자료와
+    # 대조해 검증할 수 있도록 리스크 토론자와 동일한 방식으로 제공합니다.
+    # 분석가 일부만 선택된 실행에서는 키가 없거나 빈 문자열일 수 있으므로
+    # .get()으로 안전하게 꺼냅니다.
+    market_research_report = state.get("market_report", "")
+    sentiment_report = state.get("sentiment_report", "")
+    news_report = state.get("news_report", "")
+    fundamentals_report = state.get("fundamentals_report", "")
+
+    # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
+    # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
+    snapshot_block = get_verified_snapshot_block(state)
+
+    # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
+    # "너는 재종합자가 아니라 최종 '리스크 감독(risk-oversight) 게이트'다.
+    # 리서치 매니저(RM)가 강세/약세 리서치 토론에서 이미 제안 등급을 정했다.
+    # 네 임무는 리스크 관리 토론의 관점에서 그 등급을 확정(CONFIRM)할지,
+    # 아니면 척도를 위/아래로 움직여 뒤집을지(OVERRIDE)를 판정하는 것이다.
+    # [비대칭 override 기준 — CONFIRM이 기본값, override 시 자본 보호 우선]
+    # (재판정에서 과교정이 확인되어 문턱을 2회 상향: 95%→60%→목표 15~45%.
+    #  DOWNGRADE는 3개 관문(구체성·반박 생존·RM 미반영)을 모두 통과해야 하며,
+    #  보수 분석가의 우려 제기 자체는 하향 근거가 아님 — RM이 이미
+    #  반영한 통상적 밸류에이션/모멘텀/거시 경계는 하향 사유가 아님.)
+    #   - CONFIRM(기본값): 리스크 토론이 RM이 이미 반영한 것 이상의 실질적
+    #     리스크를 제기하지 않을 때. 연구 토론이 이미 가늠한 통상적 경계는 유지.
+    #   - DOWNGRADE(Hold/Sell 쪽): 연구 단계가 진짜로 놓쳤거나 과소평가하고
+    #     해소하지 못한, 리스크 조정 판단을 바꿀 만큼 구체적·중대한 하방 리스크가
+    #     리스크 토론에서 드러날 때만 (집중/이벤트/유동성 리스크·펀더멘털 악화 등).
+    #   - UPGRADE(드물어야 함): 연구 계획이 근거가 탄탄한 유리한 비대칭성 대비
+    #     과도하게 보수적임을 리스크 토론이 보일 때만.
+    # 최종적으로 RM 제안 등급 대비 CONFIRM/UPGRADE/DOWNGRADE 중 무엇인지 명시하고,
+    # 등급을 움직인 경우 그것을 정당화하는 구체적 리스크-토론 근거를 인용하라.
+    # 구체적 리스크 근거 없이 등급을 움직이지 말되, 고무도장도 되지 마라 —
+    # 리스크 토론이 리스크 조정 그림을 실질적으로 바꾸면 그에 따라 행동하라.
+    # 등급(Rating)은 Buy/Overweight/Hold/Underweight/Sell 중 정확히 하나.
+    # [평가 루브릭 — 중기 로드맵 #3]·[편향검증 Phase 2 기저율 균형 문구]는 그대로
+    # 보존한다: 리스크 토론 판정은 수사가 아닌 논거 품질(증거 접지·응답성·리스크
+    # 비대칭)로 하고, 양/음 알파는 대략 반반이므로 낙관/행동 욕구가 아니라 증거가
+    # 등급을 정하게 하며, 증거가 진정으로 균형이면 Hold도 정당하다.
+    # 외부 도구는 사용하지 말라."
+    # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
+    return f"""You are the final RISK-OVERSIGHT gate, not a re-synthesizer. The Research Manager has already set a proposed rating from the bull/bear research debate. Your task is to decide — through the lens of the RISK-management debate — whether to CONFIRM that rating or OVERRIDE it (move it up or down the scale).
+
+{instrument_context}
+
+---
+
+**Rating Scale** (use exactly one):
+- **Buy**: Strong conviction to enter or add to position
+- **Overweight**: Favorable outlook, gradually increase exposure
+- **Hold**: Maintain current position, no action needed
+- **Underweight**: Cautious outlook, gradually reduce exposure
+- **Sell**: Strong conviction to exit the position or avoid entry
+
+**The Research Manager proposed: {rm_rating}** — this is your anchor, and confirming it is the default. The Research Manager already weighed the bull and bear cases and the ordinary valuation, momentum, and macro risks; keep their rating unless the RISK debate surfaces something they genuinely missed.
+
+**Risk-Oversight Override Criteria** (asymmetric — when you do override, capital preservation comes first):
+- **CONFIRM** (the default, and the majority outcome): when the risk debate raises no material risk beyond what the Research Manager already accounted for. Ordinary valuation, momentum, or macro caution that the research debate already weighed is NOT grounds to move — confirm.
+- **DOWNGRADE** (toward Hold / Sell): only when a downside risk clears ALL THREE bars — (1) **specific and decision-relevant** (a concrete concentration / event / liquidity risk or severe fundamental deterioration, not a general restatement of caution), (2) **survived rebuttal** — the aggressive and neutral analysts failed to answer it in the risk debate, and (3) **not already priced** by the Research Manager's rating. The conservative analyst will always raise concerns — that is their role, and their mere presence is NOT grounds to downgrade.
+- **UPGRADE** (toward Buy; rare): only when the risk debate shows the research plan was excessively cautious against a well-grounded favorable asymmetry.
+
+State explicitly whether you CONFIRM, UPGRADE, or DOWNGRADE relative to the RM's proposed rating. In a well-functioning pipeline most ratings are CONFIRMED and overrides are the minority; when you do override, move by a single band unless the risk is severe. Overriding moves real money, so require a risk that clears all three bars above — but do not rubber-stamp either: when the risk debate genuinely changes the risk-adjusted picture, act on it.
+
+**Context:**
+- Research Manager's investment plan: **{research_plan}**
+- Trader's transaction proposal: **{trader_plan}**
+{lessons_line}
+**Analyst Reports** (original evidence — cross-check the debaters' claims against these reports; a report may be empty if that analyst was not run):
+Market Research Report: {market_research_report}
+Social Media Sentiment Report: {sentiment_report}
+Latest World Affairs Report: {news_report}
+Company Fundamentals Report: {fundamentals_report}
+
+{snapshot_block}**Risk Analysts Debate History:**
+{history}
+
+---
+
+**Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to every risk analyst):
+1. **Evidence grounding**: Is each analyst's core claim backed by specific numbers or facts from the analyst reports above? Discount any claim you cannot trace back to a report.
+2. **Responsiveness**: Did each analyst actually engage with the strongest opposing argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
+3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the aggressive view fails versus the opportunity cost if the cautious view fails — not merely the number of arguments raised.
+
+Rate in proportion to the evidence and ground every conclusion in specific evidence from the analyst reports and the debate. Across many large-cap stock-days, positive and negative alpha are roughly equally common — do not let optimism or the urge to act set your rating. Hold is a legitimate finding when the evidence is genuinely balanced.
+
+{NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
+
+
 def create_portfolio_manager(llm):
     # 구조화 출력 바인딩: LLM이 PortfolioDecision 스키마 형태로 응답하도록 감쌉니다.
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
@@ -79,97 +206,11 @@ def create_portfolio_manager(llm):
                 "final_trade_decision": FORCED_HOLD_DECISION,
             }
 
-        instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
-
-        # 상태에서 리스크 토론 이력과 상위 단계 산출물들을 꺼냅니다.
-        # 주의: 리스크 토론자들은 토큰 절약을 위해 압축 이력(debate_context
-        # 참고)을 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체
-        # 이력을 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
-        history = state["risk_debate_state"]["history"]  # 리스크 분석가 토론 전체 이력
         risk_debate_state = state["risk_debate_state"]
-        research_plan = state["investment_plan"]  # 리서치 매니저의 투자 계획
-        trader_plan = state["trader_investment_plan"]  # 트레이더의 거래 제안
 
-        # 과거 결정과 결과에서 얻은 교훈(메모리)이 있으면 프롬프트에 포함합니다.
-        past_context = state.get("past_context", "")
-        lessons_line = (
-            f"- Lessons from prior decisions and outcomes:\n{past_context}\n"
-            if past_context
-            else ""
-        )
-
-        # 분석가 4종 원본 보고서: 최종 판정자가 토론자들의 주장을 원자료와
-        # 대조해 검증할 수 있도록 리스크 토론자와 동일한 방식으로 제공합니다.
-        # 분석가 일부만 선택된 실행에서는 키가 없거나 빈 문자열일 수 있으므로
-        # .get()으로 안전하게 꺼냅니다.
-        market_research_report = state.get("market_report", "")
-        sentiment_report = state.get("sentiment_report", "")
-        news_report = state.get("news_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
-
-        # 검증 스냅샷 섹션(중기 로드맵 #5): 정확한 수치 인용의 기준점.
-        # 비어 있으면 섹션 전체가 생략된다 (past_context 빈 값 가드와 동일 패턴).
-        snapshot_block = get_verified_snapshot_block(state)
-
-        # [한국어 요약] 아래 f-string 프롬프트는 LLM에게 다음을 지시합니다:
-        # "포트폴리오 매니저로서 리스크 분석가들의 토론을 종합해 최종 거래 결정을 내려라.
-        # 등급(Rating)은 Buy(매수)/Overweight(비중 확대)/Hold(보유)/
-        # Underweight(비중 축소)/Sell(매도) 중 정확히 하나를 사용하라.
-        # 리서치 매니저의 투자 계획, 트레이더의 거래 제안, (있다면) 과거 교훈,
-        # 분석가 원본 보고서 4종, 리스크 토론 이력이 컨텍스트로 주어진다.
-        # 토론자의 주장은 원본 보고서와 대조해 검증하라 (해당 분석가가
-        # 실행되지 않았으면 보고서가 비어 있을 수 있다).
-        # [평가 루브릭 — 중기 로드맵 #3] 리스크 토론의 판정은 수사가 아닌 논거
-        # 품질로 하라: (1) 증거 접지 — 각 분석가의 핵심 주장이 보고서의 구체
-        # 수치·사실로 뒷받침되는가(추적 불가한 주장은 할인), (2) 응답성 —
-        # 상대의 최강 논거에 실제로 응답했는가(무응답 논거는 유효, 도전받고도
-        # 무응답인 주장은 할인), (3) 리스크 비대칭 — 각 관점이 틀렸을 때의
-        # 손실 크기를 가중하라.
-        # [편향검증 Phase 2] 기존의 "단호하게 결정하라" 지시를 "증거에 비례해
-        # 등급을 매겨라"로 교체 — 대형주의 수많은 종목-일 단위에서 양(+)의
-        # 알파와 음(-)의 알파는 대략 비슷하게 흔하고, 증거가 진정으로 균형이면
-        # Hold도 정당한 판정이다. 등급 척도도 대칭화: Sell에 Buy와 같은
-        # "강한 확신(strong conviction)" 프레임을 부여하고, Underweight의
-        # 이익 실현 문구(이익을 전제하는 프레임)를 중립 표현으로 수정.
-        # 모든 결론은 분석가 보고서와 토론의 구체적 근거에 기반하라.
-        # 외부 도구는 사용하지 말라."
-        # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
-        prompt = f"""As the Portfolio Manager, synthesize the risk analysts' debate and deliver the final trading decision.
-
-{instrument_context}
-
----
-
-**Rating Scale** (use exactly one):
-- **Buy**: Strong conviction to enter or add to position
-- **Overweight**: Favorable outlook, gradually increase exposure
-- **Hold**: Maintain current position, no action needed
-- **Underweight**: Cautious outlook, gradually reduce exposure
-- **Sell**: Strong conviction to exit the position or avoid entry
-
-**Context:**
-- Research Manager's investment plan: **{research_plan}**
-- Trader's transaction proposal: **{trader_plan}**
-{lessons_line}
-**Analyst Reports** (original evidence — cross-check the debaters' claims against these reports; a report may be empty if that analyst was not run):
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-Company Fundamentals Report: {fundamentals_report}
-
-{snapshot_block}**Risk Analysts Debate History:**
-{history}
-
----
-
-**Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to every risk analyst):
-1. **Evidence grounding**: Is each analyst's core claim backed by specific numbers or facts from the analyst reports above? Discount any claim you cannot trace back to a report.
-2. **Responsiveness**: Did each analyst actually engage with the strongest opposing argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
-3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the aggressive view fails versus the opportunity cost if the cautious view fails — not merely the number of arguments raised.
-
-Rate in proportion to the evidence and ground every conclusion in specific evidence from the analyst reports and the debate. Across many large-cap stock-days, positive and negative alpha are roughly equally common — do not let optimism or the urge to act set your rating. Hold is a legitimate finding when the evidence is genuinely balanced.
-
-{NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
+        # 판정 프롬프트 구성은 모듈 함수로 분리되어 pm_probe와 공유됩니다.
+        # (리스크 감독 게이트 재프레이밍 — BACKLOG.md B2 옵션 b)
+        prompt = build_portfolio_manager_prompt(state)
 
         # 구조화 출력을 우선 시도하고, 지원하지 않는 제공자에서는
         # 자유 텍스트 생성으로 대체(fallback)하여 최종 결정 텍스트를 얻습니다.

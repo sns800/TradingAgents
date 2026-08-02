@@ -359,13 +359,68 @@ class PortfolioDecision(BaseModel):
     extraction pass is required. Field descriptions double as the model's
     output instructions, so the prompt body only needs to convey context and
     the rating-scale guidance.
+
+    Field order is deliberate: the risk-oversight fields
+    (rm_proposed_rating -> override_action -> override_rationale) come *before*
+    the final rating so the model must name the Research Manager's anchor and
+    decide, on the record, whether to confirm or override it before it states
+    the final rating. This reframes the PM from a re-synthesizer into an
+    explicit risk-oversight gate (BACKLOG.md B2 option b).
     """
 
+    # [한국어] 리서치 매니저(RM)가 제안한 등급. 모델이 프롬프트의 앵커 줄에서
+    # 인지한 RM 제안 등급을 그대로 기록한다. rating보다 앞 순서에 두어, 모델이
+    # 최종 등급을 말하기 전에 "무엇을 기준으로 확정/변경하는가"의 기준점을
+    # 먼저 명시하게 한다 (감독 게이트 재프레이밍 — BACKLOG.md B2 옵션 b).
+    rm_proposed_rating: PortfolioRating = Field(
+        description=(
+            "The rating the Research Manager proposed, as stated in the prompt's "
+            "anchor line. Exactly one of Buy / Overweight / Hold / Underweight / "
+            "Sell. Record the RM's proposed rating here first, before deciding "
+            "whether to confirm or override it."
+        ),
+    )
+    # [한국어] 감독 판정: RM 제안 등급 대비 확정(confirm)/상향(upgrade)/
+    # 하향(downgrade) 중 하나. 자본 보호 우선의 비대칭 기준 — 리스크 토론이
+    # 실질적 하방 리스크를 드러내면 downgrade, 리스크 조정 그림을 바꾸지 않으면
+    # confirm, 근거 탄탄한 유리한 비대칭성 대비 과도하게 보수적이면
+    # upgrade(드물어야 함).
+    override_action: Literal["confirm", "upgrade", "downgrade"] = Field(
+        description=(
+            "Your risk-oversight verdict relative to the Research Manager's "
+            "proposed rating: 'confirm' to keep it, 'upgrade' to move it toward "
+            "Buy, 'downgrade' to move it toward Sell. Confirm is the default: "
+            "keep the rating unless the risk debate raises a material risk beyond "
+            "what the Research Manager already accounted for — ordinary "
+            "valuation, momentum, or macro caution the research debate already "
+            "weighed is not grounds to move. Downgrade only when the risk debate "
+            "surfaces a specific, decision-relevant downside the research stage "
+            "genuinely missed or underweighted and left unresolved "
+            "(concentration / event / liquidity risk, or fundamental "
+            "deterioration severe enough to change the risk-adjusted call). "
+            "Upgrade only, and rarely, when the risk debate shows the research "
+            "plan was excessively cautious against a well-grounded favorable "
+            "asymmetry. This must be consistent with rm_proposed_rating and the "
+            "final rating: 'confirm' iff they are equal."
+        ),
+    )
+    # [한국어] 밴드를 움직인 / 유지한 구체적 리스크 근거 (1~3문장).
+    override_rationale: str = Field(
+        description=(
+            "The specific risk-debate evidence that justifies confirming or "
+            "moving the rating. Cite concrete risks (or their absence). Do not "
+            "move the rating without a concrete risk-based reason, and do not "
+            "rubber-stamp when the risk debate materially changes the "
+            "risk-adjusted picture. One to three sentences."
+        ),
+    )
     # [한국어] 최종 포지션 등급. 리스크 토론을 바탕으로 5개 중 정확히 하나 선택.
     rating: PortfolioRating = Field(
         description=(
-            "The final position rating. Exactly one of Buy / Overweight / Hold / "
-            "Underweight / Sell, picked based on the analysts' debate."
+            "The final position rating after risk oversight. Exactly one of Buy / "
+            "Overweight / Hold / Underweight / Sell. Equal to rm_proposed_rating "
+            "when override_action is 'confirm'; otherwise moved one or more bands "
+            "in the direction of override_action."
         ),
     )
     # [한국어] 진입 전략·포지션 크기·핵심 리스크 수준·투자 기간을 담은
@@ -411,9 +466,20 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     렌더링 결과는 다운스트림 파서와 보고서 작성기가 이미 처리하고 있는 섹션
     헤더(``**Rating**``, ``**Executive Summary**``, ``**Investment Thesis**``)를
     정확히 그대로 유지한다.
+
+    ``**Rating**`` 줄은 반드시 맨 앞에 둔다: parse_rating은 라인 순서대로
+    처음 매칭되는 등급 라벨을 반환하므로, 감독 판정 줄(RM 등급 → 최종 등급을
+    함께 표기)이나 근거 텍스트가 뒤에 와도 최종 등급 추출이 흔들리지 않는다.
+    감독 판정 섹션(리스크 감독 게이트 재프레이밍 — BACKLOG.md B2)은 그
+    바로 아래에 붙여, RM 제안 등급 대비 확정/변경 여부를 보고서에서 바로
+    볼 수 있게 한다.
     """
     parts = [
         f"**Rating**: {decision.rating.value}",
+        "",
+        f"**리스크 감독 판정**: {decision.override_action} "
+        f"(RM {decision.rm_proposed_rating.value} → 최종 {decision.rating.value})",
+        f"**감독 근거**: {decision.override_rationale}",
         "",
         f"**Executive Summary**: {decision.executive_summary}",
         "",
