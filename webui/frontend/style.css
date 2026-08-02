@@ -471,6 +471,12 @@ input:focus, select:focus {
   font-size: 0.85rem;
 }
 
+.cancel-box {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- 보고서 ---------- */
 .report-layout {
   display: grid;

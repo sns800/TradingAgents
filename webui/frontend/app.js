@@ -19,15 +19,20 @@
     queued: '대기중',
     running: '실행중',
     completed: '완료',
-    failed: '실패'
+    failed: '실패',
+    cancelled: '취소됨'
   };
 
   var STATUS_BADGE = {
     queued: 'badge-gray',
     running: 'badge-blue',
     completed: 'badge-green',
-    failed: 'badge-red'
+    failed: 'badge-red',
+    cancelled: 'badge-gray'
   };
+
+  // 진행 중 상태(취소 버튼 노출·폴링 지속 판단)
+  var ACTIVE_STATUSES = { queued: true, running: true };
 
   var DECISION_BADGE = {
     BUY: 'badge-green',
@@ -709,8 +714,41 @@
       box.appendChild(errBox);
     }
 
-    var restart = buildRestartPanel(run);
-    if (restart) box.appendChild(restart);
+    // 진행 중이면 취소 버튼, 종료됐으면 재시작 패널
+    if (ACTIVE_STATUSES[run.status]) {
+      var cancel = buildCancelPanel(run);
+      if (cancel) box.appendChild(cancel);
+    } else {
+      var restart = buildRestartPanel(run);
+      if (restart) box.appendChild(restart);
+    }
+  }
+
+  // 진행 중(queued/running)인 실행을 취소하는 버튼. Fargate 태스크를 중지하고
+  // 상태를 취소됨으로 바꾼다. 확인 프롬프트 후 호출.
+  function buildCancelPanel(run) {
+    if (!run.run_id || !ACTIVE_STATUSES[run.status]) return null;
+    var box = elem('div', 'cancel-box');
+    var btn = elem('button', 'btn btn-danger', '실행 취소');
+    var err = elem('p', 'restart-error');
+    err.hidden = true;
+    btn.addEventListener('click', function () {
+      if (!window.confirm('이 분석 실행을 취소할까요? 진행 중인 작업이 중단됩니다.')) return;
+      btn.disabled = true;
+      btn.textContent = '취소 중…';
+      err.hidden = true;
+      apiFetch('/runs/' + encodeURIComponent(run.run_id) + '/cancel', { method: 'POST', body: '{}' })
+        .then(function () { loadDetail(run.run_id); })
+        .catch(function (e) {
+          err.textContent = e.message;
+          err.hidden = false;
+          btn.disabled = false;
+          btn.textContent = '실행 취소';
+        });
+    });
+    box.appendChild(btn);
+    box.appendChild(err);
+    return box;
   }
 
   // 새 분석 폼과 동일한 깊이 옵션 (값, 레이블)
@@ -724,7 +762,7 @@
   // 진행 중(queued/running)인 실행에는 표시하지 않는다.
   function buildRestartPanel(run) {
     if (!run.run_id) return null;
-    if (run.status !== 'completed' && run.status !== 'failed') return null;
+    if (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled') return null;
     var failed = run.status === 'failed';
 
     var box = elem('div', 'restart-box' + (failed ? ' restart-box-failed' : ''));

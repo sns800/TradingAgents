@@ -6,6 +6,8 @@
 #  - GET  /api/runs            실행 목록 (최신순 최대 50건)
 #  - GET  /api/runs/{id}       실행 상세 + 보고서 파일 목록
 #  - GET  /api/runs/{id}/report?name=...  보고서 마크다운 내용
+#  - POST /api/runs/{id}/restart   기존 실행을 새 깊이로 재실행
+#  - POST /api/runs/{id}/cancel     진행 중 실행 취소 (Fargate 태스크 중지)
 #  - GET  /api/catalog         종목 카탈로그 조회 (검색/업종/정렬/페이지네이션)
 #
 # 의존성은 boto3(런타임 내장)뿐이라 별도 패키징 없이 zip 한 장으로 배포됩니다.
@@ -380,13 +382,17 @@ def _start_run(ticker, analysis_date, depth, extra=None):
         return ticker_error
     ticker = canonical
 
-    # 동시 실행 수 제한 (테이블이 작아 scan으로 충분)
+    # 진행 중(queued/running) 실행 목록을 한 번의 scan으로 가져와
+    # (1) 동일 종목 중복 방지, (2) 동시 실행 상한을 함께 검사한다.
     active = table.scan(
-        ProjectionExpression="run_id",
+        ProjectionExpression="run_id, ticker",
         FilterExpression="#s IN (:q, :r)",
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":q": "queued", ":r": "running"},
     )["Items"]
+    # 동일 종목 중복 방지: 같은 티커가 이미 진행 중이면 새 실행을 막는다.
+    if any(str(a.get("ticker", "")).upper() == ticker for a in active):
+        return _err(409, f"{ticker} 종목 분석이 이미 진행 중입니다. 완료되거나 취소된 뒤 다시 시도하세요.")
     max_active = _get_max_active_runs()
     if len(active) >= max_active:
         return _err(429, f"동시 실행은 최대 {max_active}건입니다. 진행 중인 분석이 끝난 뒤 다시 시도하세요.")
@@ -429,6 +435,15 @@ def _start_run(ticker, analysis_date, depth, extra=None):
         failures = result.get("failures") or []
         if failures:
             raise RuntimeError(failures[0].get("reason", "RunTask failed"))
+        # 시작된 태스크 ARN을 저장해두면 취소(cancel_run) 시 정확히 그 태스크만
+        # 중지할 수 있다. 실패해도 치명적이지 않으므로 방어적으로 처리.
+        tasks = result.get("tasks") or []
+        if tasks and tasks[0].get("taskArn"):
+            table.update_item(
+                Key={"run_id": run_id},
+                UpdateExpression="SET task_arn = :t",
+                ExpressionAttributeValues={":t": tasks[0]["taskArn"]},
+            )
     except Exception as e:
         table.update_item(
             Key={"run_id": run_id},
@@ -484,6 +499,39 @@ def restart_run(run_id, body):
     ticker = str(original.get("ticker", "")).strip().upper()
     analysis_date = str(original.get("analysis_date", "")).strip()
     return _start_run(ticker, analysis_date, depth, extra={"restarted_from": run_id})
+
+
+def cancel_run(run_id):
+    """진행 중(queued/running)인 실행을 취소한다.
+
+    저장된 task_arn의 Fargate 태스크를 중지하고 상태를 'cancelled'로 바꾼다.
+    이미 종료된(completed/failed/cancelled) 실행은 409로 거부한다. 태스크
+    중지에 실패해도(이미 종료 등) 상태는 cancelled로 확정한다 — 태스크가
+    죽으면 워커가 더는 상태를 갱신하지 않으므로 cancelled가 유지된다.
+    """
+    item = table.get_item(Key={"run_id": run_id}).get("Item")
+    if not item:
+        return _err(404, "해당 실행을 찾을 수 없습니다.")
+    status = str(item.get("status", ""))
+    if status not in ("queued", "running"):
+        return _err(409, "이미 종료된 실행은 취소할 수 없습니다.")
+
+    task_arn = item.get("task_arn")
+    if task_arn:
+        try:
+            ecs.stop_task(cluster=CLUSTER_ARN, task=task_arn, reason="cancelled by user")
+        except Exception as e:
+            # 태스크가 이미 멈췄거나 조회 불가여도 상태는 cancelled로 확정한다.
+            print(f"stop_task failed for {run_id}: {e}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    table.update_item(
+        Key={"run_id": run_id},
+        UpdateExpression="SET #s = :s, updated_at = :u, finished_at = :f",
+        ExpressionAttributeNames={"#s": "status"},
+        ExpressionAttributeValues={":s": "cancelled", ":u": now, ":f": now},
+    )
+    return _resp(200, {"run_id": run_id, "status": "cancelled"})
 
 
 def list_runs():
@@ -800,6 +848,11 @@ def handler(event, _context):
             if body_error:
                 return body_error
             return restart_run(m.group(1), body)
+
+        # 진행 중인 실행 취소 (Fargate 태스크 중지 + status=cancelled)
+        m = re.match(r"^/api/runs/([a-f0-9]{12})/cancel$", path)
+        if method == "POST" and m:
+            return cancel_run(m.group(1))
 
         if method == "GET" and path == "/api/runs":
             return list_runs()
