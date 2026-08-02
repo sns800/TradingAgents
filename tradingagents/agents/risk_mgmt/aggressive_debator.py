@@ -64,8 +64,14 @@ def create_aggressive_debator(llm):
         # 에코 루프(echo loop)를 만들므로, 결정이 아니라 '증거의 공격적 해석'을
         # 옹호하는 역할로 교체 — 계획이 과소 위험이면 더 대담하게, 과대
         # 위험이면 그 지점을 비판하게 한다.
+        # [편향검증 b' — 리스크 토론 대칭화] 보수 분석가가 항상 구체적 하방을
+        # 생산하는데 공격 반박이 "기회를 놓친다"式 일반론에 그치면, 심판(PM)이
+        # 공격 논거를 수사로 discount하고 하향으로 기운다(직전 실험 override
+        # 22/22 전부 하향). 이를 막기 위해 (1) 보수/중립 논거에 일반론이 아니라
+        # 구체적 반증(수치·사실·메커니즘)으로 조목조목 반박하도록, (2) 상방 논거
+        # 자체도 하방에 요구하는 것과 동일한 정량 근거를 갖추도록 강화한다.
         # (LLM 프롬프트이므로 영어 원문 유지)
-        prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
+        prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Ground your upside case in quantitative evidence from the reports — specific numbers, facts, or mechanisms — held to the same standard of proof you demand of the downside case; an appeal to "opportunity" or "risk-taking" that cites no evidence is not an argument. Here is the trader's decision:
 
 {trader_decision}
 
@@ -78,7 +84,7 @@ Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 {snapshot_block}Here is the current conversation history (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history} Here are the last arguments from the conservative analyst: {current_conservative_response} Here are the last arguments from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
-Engage actively by addressing any specific concerns raised, refuting the weaknesses in their logic, and asserting the benefits of risk-taking to outpace market norms. Maintain a focus on debating and persuading, not just presenting data. Challenge each counterpoint to underscore why a high-risk approach is optimal. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Engage actively by answering each specific concern the conservative and neutral analysts raise with specific counter-evidence — name the number, fact, or mechanism that defuses each concrete risk, because a general appeal to opportunity does not rebut a specific downside. Where a concern is genuinely material and unpriced, say so plainly rather than dismissing it; where it is overstated or already reflected in the price, show precisely why with the data. Maintain a focus on debating and persuading, not just presenting data. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
 
         # LLM을 한 번 호출해 공격적 애널리스트의 발언을 생성합니다.
         response = llm.invoke(prompt)

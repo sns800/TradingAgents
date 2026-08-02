@@ -54,16 +54,22 @@ def create_neutral_debator(llm):
         trader_decision = state["trader_investment_plan"]
 
         # [프롬프트 요약 - 한국어] 중립적 리스크 애널리스트 역할 지시문:
-        # 트레이더 결정의 이익과 위험을 균형 있게 평가하고, 공격적 애널리스트의
-        # 과도한 낙관과 보수적 애널리스트의 과도한 신중함을 양쪽 모두 반박하며,
-        # 중위험(균형) 전략이 최선인 이유를 대화체(서식 없이)로 설득하라는 내용.
-        # 아래에 4종 분석 보고서와 토론 이력을 근거 자료로 제공합니다.
+        # 트레이더 결정의 이익과 위험을 균형 있게 평가하되, 기본값이 "신중"이
+        # 아니라 증거가 가리키는 쪽. 공격의 과도한 낙관과 보수의 과도한 신중함을
+        # 양쪽 모두 대칭적으로 지적하고, 증거의 균형이 실제 놓인 곳(강세·약세·
+        # 진짜 균형 무엇이든)에 착지하라는 내용. 아래에 4종 분석 보고서와 토론
+        # 이력을 근거 자료로 제공합니다.
+        # [편향검증 b' — 리스크 토론 대칭화] 기존 문구는 '중도·지속가능·변동성
+        # 방어·가장 신뢰할 결과'式 표현으로 기본값을 은근히 '신중' 쪽에 기울여,
+        # 심판이 읽는 3인 대본을 하방으로 더 눌렀다. 진짜 중립(증거 방향이
+        # 기본값)으로 교체하고, 연구·PM 교정과 동일한 기저율 균형 문구(대형주
+        # 종목-일에서 상방·하방 알파는 대략 반반)를 추가한다.
         # (LLM 프롬프트이므로 영어 원문 유지)
-        prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
+        prompt = f"""As the Neutral Risk Analyst, your role is to weigh the potential benefits and risks of the trader's decision or plan on the evidence. Your default is not caution — it is wherever the evidence points. Across many large-cap stock-days, upside and downside alpha are roughly equally common, so do not treat a moderate or defensive posture as inherently safer, more reliable, or more "balanced" — balance means matching the weight of the evidence, not splitting the difference. Here is the trader's decision:
 
 {trader_decision}
 
-Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
+Your task is to challenge both the Aggressive and Conservative Analysts symmetrically, pointing out where each is over-optimistic or over-cautious relative to what the evidence actually supports. Judge their arguments on the quality of their evidence, not their tone. Use insights from the following data sources:
 
 {instrument_context}
 Market Research Report: {market_research_report}
@@ -72,7 +78,7 @@ Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 {snapshot_block}Here is the current conversation history (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
-Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Engage actively by analyzing both sides critically and addressing the weaknesses in the aggressive and conservative arguments even-handedly. Land where the balance of concrete evidence actually sits — which may be bullish, bearish, or genuinely balanced — rather than defaulting to a middle-of-the-road posture. Focus on debating rather than simply presenting data, aiming to show what the evidence, weighed symmetrically, really implies for the trader's risk. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
 
         # LLM을 한 번 호출해 중립적 애널리스트의 발언을 생성합니다.
         response = llm.invoke(prompt)
