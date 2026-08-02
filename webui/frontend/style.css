@@ -404,6 +404,73 @@ input:focus, select:focus {
   word-break: break-word;
 }
 
+/* ---------- 재시작 패널 ---------- */
+.restart-box {
+  margin-top: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+/* 실패한 실행에서는 눈에 띄게 강조 */
+.restart-box-failed {
+  border-color: var(--accent);
+  background: var(--blue-bg);
+}
+
+.restart-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.restart-desc {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.restart-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.restart-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.restart-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.restart-depth {
+  width: auto;
+  min-width: 180px;
+}
+
+.restart-btn {
+  margin-bottom: 0;
+}
+
+.restart-hint {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.restart-error {
+  margin: 8px 0 0;
+  color: var(--red);
+  font-size: 0.85rem;
+}
+
 /* ---------- 보고서 ---------- */
 .report-layout {
   display: grid;

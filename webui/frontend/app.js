@@ -673,6 +673,98 @@
       var errBox = elem('div', 'detail-error', '오류: ' + run.error);
       box.appendChild(errBox);
     }
+
+    var restart = buildRestartPanel(run);
+    if (restart) box.appendChild(restart);
+  }
+
+  // 새 분석 폼과 동일한 깊이 옵션 (값, 레이블)
+  var DEPTH_OPTIONS = [
+    [1, '얕게 (빠름·저비용)'],
+    [3, '중간 (균형)'],
+    [5, '깊게 (느림·고비용)']
+  ];
+
+  // 완료/실패한 실행을 같은 종목·날짜로, 새 깊이로 재시작하는 패널.
+  // 진행 중(queued/running)인 실행에는 표시하지 않는다.
+  function buildRestartPanel(run) {
+    if (!run.run_id) return null;
+    if (run.status !== 'completed' && run.status !== 'failed') return null;
+    var failed = run.status === 'failed';
+
+    var box = elem('div', 'restart-box' + (failed ? ' restart-box-failed' : ''));
+    box.appendChild(elem('p', 'restart-title', failed ? '다른 깊이로 재시작' : '재시작'));
+    box.appendChild(elem('p', 'restart-desc',
+      (run.ticker || '-') + ' · ' + (run.analysis_date || '-') + '을(를) 새로운 분석 깊이로 다시 실행합니다.'));
+
+    var origDepth = Number(run.depth) || 1;
+    var origLabel = DEPTH_LABEL[origDepth] || origDepth;
+
+    var row = elem('div', 'restart-row');
+
+    var field = elem('div', 'restart-field');
+    var selId = 'restart-depth-' + run.run_id;
+    var label = elem('label', 'restart-label', '분석 깊이');
+    label.setAttribute('for', selId);
+    field.appendChild(label);
+
+    var select = document.createElement('select');
+    select.id = selId;
+    select.className = 'restart-depth';
+    DEPTH_OPTIONS.forEach(function (opt) {
+      var o = elem('option', null, opt[1]);
+      o.value = String(opt[0]);
+      select.appendChild(o);
+    });
+    select.value = String(origDepth);
+    field.appendChild(select);
+    row.appendChild(field);
+
+    var btn = elem('button', 'btn btn-primary restart-btn', '재시작');
+    btn.type = 'button';
+    row.appendChild(btn);
+    box.appendChild(row);
+
+    // 원본 대비 무엇이 바뀌는지(깊이) 안내
+    var hint = elem('p', 'restart-hint');
+    function updateHint() {
+      var newDepth = parseInt(select.value, 10);
+      var newLabel = DEPTH_LABEL[newDepth] || newDepth;
+      hint.textContent = '원본 깊이: ' + origLabel + ' → 새 실행: ' + newLabel +
+        (newDepth === origDepth ? ' (동일)' : '');
+    }
+    updateHint();
+    select.addEventListener('change', updateHint);
+    box.appendChild(hint);
+
+    var err = elem('p', 'restart-error');
+    err.hidden = true;
+    box.appendChild(err);
+
+    btn.addEventListener('click', function () {
+      var newDepth = parseInt(select.value, 10);
+      err.hidden = true;
+      btn.disabled = true;
+      select.disabled = true;
+      btn.textContent = '요청 중…';
+      apiFetch('/runs/' + encodeURIComponent(run.run_id) + '/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depth: newDepth })
+      }).then(function (data) {
+        if (data && data.run_id) {
+          location.hash = '#/runs/' + encodeURIComponent(data.run_id);
+        }
+      }).catch(function (e) {
+        err.textContent = e.message;
+        err.hidden = false;
+        btn.disabled = false;
+        select.disabled = false;
+        btn.textContent = '재시작';
+      });
+    });
+
+    return box;
   }
 
   function renderReportNav(reports) {

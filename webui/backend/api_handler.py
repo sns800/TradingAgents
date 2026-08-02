@@ -206,6 +206,7 @@ def _validate_ticker(ticker: str):
 RUN_FIELDS = (
     "run_id", "ticker", "analysis_date", "depth", "status",
     "decision", "error", "created_at", "updated_at", "started_at", "finished_at",
+    "restarted_from",
 )
 
 
@@ -298,27 +299,26 @@ def get_catalog(query):
     })
 
 
-def create_run(body):
-    ticker = str(body.get("ticker", "")).strip().upper()
-    analysis_date = str(body.get("analysis_date", "")).strip()
+def _parse_depth(raw):
+    """분석 깊이(depth)를 검증한다. (depth, 오류 응답) 튜플을 반환한다."""
     try:
-        depth = int(body.get("depth", 1))
+        depth = int(raw)
     except (TypeError, ValueError):
-        return _err(400, "분석 깊이(depth)는 1, 3, 5 중 하나여야 합니다.")
-
-    if not TICKER_RE.match(ticker):
-        return _err(400, "올바른 종목 코드를 입력해 주세요 (예: AAPL, 005930.KS, BTC-USD).")
-    if not DATE_RE.match(analysis_date):
-        return _err(400, "날짜는 YYYY-MM-DD 형식이어야 합니다.")
-    try:
-        parsed = datetime.strptime(analysis_date, "%Y-%m-%d").date()
-    except ValueError:
-        return _err(400, "존재하지 않는 날짜입니다.")
-    if parsed > datetime.now(timezone.utc).date():
-        return _err(400, "분석 날짜는 미래일 수 없습니다.")
+        return None, _err(400, "분석 깊이(depth)는 1, 3, 5 중 하나여야 합니다.")
     if depth not in (1, 3, 5):
-        return _err(400, "분석 깊이(depth)는 1, 3, 5 중 하나여야 합니다.")
+        return None, _err(400, "분석 깊이(depth)는 1, 3, 5 중 하나여야 합니다.")
+    return depth, None
 
+
+def _start_run(ticker, analysis_date, depth, extra=None):
+    """티커 검증·동시성 제한·RunTask 트리거를 처리하고 새 실행을 생성한다.
+
+    create_run과 restart_run이 공유하는 핵심 로직. ticker/analysis_date/depth는
+    이미 형식 검증을 마친 값이어야 하며, 여기서는 카탈로그 대조로 정규 티커를
+    확정하고 동시 실행 상한을 확인한 뒤 Fargate 태스크를 띄운다.
+    extra는 새 레코드에 함께 저장할 부가 필드(예: restarted_from).
+    성공 시 201 + {"run_id": ...}.
+    """
     # 카탈로그 기반 티커 검증: 통과 시 카탈로그의 정규 티커로 실행한다
     canonical, ticker_error = _validate_ticker(ticker)
     if ticker_error:
@@ -337,7 +337,7 @@ def create_run(body):
 
     run_id = uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc).isoformat()
-    table.put_item(Item={
+    item = {
         "run_id": run_id,
         "ticker": ticker,
         "analysis_date": analysis_date,
@@ -345,7 +345,10 @@ def create_run(body):
         "status": "queued",
         "created_at": now,
         "updated_at": now,
-    })
+    }
+    if extra:
+        item.update(extra)
+    table.put_item(Item=item)
 
     try:
         result = ecs.run_task(
@@ -386,6 +389,47 @@ def create_run(body):
     return _resp(201, {"run_id": run_id})
 
 
+def create_run(body):
+    ticker = str(body.get("ticker", "")).strip().upper()
+    analysis_date = str(body.get("analysis_date", "")).strip()
+    depth, depth_error = _parse_depth(body.get("depth", 1))
+    if depth_error:
+        return depth_error
+
+    if not TICKER_RE.match(ticker):
+        return _err(400, "올바른 종목 코드를 입력해 주세요 (예: AAPL, 005930.KS, BTC-USD).")
+    if not DATE_RE.match(analysis_date):
+        return _err(400, "날짜는 YYYY-MM-DD 형식이어야 합니다.")
+    try:
+        parsed = datetime.strptime(analysis_date, "%Y-%m-%d").date()
+    except ValueError:
+        return _err(400, "존재하지 않는 날짜입니다.")
+    if parsed > datetime.now(timezone.utc).date():
+        return _err(400, "분석 날짜는 미래일 수 없습니다.")
+
+    return _start_run(ticker, analysis_date, depth)
+
+
+def restart_run(run_id, body):
+    """기존 실행을 같은 종목·날짜로, 새 깊이(depth)로 다시 실행한다.
+
+    원본 레코드에서 ticker/analysis_date를 복사하고 depth만 요청값으로 바꿔
+    create_run과 동일한 검증·동시성·RunTask 경로(_start_run)를 재사용한다.
+    새 레코드에는 restarted_from(원본 run_id)을 기록한다.
+    """
+    original = table.get_item(Key={"run_id": run_id}).get("Item")
+    if not original:
+        return _err(404, "해당 실행을 찾을 수 없습니다.")
+
+    depth, depth_error = _parse_depth(body.get("depth"))
+    if depth_error:
+        return depth_error
+
+    ticker = str(original.get("ticker", "")).strip().upper()
+    analysis_date = str(original.get("analysis_date", "")).strip()
+    return _start_run(ticker, analysis_date, depth, extra={"restarted_from": run_id})
+
+
 def list_runs():
     items = table.scan().get("Items", [])
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -412,6 +456,17 @@ def get_report(run_id, name):
     return _resp(200, {"name": name, "content": content})
 
 
+def _parse_body(event):
+    """POST 본문을 JSON으로 파싱한다. (body, 오류 응답) 튜플을 반환한다."""
+    try:
+        raw = event.get("body") or "{}"
+        if event.get("isBase64Encoded"):
+            raw = base64.b64decode(raw).decode("utf-8")
+        return json.loads(raw), None
+    except (ValueError, UnicodeDecodeError):
+        return None, _err(400, "요청 본문이 올바른 JSON이 아닙니다.")
+
+
 def handler(event, _context):
     http = event.get("requestContext", {}).get("http", {})
     method = http.get("method", "GET")
@@ -423,15 +478,19 @@ def handler(event, _context):
 
     try:
         if method == "POST" and path == "/api/runs":
-            try:
-                raw = event.get("body") or "{}"
-                if event.get("isBase64Encoded"):
-                    import base64
-                    raw = base64.b64decode(raw).decode("utf-8")
-                body = json.loads(raw)
-            except (ValueError, UnicodeDecodeError):
-                return _err(400, "요청 본문이 올바른 JSON이 아닙니다.")
+            body, body_error = _parse_body(event)
+            if body_error:
+                return body_error
             return create_run(body)
+
+        # 기존 실행 재시작 (원본 종목·날짜 유지, 새 깊이). create_run보다 먼저
+        # 검사해 아래 상세 조회 라우트(GET)와 경로가 겹치지 않게 한다.
+        m = re.match(r"^/api/runs/([a-f0-9]{12})/restart$", path)
+        if method == "POST" and m:
+            body, body_error = _parse_body(event)
+            if body_error:
+                return body_error
+            return restart_run(m.group(1), body)
 
         if method == "GET" and path == "/api/runs":
             return list_runs()
