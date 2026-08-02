@@ -46,6 +46,10 @@ ADMIN_GROUP = "admins"
 # 실행 테이블에서 런타임 설정을 담는 특수 항목의 run_id.
 # 실제 실행이 아니므로 목록/실행 검사에서 제외한다.
 CONFIG_RUN_ID = "__config__"
+# 워커 하트비트(30초)가 이 시간 이상 끊긴 running 항목은 고아(죽은 태스크)로
+# 간주해 동시성·중복 판정에서 제외한다. 하트비트 주기의 넉넉한 배수로 잡아
+# 잠깐 느린 실행을 오판하지 않게 한다.
+ORPHAN_STALE_SECONDS = 600
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -385,11 +389,25 @@ def _start_run(ticker, analysis_date, depth, extra=None):
     # 진행 중(queued/running) 실행 목록을 한 번의 scan으로 가져와
     # (1) 동일 종목 중복 방지, (2) 동시 실행 상한을 함께 검사한다.
     active = table.scan(
-        ProjectionExpression="run_id, ticker",
+        ProjectionExpression="run_id, ticker, updated_at",
         FilterExpression="#s IN (:q, :r)",
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":q": "queued", ":r": "running"},
     )["Items"]
+    # 고아(orphan) 레코드 제외: 워커가 30초마다 하트비트로 updated_at을
+    # 갱신하므로, updated_at이 오래 정체된(ORPHAN_STALE_SECONDS 초과) running
+    # 항목은 태스크가 죽었는데 상태만 남은 것으로 보고 동시성·중복 판정에서
+    # 제외한다. 이렇게 하면 죽은 실행이 큐를 영구 점유하는 것을 자가 치유한다.
+    now_ts = datetime.now(timezone.utc)
+    def _is_stale(a):
+        upd = a.get("updated_at")
+        if not upd:
+            return False
+        try:
+            return (now_ts - datetime.fromisoformat(upd)).total_seconds() > ORPHAN_STALE_SECONDS
+        except (ValueError, TypeError):
+            return False
+    active = [a for a in active if not _is_stale(a)]
     # 동일 종목 중복 방지: 같은 티커가 이미 진행 중이면 새 실행을 막는다.
     if any(str(a.get("ticker", "")).upper() == ticker for a in active):
         return _err(409, f"{ticker} 종목 분석이 이미 진행 중입니다. 완료되거나 취소된 뒤 다시 시도하세요.")

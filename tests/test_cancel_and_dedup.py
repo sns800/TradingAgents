@@ -114,6 +114,32 @@ def test_dedup_case_insensitive(api):
     assert status == 409
 
 
+def test_stale_orphan_ignored_in_concurrency(api):
+    """updated_at이 오래 정체된 running(고아)은 동시성·중복 판정에서 제외."""
+    import datetime
+    old = (datetime.datetime.now(datetime.timezone.utc)
+           - datetime.timedelta(hours=1)).isoformat()
+    # 10건 모두 오래된 고아 → 상한(10)에 안 걸리고 신규 실행 허용
+    api.table.scan.return_value = {"Items": [
+        {"run_id": f"r{i}", "ticker": "OLD", "updated_at": old} for i in range(10)
+    ]}
+    status, _ = _post(api, "/api/runs",
+                      {"ticker": "AAPL", "analysis_date": "2026-07-30", "depth": 1})
+    assert status == 201  # 고아가 슬롯을 막지 않음
+
+
+def test_stale_orphan_same_ticker_not_blocking(api):
+    """고아가 된 동일 종목은 중복 차단에서도 제외(재실행 허용)."""
+    import datetime
+    old = (datetime.datetime.now(datetime.timezone.utc)
+           - datetime.timedelta(hours=1)).isoformat()
+    api.table.scan.return_value = {"Items": [
+        {"run_id": "r1", "ticker": "AAPL", "updated_at": old}]}
+    status, _ = _post(api, "/api/runs",
+                      {"ticker": "AAPL", "analysis_date": "2026-07-30", "depth": 1})
+    assert status == 201
+
+
 def test_task_arn_saved_on_start(api):
     """실행 시작 시 task_arn이 저장되는지 검증(취소에 필요)."""
     status, _ = _post(api, "/api/runs",

@@ -10,7 +10,6 @@
 #  - DynamoDB/S3 등 시스템 리소스: 서울(ap-northeast-2), HOME_REGION 환경변수로
 #    명시해 boto3 클라이언트에 직접 넘긴다 (Bedrock용 리전 env와 분리).
 # ============================================================
-import contextlib
 import os
 import sys
 import threading
@@ -56,11 +55,30 @@ def update_run(**fields):
 
 
 def heartbeat_loop(stop_event: threading.Event):
-    """실행 중임을 알리는 하트비트. UI가 '아직 살아있음'을 알 수 있게 한다."""
+    """실행 중임을 알리는 하트비트. UI가 '아직 살아있음'을 알 수 있게 한다.
+
+    사용자가 실행을 취소하면 API가 status=cancelled로 바꾸고 이 태스크를
+    중지한다. 중지 유예(SIGTERM~SIGKILL) 동안 하트비트가 status를 running으로
+    되돌리는 경쟁을 막기 위해, status가 아직 running일 때만 갱신하는 조건부
+    업데이트를 쓴다. 조건이 깨지면(취소됨 등) 하트비트를 멈춘다.
+    """
+    from botocore.exceptions import ClientError
     while not stop_event.wait(30):
-        # 하트비트 실패는 치명적이지 않으므로 조용히 넘어간다
-        with contextlib.suppress(Exception):
-            update_run(status="running")
+        try:
+            table.update_item(
+                Key={"run_id": RUN_ID},
+                UpdateExpression="SET updated_at = :u",
+                ConditionExpression="#s = :running",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={":u": now_iso(), ":running": "running"},
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                # 외부에서 종료 상태(취소 등)로 바뀜 → 하트비트 중단
+                return
+            # 그 외 오류는 치명적이지 않으므로 계속
+        except Exception:
+            pass
 
 
 def upload_reports(report_dir: Path) -> list[str]:
