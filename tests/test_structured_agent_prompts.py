@@ -96,6 +96,9 @@ def test_portfolio_manager_prompt_states_constraint():
     llm = _capturing_llm(
         captured,
         PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.HOLD,
+            override_action="confirm",
+            override_rationale="No new risk evidence.",
             rating=PortfolioRating.HOLD,
             executive_summary="x",
             investment_thesis="y",

@@ -372,6 +372,8 @@ def _structured_results():
             rationale="x", strategic_actions="y",
         ),
         "pm": PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.HOLD, override_action="confirm",
+            override_rationale="No new risk evidence.",
             rating=PortfolioRating.HOLD, executive_summary="x", investment_thesis="y",
         ),
     }

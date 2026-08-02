@@ -240,6 +240,9 @@ class TestPortfolioManagerGate:
 
         structured = MagicMock()
         structured.invoke.return_value = PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.BUY,
+            override_action="confirm",
+            override_rationale="No new risk evidence.",
             rating=PortfolioRating.BUY,
             executive_summary="x",
             investment_thesis="y",
@@ -257,6 +260,9 @@ class TestPortfolioManagerGate:
 
         structured = MagicMock()
         structured.invoke.return_value = PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.HOLD,
+            override_action="confirm",
+            override_rationale="No new risk evidence.",
             rating=PortfolioRating.HOLD,
             executive_summary="x",
             investment_thesis="y",

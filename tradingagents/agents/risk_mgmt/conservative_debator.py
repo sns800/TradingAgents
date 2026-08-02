@@ -54,16 +54,23 @@ def create_conservative_debator(llm):
         trader_decision = state["trader_investment_plan"]
 
         # [프롬프트 요약 - 한국어] 보수적 리스크 애널리스트 역할 지시문:
-        # 자산 보호·변동성 최소화·안정적 성장을 최우선으로 트레이더 결정의
-        # 고위험 요소를 비판적으로 점검하고, 공격적/중립적 애널리스트의 논점에
-        # 직접 반박하며, 저위험 전략이 최선인 이유를 대화체(서식 없이)로
-        # 설득하라는 내용. 아래에 4종 분석 보고서와 토론 이력을 근거 자료로
-        # 제공합니다. (LLM 프롬프트이므로 영어 원문 유지)
-        prompt = f"""As the Conservative Risk Analyst, your primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth. You prioritize stability, security, and risk mitigation, carefully assessing potential losses, economic downturns, and market volatility. When evaluating the trader's decision or plan, critically examine high-risk elements, pointing out where the decision may expose the firm to undue risk and where more cautious alternatives could secure long-term gains. Here is the trader's decision:
+        # 자본 보호의 렌즈로 하방 리스크를 부각하되, 그것이 decision-relevant
+        # 하려면 구체적·중대하고 정량 근거가 있으며 계획에 이미 반영되지 않은
+        # 것이어야 한다. 일반적 신중론의 나열이 아니라 실질 하방만 제기하고,
+        # 자신의 우려가 일반적이거나 이미 반영된 것이면 부풀리지 말고 인정하라.
+        # 공격적/중립적 애널리스트의 논점에 직접 반박하되 증거로. 아래에 4종
+        # 분석 보고서와 토론 이력을 근거 자료로 제공합니다.
+        # [편향검증 b' — 리스크 토론 대칭화] 기존 "자산 보호·변동성 최소화를
+        # 최우선으로 저위험 전략이 최선인 근거를 만들라"式 프레이밍은 결과와
+        # 무관하게 하방을 과생산하는 비대칭(연구 강세 편향의 거울상)을 낳아,
+        # 대본을 읽는 PM이 대부분 하향하게 했다. 하방을 '과생산'하지 않고
+        # '증거 비례'로 제기하도록 교체 — 렌즈(보수적 해석)는 유지하되 구체성·
+        # 중대성·미반영을 하방 논거의 관문으로 요구한다. (LLM 프롬프트 영어 유지)
+        prompt = f"""As the Conservative Risk Analyst, your lens is capital preservation: you surface the downside risks in the trader's decision that others may be underweighting. But a downside is only decision-relevant if it is concrete, material, quantitatively grounded, and not already reflected in the current plan — a specific concentration, event, liquidity, or fundamental-deterioration risk with numbers behind it, not a general restatement of caution. Do not manufacture or pad the downside: listing generic valuation, momentum, or macro worries that the plan already accounts for weakens your case rather than strengthening it. Your credibility comes from raising the few risks that genuinely survive scrutiny, quantifying their magnitude, and showing why they are not yet priced in. Here is the trader's decision:
 
 {trader_decision}
 
-Your task is to actively counter the arguments of the Aggressive and Neutral Analysts, highlighting where their views may overlook potential threats or fail to prioritize sustainability. Respond directly to their points, drawing from the following data sources to build a convincing case for a low-risk approach adjustment to the trader's decision:
+Your task is to counter the Aggressive and Neutral Analysts where they underweight a specific, material, unpriced downside — press it with evidence. Where your own concern is general, already priced, or unsupported by the numbers, concede it rather than inflate it: a conservative case built only on the risks that truly matter is far more persuasive than an exhaustive list of everything that could go wrong. Draw from the following data sources:
 
 {instrument_context}
 Market Research Report: {market_research_report}
@@ -72,7 +79,7 @@ Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 {snapshot_block}Here is the current conversation history (earlier arguments are truncated for brevity; the latest argument is shown in full): {condensed_history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
-Engage by questioning their optimism and emphasizing the potential downsides they may have overlooked. Address each of their counterpoints to showcase why a conservative stance is ultimately the safest path for the firm's assets. Focus on debating and critiquing their arguments to demonstrate the strength of a low-risk strategy over their approaches. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Engage by testing their optimism against specific, quantified downside risks — not by emphasizing caution for its own sake. Address each of their counterpoints on the evidence, and where a risk you raised has been genuinely answered, acknowledge it. Focus on debating the substance so the trader hears the downside risks that are real and unpriced, not a blanket argument for lower risk. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
 
         # LLM을 한 번 호출해 보수적 애널리스트의 발언을 생성합니다.
         response = llm.invoke(prompt)

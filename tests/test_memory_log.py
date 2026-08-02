@@ -93,6 +93,9 @@ def _structured_pm_llm(captured: dict, decision: PortfolioDecision | None = None
     """
     if decision is None:
         decision = PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.HOLD,
+            override_action="confirm",
+            override_rationale="Risk debate does not change the risk-adjusted picture.",
             rating=PortfolioRating.HOLD,
             executive_summary="Hold the position; await catalyst.",
             investment_thesis="Balanced view; neither side carried the debate.",
@@ -748,6 +751,9 @@ class TestPortfolioManagerInjection:
         있는지 검증하는 테스트."""
         captured = {}
         decision = PortfolioDecision(
+            rm_proposed_rating=PortfolioRating.OVERWEIGHT,
+            override_action="confirm",
+            override_rationale="Risk debate confirms the constructive setup.",
             rating=PortfolioRating.OVERWEIGHT,
             executive_summary="Build position gradually over the next two weeks.",
             investment_thesis="AI capex cycle remains intact; institutional flows constructive.",
