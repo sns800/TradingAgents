@@ -31,12 +31,16 @@ echo "VPC: $VPC_ID / 서브넷: $SUBNET_IDS"
 
 # ---------- 2. CloudFormation 스택 배포 ----------
 echo "== CloudFormation 스택 배포 중 (수 분 소요) =="
+# 스택 레벨 태그: 태그 가능한 모든 리소스에 자동 전파된다. 비용 할당 태그
+# Project=stock 으로 Cost Explorer에서 이 프로젝트 비용만 필터링할 수 있다
+# (최초 1회 Billing 콘솔에서 'Project'를 비용 할당 태그로 활성화해야 청구서에 반영됨).
 aws cloudformation deploy \
   --region "$REGION" \
   --stack-name "$STACK" \
   --template-file "$INFRA/template.yaml" \
   --capabilities CAPABILITY_IAM \
   --no-fail-on-empty-changeset \
+  --tags Project=stock Application=tradingagents-webui \
   --parameter-overrides \
     "VpcId=$VPC_ID" \
     "SubnetIds=$SUBNET_IDS" \
