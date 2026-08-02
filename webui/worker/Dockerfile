@@ -14,7 +14,8 @@ COPY . .
 #  - xlrd: JPX 상장종목일람(레거시 .xls) 읽기. xlrd 2.x는 .xlsx 지원만 제거했고
 #    .xls는 계속 지원한다 (2.0.2 + pandas 3.x 조합으로 실물 파일 검증 완료).
 #  - lxml: KRX KIND 상장법인목록(HTML 테이블) pandas.read_html 파싱 엔진.
-RUN pip install --no-cache-dir ".[bedrock]" boto3 "xlrd>=2.0.1" "lxml>=5.0"
+#  - openpyxl: SZSE(선전거래소) A주 목록 xlsx 읽기 (중국 카탈로그).
+RUN pip install --no-cache-dir ".[bedrock]" boto3 "xlrd>=2.0.1" "lxml>=5.0" "openpyxl>=3.1"
 
 RUN useradd --create-home appuser \
  && install -d -m 0755 -o appuser -g appuser /home/appuser/.tradingagents

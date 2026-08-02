@@ -1,8 +1,8 @@
 """[모듈 개요] 종목 카탈로그 파서(webui/catalog/parsers.py) 테스트.
 
 픽스처는 실제 거래소 공개 파일(NASDAQ Trader symbol directory, KRX KIND
-상장법인목록, JPX 상장종목일람)에서 잘라낸 고정본이며, 외부 네트워크 호출 없이
-파싱·인코딩·야후 접미사 매핑·제외 규칙을 검증합니다.
+상장법인목록, JPX 상장종목일람, SSE/SZSE 상장사 목록)에서 잘라낸 고정본이며,
+외부 네트워크 호출 없이 파싱·인코딩·야후 접미사 매핑·제외 규칙을 검증합니다.
 """
 
 import importlib.util
@@ -198,6 +198,59 @@ class TestParseJP(unittest.TestCase):
         self.assertNotIn("8301.T", self.index)  # 出資証券 (일본은행)
         self.assertIn("1773.T", self.index)     # プライム（外国株式）
         self.assertEqual(len(self.items), 5)
+
+
+@pytest.mark.unit
+class TestParseCN(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # SZSE 픽스처(.xlsx)를 읽으려면 openpyxl 필요 (배치 전용 의존성)
+        pytest.importorskip("openpyxl", reason="catalog batch deps not installed")
+        cls.items = parsers.parse_cn(
+            (FIXTURES / "sse_stocks_sample.json").read_bytes(),
+            (FIXTURES / "szse_astock_sample.xlsx").read_bytes(),
+        )
+        cls.index = _by_ticker(cls.items)
+
+    def test_item_schema(self):
+        for item in self.items:
+            self.assertEqual(set(item), ITEM_KEYS)
+
+    def test_shanghai_suffix_and_sector(self):
+        """상하이 메인보드 종목에 .SS가 붙고 CSRC 업종이 sector로 들어오는지 검증하는 테스트."""
+        spdb = self.index["600000.SS"]
+        self.assertEqual(spdb["name"], "浦发银行")
+        self.assertEqual(spdb["market"], "Shanghai")
+        self.assertEqual(spdb["sector"], "金融业")
+        self.assertEqual(spdb["currency"], "CNY")
+
+    def test_star_market_mapped(self):
+        """과창판(688) 종목이 .SS 접미사와 STAR 시장명으로 들어오는지 검증하는 테스트."""
+        smic = self.index["688981.SS"]
+        self.assertEqual(smic["market"], "STAR")
+        self.assertEqual(smic["name"], "中芯国际")
+
+    def test_shenzhen_suffix_and_boards(self):
+        """선전 종목에 .SZ가 붙고 주판/창업판이 Shenzhen/ChiNext로 구분되는지 검증하는 테스트."""
+        self.assertEqual(self.index["000001.SZ"]["market"], "Shenzhen")
+        self.assertEqual(self.index["000001.SZ"]["name"], "平安银行")
+        self.assertEqual(self.index["300750.SZ"]["market"], "ChiNext")
+
+    def test_szse_sector_prefix_stripped(self):
+        """SZSE '所属行业'의 CSRC 분류 문자 접두('J ')가 제거되는지 검증하는 테스트."""
+        self.assertEqual(self.index["000001.SZ"]["sector"], "金融业")
+        self.assertEqual(self.index["300750.SZ"]["sector"], "制造业")
+
+    def test_delisted_and_bshare_excluded(self):
+        """상장폐지 종목과 A주 코드 없는 B주 전용 행이 제외되는지 검증하는 테스트."""
+        self.assertNotIn("600001.SS", self.index)  # 상장폐지
+        # 픽스처 유효 종목: SSE 3(600000/601398/688981) + SZSE 3(000001/000002/300750)
+        self.assertEqual(len(self.items), 6)
+        self.assertFalse(any("900929" in t for t in self.index))
+
+    def test_all_tickers_use_cn_suffixes(self):
+        """모든 CN 티커가 .SS 또는 .SZ로 끝나는지 검증하는 테스트."""
+        self.assertTrue(all(t.endswith((".SS", ".SZ")) for t in self.index))
 
 
 if __name__ == "__main__":

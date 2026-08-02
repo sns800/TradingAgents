@@ -1,0 +1,50 @@
+{
+  "result": [
+    {
+      "A_STOCK_CODE": "600000",
+      "COMPANY_ABBR": "浦发银行",
+      "SEC_NAME_CN": "浦发银行",
+      "CSRC_CODE_DESC": "金融业",
+      "DELIST_DATE": "-",
+      "STOCK_TYPE": "1",
+      "LIST_BOARD": "1"
+    },
+    {
+      "A_STOCK_CODE": "601398",
+      "COMPANY_ABBR": "工商银行",
+      "SEC_NAME_CN": "工商银行",
+      "CSRC_CODE_DESC": "金融业",
+      "DELIST_DATE": "-",
+      "STOCK_TYPE": "1",
+      "LIST_BOARD": "1"
+    },
+    {
+      "A_STOCK_CODE": "688981",
+      "COMPANY_ABBR": "中芯国际",
+      "SEC_NAME_CN": "中芯国际",
+      "CSRC_CODE_DESC": "制造业",
+      "DELIST_DATE": "-",
+      "STOCK_TYPE": "1",
+      "LIST_BOARD": "2"
+    },
+    {
+      "A_STOCK_CODE": "600001",
+      "COMPANY_ABBR": "邯郸钢铁",
+      "SEC_NAME_CN": "邯郸钢铁",
+      "CSRC_CODE_DESC": "制造业",
+      "DELIST_DATE": "20091229",
+      "STOCK_TYPE": "1",
+      "LIST_BOARD": "1"
+    },
+    {
+      "A_STOCK_CODE": "-",
+      "COMPANY_ABBR": "锦旅Ｂ股",
+      "SEC_NAME_CN": "锦旅Ｂ股",
+      "CSRC_CODE_DESC": "租赁和商务服务业",
+      "DELIST_DATE": "-",
+      "STOCK_TYPE": "2",
+      "B_STOCK_CODE": "900929",
+      "LIST_BOARD": "1"
+    }
+  ]
+}

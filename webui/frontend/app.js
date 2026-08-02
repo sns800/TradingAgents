@@ -44,13 +44,16 @@
   var MARKET_LABEL = {
     KR: '한국',
     JP: '일본',
-    US: '미국'
+    US: '미국',
+    CN: '중국'
   };
 
+  // CNY는 엔화(¥)와 기호가 같아 혼동되므로 'CN¥'로 구분 표기한다.
   var CURRENCY_SYMBOL = {
     KRW: '₩',
     JPY: '¥',
-    USD: '$'
+    USD: '$',
+    CNY: 'CN¥'
   };
 
   var REPORT_LABEL = {

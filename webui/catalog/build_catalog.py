@@ -2,11 +2,12 @@
 # [모듈 개요] 종목 카탈로그 배치 수집기 (ECS Fargate 태스크 진입점)
 #
 # EventBridge 스케줄(평일 22:00 KST)이 워커 태스크 정의를 containerOverrides로
-# 실행하며, 한국·일본·미국 상장 전 종목의 목록+기본정보를 수집해 S3에 씁니다.
+# 실행하며, 한국·일본·미국·중국 상장 전 종목의 목록+기본정보를 수집해 S3에 씁니다.
 #
 # S3 저장 계약 (다른 작업자와 합의된 스펙 - 정확히 준수):
 #  - 버킷: 환경변수 DATA_BUCKET
-#  - 키: catalog/US.json.gz, catalog/KR.json.gz, catalog/JP.json.gz, catalog/meta.json
+#  - 키: catalog/US.json.gz, catalog/KR.json.gz, catalog/JP.json.gz,
+#        catalog/CN.json.gz, catalog/meta.json
 #  - 각 시장 파일(JSON, gzip):
 #      {"market": "KR", "generated_at": "<ISO8601 UTC>", "count": N, "items": [...]}
 #  - meta.json(비압축): {"markets": {"US": {"generated_at": "...", "count": N}, ...}}
@@ -50,7 +51,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("catalog")
 
-MARKETS = ("US", "KR", "JP")
+MARKETS = ("US", "KR", "JP", "CN")
 
 # 데이터 소스 URL (전부 무료 공개 자료)
 NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
@@ -59,10 +60,26 @@ KRX_CORP_LIST_URL = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=downl
 JPX_LISTING_URL = (
     "https://www.jpx.co.jp/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_j.xls"
 )
+# 중국: 상하이(SSE)·선전(SZSE) 공식 상장사 목록. 두 소스 모두 각 거래소 사이트를
+# Referer로 요구하므로 collect_cn에서 전용 헤더로 받는다.
+#  - SSE: 상장 A주 전체(메인보드+과창판) JSON 조회 엔드포인트.
+#  - SZSE: A주 목록(주판+창업판) xlsx 다운로드(ShowReport CATALOGID=1110).
+SSE_LISTING_URL = (
+    "http://query.sse.com.cn/sseQuery/commonQuery.do"
+    "?sqlId=COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L&isPagination=false"
+)
+SSE_REFERER = "http://www.sse.com.cn/"
+SZSE_LISTING_URL = (
+    "https://www.szse.cn/api/report/ShowReport"
+    "?SHOWTYPE=xlsx&CATALOGID=1110&TABKEY=tab1&random=0.1"
+)
+SZSE_REFERER = "https://www.szse.cn/market/product/stock/list/index.html"
 
 # 소스가 깨졌을 때(빈 파일, 형식 변경 등) 정상 카탈로그를 덮어쓰지 않기 위한
-# 시장별 최소 종목 수 안전장치. 실측(2026-08): US ~6100, KR ~2700, JP ~3700.
-MIN_ITEM_COUNT = {"US": 3000, "KR": 1500, "JP": 2000}
+# 시장별 최소 종목 수 안전장치. 실측(2026-08): US ~6100, KR ~2700, JP ~3700,
+# CN ~5200(SSE ~2350 + SZSE ~2900). CN 4000은 한 거래소 소스만 성공한
+# 반쪽 결과(둘 중 큰 쪽 ~2900)도 걸러 낸다.
+MIN_ITEM_COUNT = {"US": 3000, "KR": 1500, "JP": 2000, "CN": 4000}
 
 # 일부 공개 엔드포인트(KRX 등)는 기본 UA를 차단할 수 있어 브라우저형 UA를 보낸다.
 HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) TradingAgentsCatalog/1.0"}
@@ -74,8 +91,11 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def fetch(url: str) -> bytes:
-    resp = requests.get(url, headers=HTTP_HEADERS, timeout=120)
+def fetch(url: str, extra_headers: dict | None = None) -> bytes:
+    headers = dict(HTTP_HEADERS)
+    if extra_headers:
+        headers.update(extra_headers)  # 예: 중국 거래소가 요구하는 Referer
+    resp = requests.get(url, headers=headers, timeout=120)
     resp.raise_for_status()
     return resp.content
 
@@ -94,7 +114,14 @@ def collect_jp() -> list[parsers.Item]:
     return parsers.parse_jp(fetch(JPX_LISTING_URL))
 
 
-COLLECTORS = {"US": collect_us, "KR": collect_kr, "JP": collect_jp}
+def collect_cn() -> list[parsers.Item]:
+    return parsers.parse_cn(
+        fetch(SSE_LISTING_URL, {"Referer": SSE_REFERER}),
+        fetch(SZSE_LISTING_URL, {"Referer": SZSE_REFERER}),
+    )
+
+
+COLLECTORS = {"US": collect_us, "KR": collect_kr, "JP": collect_jp, "CN": collect_cn}
 
 
 # ---------- 시세 보강 (yfinance) ----------
@@ -230,7 +257,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--markets",
         default=",".join(MARKETS),
-        help="수집할 시장 (쉼표 구분, 기본: US,KR,JP)",
+        help="수집할 시장 (쉼표 구분, 기본: US,KR,JP,CN)",
     )
     parser.add_argument(
         "--dry-run",

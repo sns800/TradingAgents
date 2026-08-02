@@ -131,10 +131,10 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------- 종목 카탈로그 (S3 → 컨테이너 전역 캐시) ----------------
-# 다른 워커가 catalog/{US|KR|JP}.json.gz 로 생성해 둔 시장별 종목 목록.
+# 다른 워커가 catalog/{US|KR|JP|CN}.json.gz 로 생성해 둔 시장별 종목 목록.
 # 수천 종목짜리 JSON이라 매 요청 S3를 읽지 않도록 Lambda 컨테이너 전역에
 # 시장별 (데이터, S3 ETag, 로드 시각)을 캐시하고 TTL이 지나면 재로드한다.
-CATALOG_MARKETS = ("US", "KR", "JP")
+CATALOG_MARKETS = ("US", "KR", "JP", "CN")
 CATALOG_PAGE_SIZE = 50
 _catalog_cache: dict[str, dict] = {}
 _CATALOG_CACHE_TTL = 600  # 10분
@@ -284,7 +284,7 @@ def get_catalog(query):
     """종목 카탈로그 조회: 검색(q)·업종(sector) 필터, 정렬, 50건 페이지네이션."""
     market = str(query.get("market") or "").strip().upper()
     if market not in CATALOG_MARKETS:
-        return _err(400, "market 파라미터는 US, KR, JP 중 하나여야 합니다.")
+        return _err(400, f"market 파라미터는 {', '.join(CATALOG_MARKETS)} 중 하나여야 합니다.")
 
     sort = str(query.get("sort") or "name").strip().lower()
     if sort not in ("name", "price", "market_cap"):
