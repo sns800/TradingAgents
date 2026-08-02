@@ -19,6 +19,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
+from urllib.parse import unquote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -30,10 +31,19 @@ TASK_DEF = os.environ["TASK_DEF"]
 SUBNET_IDS = os.environ["SUBNET_IDS"].split(",")
 SECURITY_GROUP = os.environ["SECURITY_GROUP"]
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "worker")
-# 동시 실행 상한: Fargate/Bedrock 비용 폭주 방지용 안전장치
+# 동시 실행 상한: Fargate/Bedrock 비용 폭주 방지용 안전장치.
+# 이 env var은 폴백 기본값이고, 실제 상한은 DynamoDB __config__ 항목이 우선한다
+# (관리자가 재배포 없이 조정 가능 — _get_max_active_runs 참고).
 MAX_ACTIVE_RUNS = int(os.environ.get("MAX_ACTIVE_RUNS", "3"))
 # Cognito 인증: 이 앱 클라이언트로 발급된 액세스 토큰만 허용
 COGNITO_CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
+# 관리자 계정 관리 API가 대상으로 하는 User Pool
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+# 관리자 권한을 부여하는 Cognito 그룹 이름
+ADMIN_GROUP = "admins"
+# 실행 테이블에서 런타임 설정을 담는 특수 항목의 run_id.
+# 실제 실행이 아니므로 목록/실행 검사에서 제외한다.
+CONFIG_RUN_ID = "__config__"
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -87,7 +97,37 @@ def check_auth(event) -> bool:
         _token_cache.clear()
     return True
 
+
+def _token_claims(event) -> dict:
+    """요청의 액세스 토큰 페이로드(클레임)를 디코드한다. 실패 시 빈 dict."""
+    headers = event.get("headers") or {}
+    token = headers.get("x-access-token", "")
+    if not token:
+        return {}
+    try:
+        return _decode_jwt_payload(token)
+    except Exception:
+        return {}
+
+
+def check_admin(event) -> bool:
+    """관리자 전용 게이트: 토큰의 cognito:groups에 admins가 있는지 확인한다.
+
+    토큰의 서명·폐기 검증은 check_auth의 Cognito GetUser 호출이 이미 보증하므로
+    (관리자 라우트는 check_auth 통과 후에만 도달), 여기서는 groups 클레임만 읽는다.
+    클레임 위조는 서명 검증에 의해 차단된다.
+    """
+    groups = _token_claims(event).get("cognito:groups") or []
+    return isinstance(groups, list) and ADMIN_GROUP in groups
+
+
+def _current_username(event) -> str:
+    """요청자의 Cognito Username (자기 자신 삭제 방지 등에 사용)."""
+    return str(_token_claims(event).get("username") or "")
+
+
 TICKER_RE = re.compile(r"^[A-Za-z0-9._\-^=]{1,32}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------- 종목 카탈로그 (S3 → 컨테이너 전역 캐시) ----------------
@@ -310,6 +350,21 @@ def _parse_depth(raw):
     return depth, None
 
 
+def _get_max_active_runs() -> int:
+    """현재 동시 실행 상한을 반환한다.
+
+    DynamoDB __config__ 항목의 max_active_runs를 우선 사용하고(관리자가 재배포
+    없이 조정), 없거나 조회 실패 시 env var(MAX_ACTIVE_RUNS)로 폴백한다.
+    """
+    try:
+        item = table.get_item(Key={"run_id": CONFIG_RUN_ID}).get("Item")
+        if item and item.get("max_active_runs") is not None:
+            return int(item["max_active_runs"])
+    except Exception as e:
+        print(f"max_active_runs 설정 조회 실패, env 폴백: {e}")
+    return MAX_ACTIVE_RUNS
+
+
 def _start_run(ticker, analysis_date, depth, extra=None):
     """티커 검증·동시성 제한·RunTask 트리거를 처리하고 새 실행을 생성한다.
 
@@ -332,8 +387,9 @@ def _start_run(ticker, analysis_date, depth, extra=None):
         ExpressionAttributeNames={"#s": "status"},
         ExpressionAttributeValues={":q": "queued", ":r": "running"},
     )["Items"]
-    if len(active) >= MAX_ACTIVE_RUNS:
-        return _err(429, f"동시 실행은 최대 {MAX_ACTIVE_RUNS}건입니다. 진행 중인 분석이 끝난 뒤 다시 시도하세요.")
+    max_active = _get_max_active_runs()
+    if len(active) >= max_active:
+        return _err(429, f"동시 실행은 최대 {max_active}건입니다. 진행 중인 분석이 끝난 뒤 다시 시도하세요.")
 
     run_id = uuid.uuid4().hex[:12]
     now = datetime.now(timezone.utc).isoformat()
@@ -432,6 +488,8 @@ def restart_run(run_id, body):
 
 def list_runs():
     items = table.scan().get("Items", [])
+    # __config__는 실행이 아닌 런타임 설정 항목이므로 목록에서 제외한다
+    items = [i for i in items if i.get("run_id") != CONFIG_RUN_ID]
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return _resp(200, {"runs": [_run_view(i) for i in items[:50]]})
 
@@ -456,6 +514,253 @@ def get_report(run_id, name):
     return _resp(200, {"name": name, "content": content})
 
 
+# ---------------- 관리자: 동시 한도 런타임 설정 ----------------
+
+
+def get_config():
+    """현재 동시 실행 상한(설정값 또는 env 폴백)을 반환한다."""
+    return _resp(200, {"max_active_runs": _get_max_active_runs()})
+
+
+def set_config(body):
+    """동시 실행 상한을 __config__ 항목에 저장한다 (1~50)."""
+    raw = body.get("max_active_runs")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _err(400, "max_active_runs는 1~50 사이의 정수여야 합니다.")
+    if not (1 <= value <= 50):
+        return _err(400, "max_active_runs는 1~50 사이의 정수여야 합니다.")
+    table.update_item(
+        Key={"run_id": CONFIG_RUN_ID},
+        UpdateExpression="SET max_active_runs = :v, updated_at = :u",
+        ExpressionAttributeValues={
+            ":v": value,
+            ":u": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return _resp(200, {"max_active_runs": value})
+
+
+# ---------------- 관리자: Cognito 계정 관리 ----------------
+
+
+def _user_email(attributes):
+    """Cognito 사용자 속성 목록에서 email 값을 추출한다."""
+    for attr in attributes or []:
+        if attr.get("Name") == "email":
+            return attr.get("Value")
+    return None
+
+
+def _admin_usernames() -> set:
+    """admins 그룹에 속한 사용자명 집합 (페이지네이션 포함)."""
+    names = set()
+    kwargs = {"UserPoolId": COGNITO_USER_POOL_ID, "GroupName": ADMIN_GROUP}
+    while True:
+        resp = cognito.list_users_in_group(**kwargs)
+        for user in resp.get("Users", []):
+            names.add(user.get("Username"))
+        token = resp.get("NextToken")
+        if not token:
+            break
+        kwargs["NextToken"] = token
+    return names
+
+
+def _validate_password(password):
+    """비밀번호 형식 검증. 오류 응답 또는 None을 반환한다."""
+    if not isinstance(password, str) or len(password) < 8:
+        return _err(400, "비밀번호는 8자 이상이어야 합니다.")
+    return None
+
+
+def list_users():
+    """풀 사용자 목록(username/email/status/enabled/admin 여부)."""
+    admins = _admin_usernames()
+    users = []
+    kwargs = {"UserPoolId": COGNITO_USER_POOL_ID, "Limit": 60}
+    while True:
+        resp = cognito.list_users(**kwargs)
+        for user in resp.get("Users", []):
+            username = user.get("Username")
+            users.append({
+                "username": username,
+                "email": _user_email(user.get("Attributes")),
+                "status": user.get("UserStatus"),
+                "enabled": bool(user.get("Enabled", True)),
+                "is_admin": username in admins,
+            })
+        token = resp.get("PaginationToken")
+        if not token:
+            break
+        kwargs["PaginationToken"] = token
+    users.sort(key=lambda u: (u.get("email") or "").lower())
+    return _resp(200, {"users": users})
+
+
+def create_user(body):
+    """사용자 생성: admin_create_user(SUPPRESS) + 영구 비밀번호 + 선택적 admin 그룹."""
+    email = str(body.get("email", "")).strip().lower()
+    password = body.get("password", "")
+    is_admin = bool(body.get("is_admin", False))
+
+    if not EMAIL_RE.match(email):
+        return _err(400, "올바른 이메일 주소를 입력해 주세요.")
+    pw_error = _validate_password(password)
+    if pw_error:
+        return pw_error
+
+    try:
+        resp = cognito.admin_create_user(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=email,
+            MessageAction="SUPPRESS",
+            UserAttributes=[
+                {"Name": "email", "Value": email},
+                {"Name": "email_verified", "Value": "true"},
+            ],
+        )
+        username = resp["User"]["Username"]
+        cognito.admin_set_user_password(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=username,
+            Password=password,
+            Permanent=True,
+        )
+        if is_admin:
+            cognito.admin_add_user_to_group(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=username,
+                GroupName=ADMIN_GROUP,
+            )
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code == "UsernameExistsException":
+            return _err(409, "이미 존재하는 이메일입니다.")
+        if code == "InvalidPasswordException":
+            return _err(400, "비밀번호가 정책을 충족하지 않습니다.")
+        print(f"create_user failed: {e}")
+        return _err(500, "사용자 생성에 실패했습니다.")
+
+    return _resp(201, {"username": username, "email": email, "is_admin": is_admin})
+
+
+def reset_user_password(username, body):
+    """사용자 비밀번호를 영구 재설정한다."""
+    password = body.get("password", "")
+    pw_error = _validate_password(password)
+    if pw_error:
+        return pw_error
+    try:
+        cognito.admin_set_user_password(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=username,
+            Password=password,
+            Permanent=True,
+        )
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code == "UserNotFoundException":
+            return _err(404, "해당 사용자를 찾을 수 없습니다.")
+        if code == "InvalidPasswordException":
+            return _err(400, "비밀번호가 정책을 충족하지 않습니다.")
+        print(f"reset_user_password failed: {e}")
+        return _err(500, "비밀번호 재설정에 실패했습니다.")
+    return _resp(200, {"username": username, "ok": True})
+
+
+def set_user_admin(username, body):
+    """사용자의 admins 그룹 소속을 추가/해제한다.
+
+    마지막 관리자의 권한 해제는 막아 최소 1명의 관리자를 유지한다.
+    """
+    is_admin = bool(body.get("is_admin", False))
+    try:
+        if is_admin:
+            cognito.admin_add_user_to_group(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=username,
+                GroupName=ADMIN_GROUP,
+            )
+        else:
+            admins = _admin_usernames()
+            if username in admins and len(admins) <= 1:
+                return _err(400, "마지막 관리자의 권한은 해제할 수 없습니다.")
+            cognito.admin_remove_user_from_group(
+                UserPoolId=COGNITO_USER_POOL_ID,
+                Username=username,
+                GroupName=ADMIN_GROUP,
+            )
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code == "UserNotFoundException":
+            return _err(404, "해당 사용자를 찾을 수 없습니다.")
+        print(f"set_user_admin failed: {e}")
+        return _err(500, "관리자 권한 변경에 실패했습니다.")
+    return _resp(200, {"username": username, "is_admin": is_admin})
+
+
+def delete_user(event, username):
+    """사용자를 삭제한다. 자기 자신·마지막 관리자 삭제는 막는다."""
+    if username == _current_username(event):
+        return _err(400, "자기 자신은 삭제할 수 없습니다.")
+    admins = _admin_usernames()
+    if username in admins and len(admins) <= 1:
+        return _err(400, "마지막 관리자는 삭제할 수 없습니다.")
+    try:
+        cognito.admin_delete_user(UserPoolId=COGNITO_USER_POOL_ID, Username=username)
+    except ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code == "UserNotFoundException":
+            return _err(404, "해당 사용자를 찾을 수 없습니다.")
+        print(f"delete_user failed: {e}")
+        return _err(500, "사용자 삭제에 실패했습니다.")
+    return _resp(200, {"username": username, "ok": True})
+
+
+def handle_admin(event, method, path):
+    """/api/admin/* 라우팅. 진입 전 관리자 게이트를 통과해야 한다."""
+    if not check_admin(event):
+        return _err(403, "관리자 권한이 필요합니다.")
+
+    if method == "GET" and path == "/api/admin/config":
+        return get_config()
+    if method == "POST" and path == "/api/admin/config":
+        body, body_error = _parse_body(event)
+        if body_error:
+            return body_error
+        return set_config(body)
+
+    if method == "GET" and path == "/api/admin/users":
+        return list_users()
+    if method == "POST" and path == "/api/admin/users":
+        body, body_error = _parse_body(event)
+        if body_error:
+            return body_error
+        return create_user(body)
+
+    m = re.match(r"^/api/admin/users/([^/]+)/reset-password$", path)
+    if method == "POST" and m:
+        body, body_error = _parse_body(event)
+        if body_error:
+            return body_error
+        return reset_user_password(unquote(m.group(1)), body)
+
+    m = re.match(r"^/api/admin/users/([^/]+)/admin$", path)
+    if method == "POST" and m:
+        body, body_error = _parse_body(event)
+        if body_error:
+            return body_error
+        return set_user_admin(unquote(m.group(1)), body)
+
+    m = re.match(r"^/api/admin/users/([^/]+)$", path)
+    if method == "DELETE" and m:
+        return delete_user(event, unquote(m.group(1)))
+
+    return _err(404, "존재하지 않는 API 경로입니다.")
+
+
 def _parse_body(event):
     """POST 본문을 JSON으로 파싱한다. (body, 오류 응답) 튜플을 반환한다."""
     try:
@@ -477,6 +782,10 @@ def handler(event, _context):
         return _err(401, "로그인이 필요합니다.")
 
     try:
+        # 관리자 전용 API (계정 관리 · 동시 한도 설정) — 자체 admin 게이트 통과 필요
+        if path.startswith("/api/admin/"):
+            return handle_admin(event, method, path)
+
         if method == "POST" and path == "/api/runs":
             body, body_error = _parse_body(event)
             if body_error:

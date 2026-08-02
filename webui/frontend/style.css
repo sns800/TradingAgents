@@ -873,6 +873,114 @@ input:focus, select:focus {
   100% { border-color: var(--border); box-shadow: none; }
 }
 
+/* ---------- 관리자 화면 ---------- */
+.admin-desc {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.admin-config-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-config-form .form-field {
+  max-width: 220px;
+}
+
+.admin-config-form .btn {
+  margin-bottom: 0;
+}
+
+.admin-msg {
+  width: 100%;
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--green);
+}
+
+.admin-msg-error {
+  color: var(--red);
+}
+
+.admin-create-grid {
+  grid-template-columns: 2fr 1.6fr auto auto;
+  margin-bottom: 4px;
+}
+
+.admin-check-field {
+  justify-content: flex-end;
+}
+
+.admin-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.admin-checkbox input {
+  width: auto;
+  margin: 0;
+}
+
+.admin-users-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.admin-users-table td {
+  vertical-align: middle;
+}
+
+.admin-user-email {
+  font-weight: 600;
+  white-space: normal;
+  min-width: 160px;
+}
+
+.admin-user-status {
+  color: var(--text-muted);
+}
+
+.admin-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-sm {
+  margin-bottom: 0;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.btn-danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.btn-danger:hover {
+  background: var(--red-bg);
+}
+
+@media (max-width: 820px) {
+  .admin-create-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-check-field {
+    justify-content: flex-start;
+  }
+}
+
 /* ---------- 푸터 ---------- */
 .site-footer {
   border-top: 1px solid var(--border);

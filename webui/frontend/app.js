@@ -99,6 +99,7 @@
     appNav: document.getElementById('app-nav'),
     navAnalysis: document.getElementById('nav-analysis'),
     navCatalog: document.getElementById('nav-catalog'),
+    navAdmin: document.getElementById('nav-admin'),
     formSuggest: document.getElementById('form-suggest'),
     formSuggestList: document.getElementById('form-suggest-list'),
     viewCatalog: document.getElementById('view-catalog'),
@@ -116,7 +117,29 @@
     catalogNext: document.getElementById('catalog-next'),
     catalogPageInfo: document.getElementById('catalog-pageinfo'),
     catalogGenerated: document.getElementById('catalog-generated'),
+    viewAdmin: document.getElementById('view-admin'),
+    adminDenied: document.getElementById('admin-denied'),
+    adminContent: document.getElementById('admin-content'),
+    adminConfigForm: document.getElementById('admin-config-form'),
+    adminMaxRuns: document.getElementById('admin-max-runs'),
+    btnSaveConfig: document.getElementById('btn-save-config'),
+    adminConfigMsg: document.getElementById('admin-config-msg'),
+    adminCreateForm: document.getElementById('admin-create-form'),
+    adminNewEmail: document.getElementById('admin-new-email'),
+    adminNewPassword: document.getElementById('admin-new-password'),
+    adminNewIsAdmin: document.getElementById('admin-new-is-admin'),
+    btnCreateUser: document.getElementById('btn-create-user'),
+    adminCreateMsg: document.getElementById('admin-create-msg'),
+    adminUsersStatus: document.getElementById('admin-users-status'),
+    adminUsersBody: document.getElementById('admin-users-body'),
     toast: document.getElementById('toast')
+  };
+
+  var USER_STATUS_LABEL = {
+    CONFIRMED: '정상',
+    FORCE_CHANGE_PASSWORD: '비밀번호 변경 필요',
+    RESET_REQUIRED: '재설정 필요',
+    UNCONFIRMED: '미확인'
   };
 
   // ---------- 상태 ----------
@@ -272,6 +295,15 @@
     } catch (e) {
       return null;
     }
+  }
+
+  // 액세스 토큰의 cognito:groups에 admins가 포함되면 관리자.
+  // (서버도 동일 클레임으로 admin 게이트를 검증하므로 UI 노출은 편의용)
+  function isAdmin() {
+    var payload = decodeJwtPayload(localStorage.getItem(KEY_ACCESS));
+    if (!payload) return false;
+    var groups = payload['cognito:groups'];
+    return Array.isArray(groups) && groups.indexOf('admins') >= 0;
   }
 
   function saveTokens(result) {
@@ -1073,6 +1105,199 @@
     loadCatalog();
   });
 
+  // ---------- 관리자 화면 ----------
+
+  function setAdminMsg(node, msg, isError) {
+    if (msg) {
+      node.textContent = msg;
+      node.classList.toggle('admin-msg-error', !!isError);
+      node.hidden = false;
+    } else {
+      node.textContent = '';
+      node.hidden = true;
+    }
+  }
+
+  function loadAdmin() {
+    setAdminMsg(el.adminConfigMsg, null);
+    setAdminMsg(el.adminCreateMsg, null);
+    loadAdminConfig();
+    loadAdminUsers();
+  }
+
+  function loadAdminConfig() {
+    el.adminMaxRuns.value = '';
+    apiFetch('/admin/config').then(function (data) {
+      if (state.route.view !== 'admin') return;
+      el.adminMaxRuns.value = data.max_active_runs;
+    }).catch(function (err) {
+      if (state.route.view !== 'admin') return;
+      setAdminMsg(el.adminConfigMsg, '현재 값을 불러오지 못했습니다: ' + err.message, true);
+    });
+  }
+
+  el.adminConfigForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var val = parseInt(el.adminMaxRuns.value, 10);
+    if (isNaN(val) || val < 1 || val > 50) {
+      setAdminMsg(el.adminConfigMsg, '1~50 사이의 숫자를 입력해 주세요.', true);
+      return;
+    }
+    el.btnSaveConfig.disabled = true;
+    apiFetch('/admin/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ max_active_runs: val })
+    }).then(function (data) {
+      el.adminMaxRuns.value = data.max_active_runs;
+      setAdminMsg(el.adminConfigMsg, '저장되었습니다. (현재 ' + data.max_active_runs + '건)', false);
+    }).catch(function (err) {
+      setAdminMsg(el.adminConfigMsg, '저장 실패: ' + err.message, true);
+    }).finally(function () {
+      el.btnSaveConfig.disabled = false;
+    });
+  });
+
+  function renderAdminUsers(users) {
+    el.adminUsersBody.textContent = '';
+    if (!Array.isArray(users) || users.length === 0) {
+      var trEmpty = elem('tr');
+      var tdEmpty = elem('td', 'empty-msg', '사용자가 없습니다.');
+      tdEmpty.colSpan = 4;
+      trEmpty.appendChild(tdEmpty);
+      el.adminUsersBody.appendChild(trEmpty);
+      return;
+    }
+    users.forEach(function (u) {
+      var tr = elem('tr');
+      tr.appendChild(elem('td', 'admin-user-email', u.email || u.username || '-'));
+
+      var statusLabel = u.enabled === false
+        ? '비활성'
+        : (USER_STATUS_LABEL[u.status] || u.status || '-');
+      tr.appendChild(elem('td', 'admin-user-status', statusLabel));
+
+      var adminTd = elem('td');
+      adminTd.appendChild(elem('span',
+        'badge ' + (u.is_admin ? 'badge-green' : 'badge-gray'),
+        u.is_admin ? '관리자' : '일반'));
+      tr.appendChild(adminTd);
+
+      var actionsTd = elem('td', 'admin-actions');
+
+      var btnPw = elem('button', 'btn btn-ghost btn-sm', '비밀번호');
+      btnPw.type = 'button';
+      btnPw.addEventListener('click', function () { resetUserPassword(u); });
+      actionsTd.appendChild(btnPw);
+
+      var btnAdmin = elem('button', 'btn btn-ghost btn-sm',
+        u.is_admin ? '관리자 해제' : '관리자 지정');
+      btnAdmin.type = 'button';
+      btnAdmin.addEventListener('click', function () { toggleUserAdmin(u); });
+      actionsTd.appendChild(btnAdmin);
+
+      var btnDel = elem('button', 'btn btn-ghost btn-sm btn-danger', '삭제');
+      btnDel.type = 'button';
+      btnDel.addEventListener('click', function () { deleteUser(u); });
+      actionsTd.appendChild(btnDel);
+
+      tr.appendChild(actionsTd);
+      el.adminUsersBody.appendChild(tr);
+    });
+  }
+
+  function loadAdminUsers() {
+    el.adminUsersStatus.textContent = '불러오는 중…';
+    apiFetch('/admin/users').then(function (data) {
+      if (state.route.view !== 'admin') return;
+      renderAdminUsers(data.users || []);
+      el.adminUsersStatus.textContent = '총 ' + ((data.users || []).length) + '명';
+    }).catch(function (err) {
+      if (state.route.view !== 'admin') return;
+      el.adminUsersStatus.textContent = '불러오기 실패: ' + err.message;
+    });
+  }
+
+  function resetUserPassword(u) {
+    var who = u.email || u.username;
+    var pw = window.prompt(who + '의 새 비밀번호를 입력하세요 (8자 이상):');
+    if (pw === null) return;
+    if (pw.length < 8) {
+      showToast('비밀번호는 8자 이상이어야 합니다.');
+      return;
+    }
+    apiFetch('/admin/users/' + encodeURIComponent(u.username) + '/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    }).then(function () {
+      showToast(who + '의 비밀번호를 재설정했습니다.');
+    }).catch(function (err) {
+      showToast('실패: ' + err.message);
+    });
+  }
+
+  function toggleUserAdmin(u) {
+    var who = u.email || u.username;
+    var next = !u.is_admin;
+    var msg = next ? '관리자 권한을 부여할까요?' : '관리자 권한을 해제할까요?';
+    if (!window.confirm(who + '\n' + msg)) return;
+    apiFetch('/admin/users/' + encodeURIComponent(u.username) + '/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_admin: next })
+    }).then(function () {
+      showToast('변경했습니다.');
+      loadAdminUsers();
+    }).catch(function (err) {
+      showToast('실패: ' + err.message);
+    });
+  }
+
+  function deleteUser(u) {
+    var who = u.email || u.username;
+    if (!window.confirm(who + ' 계정을 삭제할까요?\n되돌릴 수 없습니다.')) return;
+    apiFetch('/admin/users/' + encodeURIComponent(u.username), {
+      method: 'DELETE'
+    }).then(function () {
+      showToast(who + ' 계정을 삭제했습니다.');
+      loadAdminUsers();
+    }).catch(function (err) {
+      showToast('실패: ' + err.message);
+    });
+  }
+
+  el.adminCreateForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var email = el.adminNewEmail.value.trim().toLowerCase();
+    var pw = el.adminNewPassword.value;
+    var isAdm = el.adminNewIsAdmin.checked;
+    if (!email) {
+      setAdminMsg(el.adminCreateMsg, '이메일을 입력해 주세요.', true);
+      return;
+    }
+    if (pw.length < 8) {
+      setAdminMsg(el.adminCreateMsg, '비밀번호는 8자 이상이어야 합니다.', true);
+      return;
+    }
+    el.btnCreateUser.disabled = true;
+    apiFetch('/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: pw, is_admin: isAdm })
+    }).then(function () {
+      el.adminNewEmail.value = '';
+      el.adminNewPassword.value = '';
+      el.adminNewIsAdmin.checked = false;
+      setAdminMsg(el.adminCreateMsg, email + ' 계정을 추가했습니다.', false);
+      loadAdminUsers();
+    }).catch(function (err) {
+      setAdminMsg(el.adminCreateMsg, '추가 실패: ' + err.message, true);
+    }).finally(function () {
+      el.btnCreateUser.disabled = false;
+    });
+  });
+
   // ---------- 라우팅 ----------
 
   function parseHash() {
@@ -1084,12 +1309,17 @@
     if (/^#\/catalog(?:[\/?#]|$)/.test(hash)) {
       return { view: 'catalog', runId: null };
     }
+    if (/^#\/admin(?:[\/?#]|$)/.test(hash)) {
+      return { view: 'admin', runId: null };
+    }
     return { view: 'list', runId: null };
   }
 
   function updateNav() {
-    el.navAnalysis.classList.toggle('active', state.route.view !== 'catalog');
+    el.navAnalysis.classList.toggle('active',
+      state.route.view === 'list' || state.route.view === 'detail');
     el.navCatalog.classList.toggle('active', state.route.view === 'catalog');
+    el.navAdmin.classList.toggle('active', state.route.view === 'admin');
   }
 
   function applyRoute() {
@@ -1101,6 +1331,7 @@
     if (state.route.view === 'detail') {
       el.viewList.hidden = true;
       el.viewCatalog.hidden = true;
+      el.viewAdmin.hidden = true;
       el.viewDetail.hidden = false;
       state.currentReport = null;
       state.reportsLoaded = false;
@@ -1113,11 +1344,27 @@
     } else if (state.route.view === 'catalog') {
       el.viewList.hidden = true;
       el.viewDetail.hidden = true;
+      el.viewAdmin.hidden = true;
       el.viewCatalog.hidden = false;
       loadCatalog();
+    } else if (state.route.view === 'admin') {
+      el.viewList.hidden = true;
+      el.viewDetail.hidden = true;
+      el.viewCatalog.hidden = true;
+      el.viewAdmin.hidden = false;
+      if (isAdmin()) {
+        el.adminDenied.hidden = true;
+        el.adminContent.hidden = false;
+        loadAdmin();
+      } else {
+        // 비관리자가 #/admin에 직접 접근한 경우
+        el.adminDenied.hidden = false;
+        el.adminContent.hidden = true;
+      }
     } else {
       el.viewDetail.hidden = true;
       el.viewCatalog.hidden = true;
+      el.viewAdmin.hidden = true;
       el.viewList.hidden = false;
       el.runsList.textContent = '';
       el.runsList.appendChild(elem('p', 'empty-msg', '불러오는 중…'));
@@ -1146,7 +1393,9 @@
     el.viewList.hidden = true;
     el.viewDetail.hidden = true;
     el.viewCatalog.hidden = true;
+    el.viewAdmin.hidden = true;
     el.appNav.hidden = true;
+    el.navAdmin.hidden = true;
     el.headerUser.hidden = true;
     el.userEmail.textContent = '';
     el.viewLogin.hidden = false;
@@ -1163,6 +1412,8 @@
     el.userEmail.textContent = (payload && payload.email) ? payload.email : '';
     el.headerUser.hidden = false;
     el.appNav.hidden = false;
+    // 관리자 탭은 admins 그룹 소속일 때만 노출
+    el.navAdmin.hidden = !isAdmin();
 
     applyRoute();
   }

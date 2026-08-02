@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Default: 11ikj0bqsifr90tf4b37h4t14p
     Description: "인증에 사용할 Cognito User Pool 앱 클라이언트 ID (household-ledger-users 풀의 tradingagents-web 클라이언트)"
+  CognitoUserPoolId:
+    Type: String
+    Default: ap-northeast-2_beRiSnPMY
+    Description: "관리자 계정 관리 API가 대상으로 하는 Cognito User Pool ID (household-ledger-users)"
   MaxActiveRuns:
     Type: Number
     Default: 10
@@ -280,6 +284,17 @@ Resources:
                   - !GetAtt TaskExecutionRole.Arn
                 Condition:
                   StringEquals: { "iam:PassedToService": ecs-tasks.amazonaws.com }
+              # 관리자 계정 관리 API: 지정한 User Pool에 대한 cognito-idp 관리 권한
+              - Effect: Allow
+                Action:
+                  - cognito-idp:ListUsers
+                  - cognito-idp:ListUsersInGroup
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminSetUserPassword
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminRemoveUserFromGroup
+                  - cognito-idp:AdminDeleteUser
+                Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
 
   ApiFunction:
     Type: AWS::Lambda::Function
@@ -301,6 +316,7 @@ Resources:
           CONTAINER_NAME: worker
           MAX_ACTIVE_RUNS: !Ref MaxActiveRuns
           COGNITO_CLIENT_ID: !Ref CognitoClientId
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
       Code:
         # 자리표시자 - 실제 코드는 deploy.sh가 update-function-code로 배포
         ZipFile: |

@@ -26,6 +26,7 @@
     <nav id="app-nav" class="app-nav" hidden>
       <a href="#/" id="nav-analysis" class="nav-tab active">분석</a>
       <a href="#/catalog" id="nav-catalog" class="nav-tab">종목 탐색</a>
+      <a href="#/admin" id="nav-admin" class="nav-tab" hidden>관리자</a>
     </nav>
 
     <!-- 로그인 화면 -->
@@ -156,6 +157,66 @@
           <span id="catalog-generated" class="catalog-generated"></span>
         </div>
       </section>
+    </section>
+
+    <!-- 관리자 화면 -->
+    <section id="view-admin" hidden>
+      <p id="admin-denied" class="card empty-msg" hidden>관리자만 접근할 수 있는 페이지입니다.</p>
+      <div id="admin-content">
+        <section class="card">
+          <h2>동시 분석 한도</h2>
+          <p class="admin-desc">동시에 진행할 수 있는 분석(대기 포함) 최대 개수입니다. 재배포 없이 즉시 적용됩니다.</p>
+          <form id="admin-config-form" class="admin-config-form">
+            <div class="form-field">
+              <label for="admin-max-runs">최대 동시 실행 수 (1~50)</label>
+              <input type="number" id="admin-max-runs" min="1" max="50" step="1" required>
+            </div>
+            <button type="submit" id="btn-save-config" class="btn btn-primary">저장</button>
+            <p id="admin-config-msg" class="admin-msg" hidden></p>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>사용자 관리</h2>
+          <form id="admin-create-form" class="admin-create-form">
+            <div class="form-grid admin-create-grid">
+              <div class="form-field">
+                <label for="admin-new-email">이메일</label>
+                <input type="email" id="admin-new-email" autocomplete="off" required>
+              </div>
+              <div class="form-field">
+                <label for="admin-new-password">비밀번호 (8자 이상)</label>
+                <input type="password" id="admin-new-password" autocomplete="new-password" required>
+              </div>
+              <div class="form-field admin-check-field">
+                <label class="admin-checkbox"><input type="checkbox" id="admin-new-is-admin"> 관리자로 생성</label>
+              </div>
+              <div class="form-field form-field-submit">
+                <button type="submit" id="btn-create-user" class="btn btn-primary">사용자 추가</button>
+              </div>
+            </div>
+            <p id="admin-create-msg" class="admin-msg" hidden></p>
+          </form>
+
+          <div class="list-header">
+            <h2 class="admin-users-title">계정 목록</h2>
+            <span id="admin-users-status" class="list-status"></span>
+          </div>
+          <div class="catalog-table-wrap">
+            <table class="catalog-table admin-users-table">
+              <thead>
+                <tr>
+                  <th>이메일</th>
+                  <th>상태</th>
+                  <th>관리자</th>
+                  <th>작업</th>
+                </tr>
+              </thead>
+              <tbody id="admin-users-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </section>
   </main>
 
