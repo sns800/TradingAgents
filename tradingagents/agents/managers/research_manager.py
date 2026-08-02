@@ -19,6 +19,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_verified_snapshot_block,
 )
+from tradingagents.agents.utils.debate_context import condense_for_judge
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -34,11 +35,12 @@ def build_research_manager_prompt(state) -> str:
     문구로 검증하는 일을 막는다.
     """
     instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
-    # 강세론자(Bull)/약세론자(Bear) 토론의 전체 이력을 상태에서 꺼냅니다.
-    # 주의: 토론자들은 토큰 절약을 위해 압축 이력(debate_context 참고)을
-    # 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체 이력을
-    # 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
-    history = state["investment_debate_state"].get("history", "")
+    # 강세론자(Bull)/약세론자(Bear) 토론 이력. 심판은 판정 근거로 이력이
+    # 필요하므로 토론자보다 넉넉히 받되, depth가 크면(2N+1 턴) 이력이 폭증해
+    # 한국어 환경에서 모델 입력 한도를 넘겨 "Input is too long" 오류가 났다.
+    # condense_for_judge로 총 예산(기본 40k자) 안으로 제한한다 — 예산보다
+    # 짧으면(대개 depth 1~3) 원문 그대로라 기존 동작이 보존된다.
+    history = condense_for_judge(state["investment_debate_state"].get("history", ""))
 
     # 분석가 4종 원본 보고서: 심판이 토론자들의 주장을 원자료와 대조해
     # 검증할 수 있도록 리스크 토론자와 동일한 방식으로 제공합니다.

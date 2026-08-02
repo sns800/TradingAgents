@@ -27,6 +27,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_verified_snapshot_block,
 )
+from tradingagents.agents.utils.debate_context import condense_for_judge
 from tradingagents.agents.utils.rating import parse_rating
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
@@ -73,10 +74,10 @@ def build_portfolio_manager_prompt(state) -> str:
     instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
 
     # 상태에서 리스크 토론 이력과 상위 단계 산출물들을 꺼냅니다.
-    # 주의: 리스크 토론자들은 토큰 절약을 위해 압축 이력(debate_context
-    # 참고)을 받지만, 심판인 이 노드는 판정 근거가 되므로 의도적으로 전체
-    # 이력을 그대로 받습니다 — 여기에 condense_debate_history를 적용하지 마세요.
-    history = state["risk_debate_state"]["history"]  # 리스크 분석가 토론 전체 이력
+    # 심판은 판정 근거로 이력이 필요하므로 토론자보다 넉넉히 받되, depth가
+    # 크면(3N+1 턴) 이력이 폭증해 한국어 환경에서 모델 입력 한도를 넘긴다.
+    # condense_for_judge로 총 예산 안으로 제한(예산보다 짧으면 원문 그대로).
+    history = condense_for_judge(state["risk_debate_state"]["history"])  # 리스크 토론 이력(예산 제한)
     research_plan = state["investment_plan"]  # 리서치 매니저의 투자 계획
     trader_plan = state["trader_investment_plan"]  # 트레이더의 거래 제안
 

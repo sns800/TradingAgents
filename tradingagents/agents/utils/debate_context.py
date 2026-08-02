@@ -83,3 +83,69 @@ def condense_debate_history(
     parts.append("\n".join(statements[-1]))
 
     return "\n".join(parts)
+
+
+# 심판(리서치 매니저·포트폴리오 매니저)이 받는 토론 이력의 총 예산(문자 수).
+# 심판은 판정 근거로 이력이 필요하므로 토론자보다 넉넉히 주되, 무제한은 아니다.
+# depth가 커지면 토론 턴이 늘어(리서처 2N+1, 리스크 3N+1) 이력이 O(라운드²)로
+# 폭증하는데, 한국어는 토큰 밀도가 높아 depth 5에서 모델 입력 한도를 초과해
+# "Input is too long" 오류가 났다(리서치 매니저 노드에서 실측 확인). 이 예산으로
+# 최근 발언을 우선 전문 보존하고, 예산을 넘는 과거 발언만 절단한다.
+DEFAULT_JUDGE_BUDGET_CHARS = 40000
+# 예산 초과 시 과거 발언 하나당 남기는 문자 수 (토론자용 300자보다 넉넉).
+JUDGE_OLDER_CHARS = 1200
+
+
+def condense_for_judge(
+    history: str,
+    budget_chars: int = DEFAULT_JUDGE_BUDGET_CHARS,
+    older_chars: int = JUDGE_OLDER_CHARS,
+) -> str:
+    """심판용 토론 이력을 총 예산 안으로 제한한다 (결정론적, LLM 호출 없음).
+
+    최신 발언부터 역순으로 전문을 유지하다가 누적 길이가 ``budget_chars``를
+    넘어서면, 그보다 오래된 발언은 각각 앞 ``older_chars``자로 절단한다.
+    이력이 예산보다 짧으면(대개 depth 1~3) 원문을 그대로 반환하므로 기존
+    동작이 보존되고, depth가 큰 경우에만 폭증분을 잘라낸다. 라벨을 찾지
+    못하면 안전하게 원문을 반환한다.
+    """
+    if not history or len(history) <= budget_chars:
+        return history
+
+    statements: list[list[str]] = []
+    preamble: list[str] = []
+    for line in history.split("\n"):
+        if line.startswith(DEBATE_SPEAKER_LABELS):
+            statements.append([line])
+        elif statements:
+            statements[-1].append(line)
+        else:
+            preamble.append(line)
+
+    if not statements:
+        # 형식 드리프트: 절단하지 말고 예산만큼 뒤에서 잘라 안전 반환.
+        return history[-budget_chars:]
+
+    # 최신부터 역순으로 전문 유지, 예산 소진 후의 과거 발언은 절단.
+    joined = ["\n".join(s) for s in statements]
+    keep_full = [False] * len(joined)
+    running = 0
+    for i in range(len(joined) - 1, -1, -1):
+        running += len(joined[i])
+        if running <= budget_chars:
+            keep_full[i] = True
+        else:
+            break
+
+    parts: list[str] = []
+    preamble_text = "\n".join(preamble).strip()
+    if preamble_text:
+        parts.append(preamble_text)
+    for i, stmt in enumerate(joined):
+        if keep_full[i]:
+            parts.append(stmt)
+        elif len(stmt) > older_chars:
+            parts.append(stmt[:older_chars] + TRUNCATION_MARKER)
+        else:
+            parts.append(stmt)
+    return "\n".join(parts)
