@@ -95,8 +95,9 @@ def create_sentiment_analyst(llm):
         )
 
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:
-        # "당신은 다른 어시스턴트들과 협업하는 AI다. 오늘 날짜를 '현재'로
-        # 간주하라. 외부 도구는 사용하지 말라(NO_EXTERNAL_TOOLS)."
+        # "너는 이 보고서의 유일한 책임 분석가다 — 하류 에이전트들이 이 보고서에
+        # 의존한다. 오늘 날짜를 '현재'로 간주하라. 외부 도구는 사용하지
+        # 말라(NO_EXTERNAL_TOOLS)." (협업 프레임 잔재 제거 — 작업이력 22)
         # ※ 매수/매도 최종 제안 지시는 넣지 않습니다 — 분석가는 파이프라인
         #   1단계로 보고서만 작성하며, 최종 결정은 하류(트레이더·포트폴리오
         #   매니저)의 역할입니다.
@@ -105,7 +106,8 @@ def create_sentiment_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
+                    "You are the analyst solely responsible for this report in a multi-agent"
+                    " trading pipeline; downstream agents rely on it."
                     # 여기서는 도구 호출을 사용하지 않습니다: 데이터가 이미 프롬프트에
                     # 주입되어 있으므로, 도구 관련 문구를 넣으면 오히려 환각(hallucination)
                     # 도구 호출을 유발할 수 있습니다(#1130).
@@ -164,9 +166,11 @@ def _build_system_message(
     # (Yahoo Finance 뉴스 / StockTwits 메시지 / Reddit 게시글)를 바탕으로
     # {ticker}에 대한 {start_date}~{end_date} 기간의 종합 감성 보고서를 작성하라.
     # 분석 모범 사례: StockTwits의 강세(Bullish)/약세(Bearish) 비율을 선행 지표로 읽고,
-    # 소스 간 괴리(divergence)를 신호로 해석하며, Reddit 글은 참여도(추천/댓글 수)로
-    # 가중하고, 의견과 사건(event)을 구분하고, 반복되는 내러티브 주제를 찾고,
-    # 데이터 한계를 솔직히 밝히고, 촉매(catalyst)와 리스크를 식별하며,
+    # 소스 간 괴리(divergence)를 신호로 해석하며, 감성의 '수준'보다 '변화'(기간 내
+    # 톤 전환·평소 대비 메시지 볼륨 급증/급감)를 더 무겁게 보되 단일 스냅샷이면
+    # 추세를 추론하지 말고 그렇다고 밝히고(작업이력 22), Reddit 글은 참여도
+    # (추천/댓글 수)로 가중하고, 의견과 사건(event)을 구분하고, 반복되는 내러티브
+    # 주제를 찾고, 데이터 한계를 솔직히 밝히고, 촉매(catalyst)와 리스크를 식별하며,
     # 과거 감성이 예측력을 갖지 않음을 유의하라.
     # 출력 필드: overall_band(감성 밴드), overall_score(0~10 점수),
     # confidence(신뢰도 low/medium/high), narrative(소스별 상세 서술 + 요약 표)."
@@ -202,17 +206,19 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
+3. **Weigh sentiment shifts more than levels.** A swing in tone within the window (e.g. bearish posts early in the week giving way to bullish ones after an event) or an unusual surge or collapse in message volume relative to what looks typical for this ticker is a stronger signal than any steady-state reading. When the timestamps let you see such a shift, lead with it; when the data is effectively a single snapshot, say so instead of inferring a trend.
 
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
+4. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
 
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
+5. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
 
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
+6. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+7. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
 
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+
+9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 

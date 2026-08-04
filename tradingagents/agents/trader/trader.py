@@ -24,6 +24,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_verified_snapshot_block,
 )
+from tradingagents.agents.utils.rating import parse_rating
 from tradingagents.agents.utils.structured import (
     NO_EXTERNAL_TOOLS,
     bind_structured,
@@ -41,6 +42,13 @@ def create_trader(llm):
         company_name = state["company_of_interest"]  # 분석 대상 종목/기업
         instrument_context = get_instrument_context_from_state(state)  # 종목/자산 정보 문자열
         investment_plan = state["investment_plan"]  # 리서치 매니저가 작성한 투자 계획
+
+        # [트레이더 역할 재정의 — 작업이력 22] RM 제안 등급을 결정론적으로 추출해
+        # 명시적 앵커로 주입한다 (PM의 rm_anchor와 동일 패턴). B2 전수조사에서
+        # RM→트레이더 "이견" 24/27이 5단계(RM)↔3단계(트레이더) 척도 차이
+        # 아티팩트였다 — 등급이 계획 본문에 묻혀 있으면 트레이더가 무엇을
+        # 실행으로 옮기는지 기준점을 인지하지 못한다.
+        rm_rating = parse_rating(investment_plan, context="trader:rm_anchor")
 
         # 분석가 4종 원본 보고서: 프롬프트의 "분석가 보고서에 근거하라" 지시가
         # 실제로 이행 가능하도록 리스크 토론자와 동일한 방식으로 제공합니다.
@@ -75,27 +83,40 @@ def create_trader(llm):
         )
 
         # [한국어 요약] 아래 메시지들은 LLM에게 다음을 지시하는 프롬프트입니다:
-        # - system: "당신은 시장 데이터를 분석해 투자 결정을 내리는 트레이딩 에이전트다.
-        #   분석에 근거해 매수/매도/보유 중 하나의 구체적 추천을 제시하고,
-        #   분석가 보고서와 리서치 계획에 근거를 두라. 외부 도구는 사용하지 말라."
-        #   [시계 정합 — 작업이력 21] 평가 지평(holding_days) 지시문을 추가하고,
-        #   진입가·손절·사이징이 그 지평 안에서 실행 가능하도록 설계하라는
-        #   문장을 덧붙임 (RM·PM·리플렉션과 동일 지평).
-        # - user: "분석가 팀의 종합 분석으로 만든 {company_name} 투자 계획이다.
-        #   기술적 추세, 거시 지표, 소셜 미디어 감성이 반영되어 있다.
-        #   아래에 계획의 근거가 된 분석가 원본 보고서 4종을 제공하니
-        #   계획의 주장을 검증하고 누락된 신호를 확인하는 데 사용하라
-        #   (해당 분석가가 실행되지 않았으면 보고서가 비어 있을 수 있다).
-        #   (있다면) 과거 결정의 교훈이 이어지며, 실행 계획 수립 시 참고하라.
-        #   이를 토대로 다음 거래 결정을 평가하라."
+        # - system: [트레이더 역할 재정의 — 작업이력 22] "너는 이 데스크의 실행
+        #   트레이더다. 방향 등급은 리서치 매니저(RM)가 이미 정했다 — 방향을
+        #   재판정하지 말고, 계획을 실행 가능한 거래로 바꾸는 것이 네 역할이다:
+        #   RM 등급을 거래 방향으로 번역하고(Buy/Overweight→Buy, Hold→Hold,
+        #   Underweight/Sell→Sell), 진입가·손절·포지션 크기와 실행 수준의 우려
+        #   (유동성, 예정 이벤트 근접, 갭 리스크)를 산출하라. 계획이 등급대로
+        #   실행 불가능해 보이면 — 예: 보고서가 계획이 의존하는 레벨과 모순 —
+        #   번역된 방향은 유지하되 그 우려를 reasoning에 명시하라(방향 이탈은
+        #   B2 조사에서 PM이 무시하는 척도 노이즈만 만들었다). 분석가 보고서와
+        #   리서치 계획에 근거를 두라. 외부 도구는 사용하지 말라."
+        #   [시계 정합 — 작업이력 21] 평가 지평(holding_days) 지시문 + 진입가·
+        #   손절·사이징이 그 지평 안에서 실행 가능하도록 설계하라는 문장 유지.
+        # - user: "RM의 제안 등급은 {rm_rating}이다 — 이것이 네가 실행으로 옮길
+        #   방향이다. 아래에 계획의 근거가 된 분석가 원본 보고서 4종을 제공하니
+        #   실행 레벨(진입/손절)의 근거 수치를 찾고 실행 리스크를 확인하는 데
+        #   사용하라 (해당 분석가가 실행되지 않았으면 보고서가 비어 있을 수 있다).
+        #   (있다면) 과거 결정의 교훈이 이어지며, 실행 계획 수립 시 참고하라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a trading agent analyzing market data to make investment decisions. "
-                    "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
-                    "Anchor your reasoning in the analysts' reports and the research plan. "
+                    "You are the execution trader for this desk. The Research Manager has already "
+                    "set the directional rating from the bull/bear research debate — your job is "
+                    "not to re-litigate that direction, but to turn the plan into an executable "
+                    "transaction. Translate the rating into the transaction direction "
+                    "(Buy/Overweight → Buy; Hold → Hold; Underweight/Sell → Sell), then add the "
+                    "execution value only you provide: a concrete entry price, stop-loss, and "
+                    "position size, plus any execution-level concerns such as liquidity, gap risk, "
+                    "or timing around scheduled events. If you believe the plan cannot be executed "
+                    "as rated — for example the analyst reports contradict a level the plan depends "
+                    "on — keep the translated direction but flag that concern explicitly in your "
+                    "reasoning. Anchor every level and concern in the analysts' reports and the "
+                    "research plan. "
                     + get_horizon_instruction()
                     + " Design the entry price, stop-loss, and position sizing so the plan is "
                     "executable within that horizon. "
@@ -109,11 +130,13 @@ def create_trader(llm):
                     f"Based on a comprehensive analysis by a team of analysts, here is an investment "
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
-                    f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\n"
-                    f"Here are the original analyst reports the plan was built on. Use them to verify "
-                    f"the plan's claims and to catch any signal it may have missed. A report may be "
-                    f"empty if that analyst was not run; rely on the reports that are available.\n\n"
+                    f"social media sentiment.\n\n"
+                    f"**The Research Manager's proposed rating: {rm_rating}** — this is the "
+                    f"direction you are translating into an executable transaction.\n\n"
+                    f"Here are the original analyst reports the plan was built on. Use them to "
+                    f"ground your execution levels (entry, stop) in concrete numbers and to spot "
+                    f"execution risks the plan may have missed. A report may be empty if that "
+                    f"analyst was not run; rely on the reports that are available.\n\n"
                     f"Market Research Report: {market_research_report}\n"
                     f"Social Media Sentiment Report: {sentiment_report}\n"
                     f"Latest World Affairs Report: {news_report}\n"
@@ -121,7 +144,7 @@ def create_trader(llm):
                     f"{snapshot_block}"
                     f"{lessons_block}"
                     f"Proposed Investment Plan: {investment_plan}\n\n"
-                    f"Leverage these insights to make an informed and strategic decision."
+                    f"Turn this plan into the executable transaction proposal."
                 ),
             },
         ]

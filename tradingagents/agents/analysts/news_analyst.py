@@ -47,17 +47,27 @@ def create_news_analyst(llm):
         # 거시 논평의 근거 확보 — 예: CPI, 실업률, 기준금리, 10년물 국채, 수익률 곡선),
         # get_prediction_markets(미래 이벤트의 시장 내재 확률 — 예: 연준 금리 인하, 경기 침체).
         # 근거가 있는 실행 가능한 인사이트를 제공하고, 끝에 핵심 요점 Markdown 표를 붙여라."
+        # [예정 이벤트 섹션 — 작업이력 22] "향후 1~2주 예정 이벤트(실적 발표일,
+        # 중앙은행 회의, CPI·고용 등 주요 지표 발표, 섹터 이벤트)를 날짜와 함께
+        # 'Upcoming events' 전용 섹션으로 정리하라 — 이벤트 직전 거래는 한산한
+        # 캘린더와 리스크 프로파일이 다르므로 짧아도 중요하다. 도구 출력에
+        # 예정 이벤트가 안 보이면 추측하지 말고 그렇다고 명시하라."
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
         system_message = (
             f"You are a news researcher tasked with analyzing recent news and trends over the past week. Please write a comprehensive report of the current state of the world that is relevant for trading and macroeconomics. Use the available tools: get_news(ticker, start_date, end_date) for {asset_label}-specific news by ticker symbol, get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news, get_macro_indicators(indicator, curr_date, look_back_days) to ground macro commentary in actual data from FRED (e.g. 'cpi', 'core_pce', 'unemployment', 'fed_funds_rate', '10y_treasury', 'yield_curve'), and get_prediction_markets(topic, limit) for live market-implied probabilities of forward-looking events (e.g. 'Fed rate cut', 'recession 2026', geopolitical or sector events). Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            + f" Include a dedicated 'Upcoming events' section: scheduled events over the next one to two weeks that could move the {asset_label} or the broader market — earnings dates, central-bank meetings, major macro releases (CPI, jobs), sector events — with their dates, drawing on the news and prediction-market output. Trading into a scheduled event carries a different risk profile than a quiet calendar, so this section matters even when it is short. If the tool output does not reveal any scheduled events, state that explicitly rather than guessing."
             + """ Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."""
             + get_language_instruction()
         )
 
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:
-        # "당신은 다른 어시스턴트들과 협업하는 AI다. 도구를 사용해 진행하고,
-        # 완전히 답하지 못해도 괜찮다(다른 어시스턴트가 이어받는다).
+        # "너는 이 보고서의 유일한 책임 분석가다 — 하류 에이전트들이 이 보고서에
+        # 의존하며, 네가 남긴 공백을 채워줄 다른 에이전트는 없다. 도구로 필요한
+        # 데이터를 확보해 완결된 보고서까지 끌고 가라.
         # 오늘 날짜({current_date})를 '현재'로 간주하라."
+        # [협업 프레임 잔재 제거 — 작업이력 22] 원본의 "완전히 답하지 못해도
+        # 괜찮다, 다른 어시스턴트가 이어받는다"는 스웜 구조 잔재로, 전용 채널
+        # 구조에서는 미완성 보고서의 명분이 되어 교체.
         # ※ 매수/매도 최종 제안 지시는 넣지 않습니다 — 분석가는 파이프라인
         #   1단계로 보고서만 작성하며, 최종 결정은 하류(트레이더·포트폴리오
         #   매니저)의 역할입니다.
@@ -66,10 +76,10 @@ def create_news_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
+                    "You are the analyst solely responsible for this report in a multi-agent"
+                    " trading pipeline; downstream agents rely on it and no other agent will"
+                    " fill the gaps you leave. Use the provided tools to gather the data you"
+                    " need and carry the analysis through to a complete report."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",

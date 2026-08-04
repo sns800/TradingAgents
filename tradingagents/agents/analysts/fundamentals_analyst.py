@@ -69,9 +69,13 @@ def create_fundamentals_analyst(llm):
         )
 
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:
-        # "당신은 다른 어시스턴트들과 협업하는 AI다. 도구를 사용해 진행하고,
-        # 완전히 답하지 못해도 괜찮다(다른 어시스턴트가 이어받는다).
+        # "너는 이 보고서의 유일한 책임 분석가다 — 하류 에이전트들이 이 보고서에
+        # 의존하며, 네가 남긴 공백을 채워줄 다른 에이전트는 없다. 도구로 필요한
+        # 데이터를 확보해 완결된 보고서까지 끌고 가라.
         # 오늘 날짜({current_date})를 '현재'로 간주하라."
+        # [협업 프레임 잔재 제거 — 작업이력 22] 원본의 "완전히 답하지 못해도
+        # 괜찮다, 다른 어시스턴트가 이어받는다"는 스웜 구조 잔재로, 전용 채널
+        # 구조에서는 미완성 보고서의 명분이 되어 교체.
         # ※ 매수/매도 최종 제안 지시는 넣지 않습니다 — 분석가는 파이프라인
         #   1단계로 보고서만 작성하며, 최종 결정은 하류(트레이더·포트폴리오
         #   매니저)의 역할입니다.
@@ -80,10 +84,10 @@ def create_fundamentals_analyst(llm):
             [
                 (
                     "system",
-                    "You are a helpful AI assistant, collaborating with other assistants."
-                    " Use the provided tools to progress towards answering the question."
-                    " If you are unable to fully answer, that's OK; another assistant with different tools"
-                    " will help where you left off. Execute what you can to make progress."
+                    "You are the analyst solely responsible for this report in a multi-agent"
+                    " trading pipeline; downstream agents rely on it and no other agent will"
+                    " fill the gaps you leave. Use the provided tools to gather the data you"
+                    " need and carry the analysis through to a complete report."
                     " You have access to the following tools: {tool_names}."
                     " Today's date is {current_date}; treat it as 'now' for all analysis and tool-call date ranges. {instrument_context}\n"
                     "{system_message}",
