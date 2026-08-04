@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage
 
 from tradingagents.agents.schemas import TraderProposal, render_trader_proposal
 from tradingagents.agents.utils.agent_utils import (
+    get_horizon_instruction,
     get_instrument_context_from_state,
     get_language_instruction,
     get_verified_snapshot_block,
@@ -77,6 +78,9 @@ def create_trader(llm):
         # - system: "당신은 시장 데이터를 분석해 투자 결정을 내리는 트레이딩 에이전트다.
         #   분석에 근거해 매수/매도/보유 중 하나의 구체적 추천을 제시하고,
         #   분석가 보고서와 리서치 계획에 근거를 두라. 외부 도구는 사용하지 말라."
+        #   [시계 정합 — 작업이력 21] 평가 지평(holding_days) 지시문을 추가하고,
+        #   진입가·손절·사이징이 그 지평 안에서 실행 가능하도록 설계하라는
+        #   문장을 덧붙임 (RM·PM·리플렉션과 동일 지평).
         # - user: "분석가 팀의 종합 분석으로 만든 {company_name} 투자 계획이다.
         #   기술적 추세, 거시 지표, 소셜 미디어 감성이 반영되어 있다.
         #   아래에 계획의 근거가 된 분석가 원본 보고서 4종을 제공하니
@@ -92,6 +96,9 @@ def create_trader(llm):
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
                     "Anchor your reasoning in the analysts' reports and the research plan. "
+                    + get_horizon_instruction()
+                    + " Design the entry price, stop-loss, and position sizing so the plan is "
+                    "executable within that horizon. "
                     + NO_EXTERNAL_TOOLS
                     + get_language_instruction()
                 ),

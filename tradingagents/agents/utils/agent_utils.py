@@ -50,6 +50,7 @@ __all__ = [
     "get_verified_market_snapshot",
     "build_instrument_context",
     "resolve_instrument_identity",
+    "get_horizon_instruction",
     "get_instrument_context_from_state",
     "get_language_instruction",
     "get_verified_snapshot_block",
@@ -71,6 +72,34 @@ def get_language_instruction() -> str:
     if lang.strip().lower() == "english":
         return ""
     return f" Write your entire response in {lang}."
+
+
+def get_horizon_instruction() -> str:
+    """평가 지평(evaluation horizon) 지시문을 반환한다.
+
+    [시계 정합 — 작업이력 21] 리서처는 다년 성장 논거를 펴고, 등급 척도에는
+    기간 정의가 없고, 리플렉션은 holding_days(기본 5거래일) 알파로 채점하는
+    시계 불일치가 있었다. 등급을 내거나 등급의 근거를 생산하는 프롬프트
+    (리서처 토론·리서치 매니저·트레이더·포트폴리오 매니저)에 이 지시문을
+    공통 주입해, 판단·논거·채점이 같은 지평 위에 서게 한다. 지평은 config의
+    holding_days에서 읽으므로 설정을 바꾸면 프롬프트도 따라간다.
+
+    [지시문 한국어 요약] "이 파이프라인의 결정은 향후 약 {N}거래일의 리스크
+    조정 초과수익으로 채점된다. 그 지평 위에서 판단하라 — 각 촉매와 리스크는
+    그 안에 주가를 움직일 수 있는지로 가중하고, 장기 논지는 시장이 그 안에
+    가격에 반영하기 시작할 개연성이 있는 만큼만 유효하며, 핵심 논거가 지평
+    밖에서만 실현된다면 그렇다고 명시하라."
+    """
+    from tradingagents.dataflows.config import get_config
+    days = get_config().get("holding_days", 5)
+    return (
+        f"Evaluation horizon: decisions in this pipeline are scored on risk-adjusted "
+        f"excess return over roughly the next {days} trading days. Frame your judgment "
+        f"on that horizon — weigh each catalyst and risk by whether it can plausibly "
+        f"move the price within it, treat longer-term theses as relevant only insofar "
+        f"as the market is likely to begin pricing them within the horizon, and say so "
+        f"explicitly when a key argument pays off only beyond it."
+    )
 
 
 def get_verified_snapshot_block(state: Mapping[str, Any]) -> str:

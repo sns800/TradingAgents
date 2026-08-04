@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
 from tradingagents.agents.utils.agent_utils import (
+    get_horizon_instruction,
     get_instrument_context_from_state,
     get_language_instruction,
     get_verified_snapshot_block,
@@ -133,6 +134,10 @@ def build_portfolio_manager_prompt(state) -> str:
     # 보존한다: 리스크 토론 판정은 수사가 아닌 논거 품질(증거 접지·응답성·리스크
     # 비대칭)로 하고, 양/음 알파는 대략 반반이므로 낙관/행동 욕구가 아니라 증거가
     # 등급을 정하게 하며, 증거가 진정으로 균형이면 Hold도 정당하다.
+    # [시계 정합 — 작업이력 21] 등급이 판단하는 지평을 holding_days 기반으로
+    # 명시하고(get_horizon_instruction — RM·리플렉션과 동일 지평), override
+    # 판단도 같은 지평 위에서 하라는 문장을 추가 — 지평 안에 작동할 수 없는
+    # 리스크/기회는 맥락일 뿐 등급 이동 근거가 아니다.
     # 외부 도구는 사용하지 말라."
     # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
     return f"""You are the final RISK-OVERSIGHT gate, not a re-synthesizer. The Research Manager has already set a proposed rating from the bull/bear research debate. Your task is to decide — through the lens of the RISK-management debate — whether to CONFIRM that rating or OVERRIDE it (move it up or down the scale).
@@ -178,6 +183,8 @@ Company Fundamentals Report: {fundamentals_report}
 3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the aggressive view fails versus the opportunity cost if the cautious view fails — not merely the number of arguments raised.
 
 Rate in proportion to the evidence and ground every conclusion in specific evidence from the analyst reports and the debate. Across many large-cap stock-days, positive and negative alpha are roughly equally common — do not let optimism or the urge to act set your rating. Hold is a legitimate finding when the evidence is genuinely balanced.
+
+{get_horizon_instruction()} Judge override-worthiness on that same horizon: a risk (or opportunity) that cannot plausibly act within it is context, not grounds to move the rating.
 
 {NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 

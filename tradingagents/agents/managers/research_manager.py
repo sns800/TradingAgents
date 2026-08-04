@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from tradingagents.agents.schemas import ResearchPlan, render_research_plan
 from tradingagents.agents.utils.agent_utils import (
+    get_horizon_instruction,
     get_instrument_context_from_state,
     get_language_instruction,
     get_verified_snapshot_block,
@@ -102,6 +103,11 @@ def build_research_manager_prompt(state) -> str:
     # 주어진다. 토론자의 주장은 원본 보고서와 대조해 검증하고, 보고서에
     # 근거가 없는 주장은 낮게 평가하라 (해당 분석가가 실행되지 않았으면
     # 보고서가 비어 있을 수 있다). 외부 도구는 사용하지 말라."
+    # [시계 정합 + priced-in — 작업이력 21] (1) 등급이 판단하는 지평을
+    # holding_days 기반으로 명시(get_horizon_instruction — 리플렉션 채점
+    # 지평과 일치), (2) 루브릭 1번(증거 접지)에 "시장이 이미 알고 가격에
+    # 반영한 사실의 재진술은 방향 등급의 약한 증거"라는 할인 기준을 추가
+    # (강세/약세 양방향에 동일 적용이라 편향 중립).
     # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
     return f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -118,10 +124,12 @@ def build_research_manager_prompt(state) -> str:
 
 Rate in proportion to the evidence. Across many large-cap stock-days, positive and negative alpha are roughly equally common — do not let optimism or the urge to act set your rating. Hold is a legitimate finding when the evidence is genuinely balanced; a directional rating requires the rubric to show a clear advantage for that side.
 
+{get_horizon_instruction()}
+
 ---
 
 **Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to both sides):
-1. **Evidence grounding**: Is each side's core claim backed by specific numbers or facts from the analyst reports below? Discount any claim you cannot trace back to a report.
+1. **Evidence grounding**: Is each side's core claim backed by specific numbers or facts from the analyst reports below? Discount any claim you cannot trace back to a report. Weigh new information and variant views against market expectations more heavily than recitations of facts the market has long known and priced — in either direction, restating consensus is weak evidence for a directional rating.
 2. **Responsiveness**: Did each side actually engage with the other's strongest argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
 3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the bull case fails versus the opportunity cost if the bear case fails — not merely the number of arguments raised.
 

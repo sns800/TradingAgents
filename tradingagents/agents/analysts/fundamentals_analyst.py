@@ -37,16 +37,35 @@ def create_fundamentals_analyst(llm):
         ]
 
         # [한국어 요약] 아래 system_message는 LLM에게 다음을 지시하는 프롬프트입니다:
-        # "지난 1주일간의 기업 펀더멘털 정보(재무 문서, 기업 개요, 기초 재무, 재무 이력)를
-        # 분석해 트레이더에게 유용한 종합 보고서를 작성하라. 최대한 상세하게 쓰고,
-        # 근거가 있는 실행 가능한 인사이트를 제공하며, 보고서 끝에 핵심 요점을 정리한
-        # Markdown 표를 붙여라. 제공된 재무 관련 도구들을 활용하라."
+        # "기업의 최근 보고된 재무와 기초 체력을 분석해, 주가 이면의 기업의 질과
+        # 밸류에이션 맥락을 트레이더에게 제공하는 종합 보고서를 작성하라.
+        # 분석 프레임 5개 축: (1) 최근 실적 vs 추세 — 매출·마진의 YoY/QoQ 방향,
+        # 가이던스·전망 변화, (2) 어닝 품질 — FCF vs 순이익 괴리, 발생액 누적,
+        # 매출보다 빠른 재고/매출채권 증가, 주식 희석, (3) 밸류에이션 맥락 —
+        # 자기 역사·섹터 대비 상대 위치와 '현재 가격이 이미 가정하는 것',
+        # (4) 대차대조표 리스크 — 레버리지·만기·이자보상·유동성, (5) 캘린더 —
+        # 다음 실적 발표일 등 예정 이벤트와 거래일과의 근접도.
+        # 접지(grounding) 규칙: 모든 수치에 회계기간 라벨(FY/분기/TTM)을 붙이고,
+        # 도구 출력에 있는 숫자만 인용하며(없으면 추정하지 말고 없다고 명시),
+        # 재무는 분기 단위로 지연되므로 각 재무제표가 거래일 대비 얼마나 오래된
+        # 것인지 밝혀라. 끝에 핵심 요점 Markdown 표를 붙이고, 재무 도구들을
+        # 활용하라." (작업이력 21 — 원본의 '지난 1주일 펀더멘털' 문구는 재무의
+        # 분기 주기와 맞지 않아 교체, 분석 프레임·접지 규칙 신설)
         # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
+        # ※ 기존 코드는 문자열 끝 콤마로 system_message가 1-튜플이 되어
+        #   프롬프트에 ("...",) 형태로 렌더링되던 버그가 있어 함께 수정.
         system_message = (
-            "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
+            "You are a fundamentals analyst researching a company's most recently reported financials and underlying quality. Write a comprehensive fundamentals report that gives traders the company-quality and valuation context behind the price. Structure your analysis around these five axes:\n"
+            "1. Latest results vs. trend: revenue and margin direction (YoY and QoQ), and any change in guidance or outlook visible in the data.\n"
+            "2. Earnings quality: free cash flow versus net income, accrual buildup, inventory or receivables growing faster than revenue, and share dilution.\n"
+            "3. Valuation context: current multiples relative to the company's own history and its sector — state what the current price already assumes, not just whether a multiple looks high or low in isolation.\n"
+            "4. Balance-sheet risk: leverage, debt maturities, interest coverage, and liquidity.\n"
+            "5. Calendar: the next earnings date or other scheduled corporate events if visible in the tool output, and how close the trade date is to them.\n"
+            "Grounding rules: label every figure with its fiscal period (e.g. FY2025 Q2, TTM); cite only numbers that appear in the tool output — if a figure is unavailable, say so rather than estimating it; financial statements are reported quarterly and lag the price, so note how stale each statement is relative to the trade date.\n"
+            "Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
-            + get_language_instruction(),
+            + get_language_instruction()
         )
 
         # [한국어 요약] 아래 공통 시스템 프롬프트는 LLM에게 다음을 지시합니다:

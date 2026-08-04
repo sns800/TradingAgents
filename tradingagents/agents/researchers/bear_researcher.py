@@ -8,6 +8,7 @@
 # =============================================================================
 
 from tradingagents.agents.utils.agent_utils import (
+    get_horizon_instruction,
     get_instrument_context_from_state,
     get_language_instruction,
     get_verified_snapshot_block,
@@ -63,6 +64,11 @@ def create_bear_researcher(llm):
         # 로드맵 #6). 반박할 강세 주장이 아직 없으면 가용 데이터에 근거한
         # 자기 논거(개시 발언)를 제시하라는 폴백 문구를 포함합니다(리스크
         # 토론자들과 동일한 패턴). (LLM 프롬프트이므로 영어 원문 유지)
+        # [priced-in 규율 + 시계 정합 — 작업이력 21] "나쁜 회사 ≠ 나쁜 주식":
+        # 현재 가격·밸류에이션이 내재한 시장 기대를 먼저 서술하고, 논지는 그
+        # 기대와의 차이(variance)로 세우라는 규율과, 평가 지평(holding_days)
+        # 안에 작동할 촉매를 요구하는 지시문을 추가. Bull과 완전 대칭으로
+        # 넣어 교정된 강세/약세 균형을 흔들지 않는다.
         prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 
 Key points to focus on:
@@ -72,6 +78,10 @@ Key points to focus on:
 - Negative Indicators: Use evidence from financial data, market trends, or recent adverse news to support your position.
 - Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
 - Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
+
+Argue against the market, not just the bull: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to fall short of those embedded expectations. A struggling or richly valued company is not a bear case if the price already assumes worse than your thesis implies; restating weaknesses the market has long known and priced is not evidence.
+
+{get_horizon_instruction()} Name the specific catalysts that can move the price within that horizon and when they hit.
 
 Resources available:
 

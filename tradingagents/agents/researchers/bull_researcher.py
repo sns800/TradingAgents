@@ -8,6 +8,7 @@
 # =============================================================================
 
 from tradingagents.agents.utils.agent_utils import (
+    get_horizon_instruction,
     get_instrument_context_from_state,
     get_language_instruction,
     get_verified_snapshot_block,
@@ -63,6 +64,11 @@ def create_bull_researcher(llm):
         # 로드맵 #6). 토론 시작(첫 발언)이라 반박할 약세 주장이 아직 없으면,
         # 가용 데이터에 근거한 자기 논거(개시 발언)를 제시하라는 폴백 문구를
         # 포함합니다. (LLM 프롬프트이므로 영어 원문 유지)
+        # [priced-in 규율 + 시계 정합 — 작업이력 21] "좋은 회사 ≠ 좋은 주식":
+        # 현재 가격·밸류에이션이 내재한 시장 기대를 먼저 서술하고, 논지는 그
+        # 기대와의 차이(variance)로 세우라는 규율과, 평가 지평(holding_days)
+        # 안에 작동할 촉매를 요구하는 지시문을 추가. Bear와 완전 대칭으로
+        # 넣어 교정된 강세/약세 균형을 흔들지 않는다.
         prompt = f"""You are a Bull Analyst advocating for investing in the {target_label}. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
 
 Key points to focus on:
@@ -71,6 +77,10 @@ Key points to focus on:
 - Positive Indicators: Use financial health, industry trends, and recent positive news as evidence.
 - Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
 - Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
+
+Argue against the market, not just the bear: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to beat those embedded expectations. A great company is not a bull case if the price already assumes more than your thesis delivers; restating strengths the market has long known and priced is not evidence.
+
+{get_horizon_instruction()} Name the specific catalysts that can move the price within that horizon and when they hit.
 
 Resources available:
 {instrument_context}
