@@ -8,6 +8,7 @@
 #  - GET  /api/runs/{id}/report?name=...  보고서 마크다운 내용
 #  - POST /api/runs/{id}/restart   기존 실행을 새 깊이로 재실행
 #  - POST /api/runs/{id}/cancel     진행 중 실행 취소 (Fargate 태스크 중지)
+#  - DELETE /api/runs/{id}         종료된 실행 삭제 (레코드 + S3 보고서)
 #  - GET  /api/catalog         종목 카탈로그 조회 (검색/업종/정렬/페이지네이션)
 #
 # 의존성은 boto3(런타임 내장)뿐이라 별도 패키징 없이 zip 한 장으로 배포됩니다.
@@ -552,6 +553,42 @@ def cancel_run(run_id):
     return _resp(200, {"run_id": run_id, "status": "cancelled"})
 
 
+def delete_run(run_id):
+    """종료된(completed/failed/cancelled) 실행을 목록에서 삭제한다.
+
+    진행 중(queued/running)인 실행은 409로 거부한다 — 태스크가 계속 도는데
+    레코드만 지우면 고아 태스크가 되므로, 먼저 취소하도록 안내한다.
+    S3의 보고서(runs/{run_id}/ 이하 전체)를 먼저 지우고 DynamoDB 레코드를
+    지운다. S3 삭제가 부분 실패해도 레코드 삭제는 진행하지 않는다 —
+    레코드가 남아 있으면 사용자가 재시도할 수 있지만, 레코드가 먼저 사라지면
+    남은 S3 객체는 영영 접근 불가한 쓰레기가 된다.
+    """
+    item = table.get_item(Key={"run_id": run_id}).get("Item")
+    if not item:
+        return _err(404, "해당 실행을 찾을 수 없습니다.")
+    status = str(item.get("status", ""))
+    if status in ("queued", "running"):
+        return _err(409, "진행 중인 실행은 삭제할 수 없습니다. 먼저 취소해 주세요.")
+
+    # runs/{run_id}/ 아래 모든 객체 삭제 (보고서 등). 1000개 단위 배치.
+    prefix = f"runs/{run_id}/"
+    token = None
+    while True:
+        kwargs = {"Bucket": DATA_BUCKET, "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        page = s3.list_objects_v2(**kwargs)
+        keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+        if keys:
+            s3.delete_objects(Bucket=DATA_BUCKET, Delete={"Objects": keys, "Quiet": True})
+        if not page.get("IsTruncated"):
+            break
+        token = page.get("NextContinuationToken")
+
+    table.delete_item(Key={"run_id": run_id})
+    return _resp(200, {"run_id": run_id, "deleted": True})
+
+
 def list_runs():
     items = table.scan().get("Items", [])
     # __config__는 실행이 아닌 런타임 설정 항목이므로 목록에서 제외한다
@@ -881,6 +918,9 @@ def handler(event, _context):
         m = re.match(r"^/api/runs/([a-f0-9]{12})$", path)
         if method == "GET" and m:
             return get_run(m.group(1))
+        # 종료된 실행 삭제 (DynamoDB 레코드 + S3 보고서)
+        if method == "DELETE" and m:
+            return delete_run(m.group(1))
 
         m = re.match(r"^/api/runs/([a-f0-9]{12})/report$", path)
         if method == "GET" and m:

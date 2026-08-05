@@ -263,11 +263,20 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                   - dynamodb:Scan
                 Resource: !GetAtt RunsTable.Arn
+              # 실행 삭제 API: runs/{id}/ 이하 보고서 일괄 삭제 (목록 조회 포함)
               - Effect: Allow
-                Action: s3:GetObject
+                Action:
+                  - s3:GetObject
+                  - s3:DeleteObject
                 Resource: !Sub "${DataBucket.Arn}/runs/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DataBucket.Arn
+                Condition:
+                  StringLike: { "s3:prefix": "runs/*" }
               # 종목 카탈로그 조회 API: 배치가 쓴 catalog/* 읽기
               - Effect: Allow
                 Action: s3:GetObject

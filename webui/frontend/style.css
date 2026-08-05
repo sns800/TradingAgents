@@ -477,6 +477,43 @@ input:focus, select:focus {
   border-top: 1px solid var(--border);
 }
 
+/* ---------- 실행 삭제 ---------- */
+.delete-box {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.delete-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* 목록 행의 삭제 버튼 — 행 클릭(상세 이동)과 시각적으로 분리된 작은 버튼 */
+.run-delete-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.run-delete-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.run-delete-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* ---------- 보고서 ---------- */
 .report-layout {
   display: grid;

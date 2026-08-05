@@ -556,6 +556,29 @@
       }
 
       meta.appendChild(elem('span', 'run-created', formatKST(run.created_at)));
+
+      // 종료된 실행은 목록에서 바로 삭제 가능 (행 클릭과 분리 — stopPropagation)
+      if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
+        var delBtn = elem('button', 'run-delete-btn', '삭제');
+        delBtn.type = 'button';
+        delBtn.title = '이 실행과 보고서를 완전히 삭제';
+        delBtn.setAttribute('aria-label', (run.ticker || '') + ' ' + (run.analysis_date || '') + ' 실행 삭제');
+        delBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (!window.confirm((run.ticker || '-') + ' · ' + (run.analysis_date || '-') +
+              ' 실행과 보고서를 완전히 삭제할까요? 되돌릴 수 없습니다.')) return;
+          delBtn.disabled = true;
+          delBtn.textContent = '삭제 중…';
+          apiFetch('/runs/' + encodeURIComponent(run.run_id), { method: 'DELETE' })
+            .then(function () { loadRuns(); })
+            .catch(function (err) {
+              delBtn.disabled = false;
+              delBtn.textContent = '삭제';
+              window.alert('삭제 실패: ' + err.message);
+            });
+        });
+        meta.appendChild(delBtn);
+      }
       row.appendChild(meta);
 
       function goDetail() {
@@ -714,14 +737,46 @@
       box.appendChild(errBox);
     }
 
-    // 진행 중이면 취소 버튼, 종료됐으면 재시작 패널
+    // 진행 중이면 취소 버튼, 종료됐으면 재시작·삭제 패널
     if (ACTIVE_STATUSES[run.status]) {
       var cancel = buildCancelPanel(run);
       if (cancel) box.appendChild(cancel);
     } else {
       var restart = buildRestartPanel(run);
       if (restart) box.appendChild(restart);
+      var del = buildDeletePanel(run);
+      if (del) box.appendChild(del);
     }
+  }
+
+  // 종료된(완료/실패/취소) 실행을 목록·저장소에서 삭제하는 패널.
+  // 진행 중 실행에는 표시하지 않는다(먼저 취소해야 함 — 백엔드도 409로 거부).
+  function buildDeletePanel(run) {
+    if (!run.run_id) return null;
+    if (run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled') return null;
+    var box = elem('div', 'delete-box');
+    var btn = elem('button', 'btn btn-danger', '실행 삭제');
+    btn.type = 'button';
+    var err = elem('p', 'restart-error');
+    err.hidden = true;
+    btn.addEventListener('click', function () {
+      if (!window.confirm('이 실행과 보고서를 완전히 삭제할까요? 되돌릴 수 없습니다.')) return;
+      btn.disabled = true;
+      btn.textContent = '삭제 중…';
+      err.hidden = true;
+      apiFetch('/runs/' + encodeURIComponent(run.run_id), { method: 'DELETE' })
+        .then(function () { location.hash = '#/'; })
+        .catch(function (e) {
+          err.textContent = e.message;
+          err.hidden = false;
+          btn.disabled = false;
+          btn.textContent = '실행 삭제';
+        });
+    });
+    box.appendChild(btn);
+    box.appendChild(elem('span', 'delete-hint', '보고서를 포함해 완전히 삭제됩니다.'));
+    box.appendChild(err);
+    return box;
   }
 
   // 진행 중(queued/running)인 실행을 취소하는 버튼. Fargate 태스크를 중지하고
