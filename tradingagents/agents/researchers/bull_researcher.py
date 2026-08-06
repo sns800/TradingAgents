@@ -69,6 +69,10 @@ def create_bull_researcher(llm):
         # 기대와의 차이(variance)로 세우라는 규율과, 평가 지평(holding_days)
         # 안에 작동할 촉매를 요구하는 지시문을 추가. Bear와 완전 대칭으로
         # 넣어 교정된 강세/약세 균형을 흔들지 않는다.
+        # [절제 프로브 교정 — 작업이력 26] 신토론이 구심판에서도 강세 0%로
+        # 쏠려(ablation_run21) 균형 문장 2개 추가: 기반영 판단은 주가 방향이
+        # 아닌 밸류에이션 증거로, 확립된 추세의 지속도 지평 내 유효 동인
+        # (Bear와 완전 대칭).
         prompt = f"""You are a Bull Analyst advocating for investing in the {target_label}. Your task is to build a strong, evidence-based case emphasizing growth potential, competitive advantages, and positive market indicators. Leverage the provided research and data to address concerns and counter bearish arguments effectively.
 
 Key points to focus on:
@@ -78,9 +82,9 @@ Key points to focus on:
 - Bear Counterpoints: Critically analyze the bear argument with specific data and sound reasoning, addressing concerns thoroughly and showing why the bull perspective holds stronger merit.
 - Engagement: Present your argument in a conversational style, engaging directly with the bear analyst's points and debating effectively rather than just listing data.
 
-Argue against the market, not just the bear: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to beat those embedded expectations. A great company is not a bull case if the price already assumes more than your thesis delivers; restating strengths the market has long known and priced is not evidence.
+Argue against the market, not just the bear: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to beat those embedded expectations. A great company is not a bull case if the price already assumes more than your thesis delivers; restating strengths the market has long known and priced is not evidence. But judge what is priced from the valuation evidence, not from the direction of recent price movement alone — a rising price by itself does not mean your case is already in the price.
 
-{get_horizon_instruction()} Name the specific catalysts that can move the price within that horizon and when they hit.
+{get_horizon_instruction()} Name the specific drivers that can move the price within that horizon and when they hit — an established trend that the evidence shows is intact counts as such a driver.
 
 Resources available:
 {instrument_context}

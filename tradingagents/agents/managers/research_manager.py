@@ -108,6 +108,10 @@ def build_research_manager_prompt(state) -> str:
     # 지평과 일치), (2) 루브릭 1번(증거 접지)에 "시장이 이미 알고 가격에
     # 반영한 사실의 재진술은 방향 등급의 약한 증거"라는 할인 기준을 추가
     # (강세/약세 양방향에 동일 적용이라 편향 중립).
+    # [절제 프로브 교정 — 작업이력 26] priced-in만 단독 추가 시 약세가 15%→30%로
+    # 배증(ablation_run21) — 최근 주가 방향을 기대치로 오독하는 것이 원인.
+    # "기반영 여부는 주가 방향이 아니라 보고서의 밸류에이션 증거로 판단, 양측에
+    # 동일 강도로 적용" 문장을 덧붙여 균형을 회복.
     # ※ 프롬프트를 번역하면 모델 출력 형식이 깨질 수 있어 영어 원문을 유지합니다.
     return f"""As the Research Manager and debate facilitator, your role is to critically evaluate this round of debate and deliver a clear, actionable investment plan for the trader.
 
@@ -129,7 +133,7 @@ Rate in proportion to the evidence. Across many large-cap stock-days, positive a
 ---
 
 **Evaluation Rubric** (judge argument quality, not rhetoric — apply each criterion to both sides):
-1. **Evidence grounding**: Is each side's core claim backed by specific numbers or facts from the analyst reports below? Discount any claim you cannot trace back to a report. Weigh new information and variant views against market expectations more heavily than recitations of facts the market has long known and priced — in either direction, restating consensus is weak evidence for a directional rating.
+1. **Evidence grounding**: Is each side's core claim backed by specific numbers or facts from the analyst reports below? Discount any claim you cannot trace back to a report. Weigh new information and variant views against market expectations more heavily than recitations of facts the market has long known and priced — in either direction, restating consensus is weak evidence for a directional rating. But do not infer expectations from the direction of recent price movement alone: a stock that has risen does not thereby have every strength priced in, nor does a fallen one have every weakness priced in — judge what is priced from the valuation evidence in the reports, and apply that test with equal force to both sides.
 2. **Responsiveness**: Did each side actually engage with the other's strongest argument? An argument that was never answered still stands; a rebuttal that dodges the point does not count as an answer. Discount claims that were challenged and left unanswered.
 3. **Risk asymmetry**: Weigh the magnitude of being wrong on each side — the downside if the bull case fails versus the opportunity cost if the bear case fails — not merely the number of arguments raised.
 

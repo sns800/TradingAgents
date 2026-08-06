@@ -92,13 +92,21 @@ def get_horizon_instruction() -> str:
     """
     from tradingagents.dataflows.config import get_config
     days = get_config().get("holding_days", 5)
+    # [절제 프로브 교정 — 작업이력 26] 원문(지평 문구)만 넣었을 때 RM 등급이
+    # Hold 85%로 쏠렸다(ablation_run21). "지평 내 촉매"를 이벤트성 촉매로만
+    # 읽어 추세 지속(모멘텀)이 근거에서 배제된 것이 원인 — 확립된 추세의
+    # 지속도 지평 내 유효한 동인임을 양방향 공통으로 명시해 균형을 회복한다.
     return (
         f"Evaluation horizon: decisions in this pipeline are scored on risk-adjusted "
         f"excess return over roughly the next {days} trading days. Frame your judgment "
         f"on that horizon — weigh each catalyst and risk by whether it can plausibly "
         f"move the price within it, treat longer-term theses as relevant only insofar "
         f"as the market is likely to begin pricing them within the horizon, and say so "
-        f"explicitly when a key argument pays off only beyond it."
+        f"explicitly when a key argument pays off only beyond it. A discrete event is "
+        f"not the only valid driver: the continuation of an established trend that the "
+        f"evidence shows is intact — in either direction — is itself a legitimate "
+        f"within-horizon driver, so do not default to a neutral stance merely because "
+        f"no scheduled catalyst falls inside the horizon."
     )
 
 

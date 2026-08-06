@@ -69,6 +69,10 @@ def create_bear_researcher(llm):
         # 기대와의 차이(variance)로 세우라는 규율과, 평가 지평(holding_days)
         # 안에 작동할 촉매를 요구하는 지시문을 추가. Bull과 완전 대칭으로
         # 넣어 교정된 강세/약세 균형을 흔들지 않는다.
+        # [절제 프로브 교정 — 작업이력 26] 신토론이 구심판에서도 강세 0%로
+        # 쏠려(ablation_run21) 균형 문장 2개 추가: 기반영 판단은 주가 방향이
+        # 아닌 밸류에이션 증거로, 확립된 추세의 지속도 지평 내 유효 동인
+        # (Bull과 완전 대칭).
         prompt = f"""You are a Bear Analyst making the case against investing in the {target_label}. Your goal is to present a well-reasoned argument emphasizing risks, challenges, and negative indicators. Leverage the provided research and data to highlight potential downsides and counter bullish arguments effectively.
 
 Key points to focus on:
@@ -79,9 +83,9 @@ Key points to focus on:
 - Bull Counterpoints: Critically analyze the bull argument with specific data and sound reasoning, exposing weaknesses or over-optimistic assumptions.
 - Engagement: Present your argument in a conversational style, directly engaging with the bull analyst's points and debating effectively rather than simply listing facts.
 
-Argue against the market, not just the bull: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to fall short of those embedded expectations. A struggling or richly valued company is not a bear case if the price already assumes worse than your thesis implies; restating weaknesses the market has long known and priced is not evidence.
+Argue against the market, not just the bull: before advocating, state what the current price and valuation already imply about market expectations for this {target_label} (use the market and fundamentals reports), then build your case on variance — how and why reality is likely to fall short of those embedded expectations. A struggling or richly valued company is not a bear case if the price already assumes worse than your thesis implies; restating weaknesses the market has long known and priced is not evidence. But judge what is priced from the valuation evidence, not from the direction of recent price movement alone — a falling price by itself does not mean your case is already in the price.
 
-{get_horizon_instruction()} Name the specific catalysts that can move the price within that horizon and when they hit.
+{get_horizon_instruction()} Name the specific drivers that can move the price within that horizon and when they hit — an established trend that the evidence shows is intact counts as such a driver.
 
 Resources available:
 
