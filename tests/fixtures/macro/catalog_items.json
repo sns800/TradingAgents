@@ -1,0 +1,84 @@
+{
+ "KR": [
+  {
+   "ticker": "005930",
+   "name": "Samsung Electronics",
+   "name_ko": "삼성전자",
+   "market": "KR",
+   "sector": "전기전자",
+   "price": 88000.0,
+   "currency": "KRW",
+   "market_cap": 525000000000000
+  },
+  {
+   "ticker": "000660",
+   "name": "SK hynix",
+   "name_ko": "SK하이닉스",
+   "market": "KR",
+   "sector": "전기전자",
+   "price": 320000.0,
+   "currency": "KRW",
+   "market_cap": 233000000000000
+  },
+  {
+   "ticker": "373220",
+   "name": "LG Energy Solution",
+   "name_ko": "LG에너지솔루션",
+   "market": "KR",
+   "sector": "전기전자",
+   "price": 380000.0,
+   "currency": "KRW",
+   "market_cap": 88900000000000
+  },
+  {
+   "ticker": "005380",
+   "name": "Hyundai Motor",
+   "name_ko": "현대차",
+   "market": "KR",
+   "sector": "운수장비",
+   "price": 210000.0,
+   "currency": "KRW",
+   "market_cap": 44000000000000
+  },
+  {
+   "ticker": "068270",
+   "name": "Celltrion",
+   "name_ko": "셀트리온",
+   "market": "KR",
+   "sector": "의약품",
+   "price": 180000.0,
+   "currency": "KRW",
+   "market_cap": 39000000000000
+  },
+  {
+   "ticker": "099999",
+   "name": "No Cap Corp",
+   "name_ko": "시총없음",
+   "market": "KR",
+   "sector": "기타",
+   "price": 1000.0,
+   "currency": "KRW",
+   "market_cap": null
+  }
+ ],
+ "US": [
+  {
+   "ticker": "AAPL",
+   "name": "Apple Inc.",
+   "market": "US",
+   "sector": "Technology",
+   "price": 230.0,
+   "currency": "USD",
+   "market_cap": 3500000000000
+  },
+  {
+   "ticker": "MSFT",
+   "name": "Microsoft Corp.",
+   "market": "US",
+   "sector": "Technology",
+   "price": 420.0,
+   "currency": "USD",
+   "market_cap": 3120000000000
+  }
+ ]
+}

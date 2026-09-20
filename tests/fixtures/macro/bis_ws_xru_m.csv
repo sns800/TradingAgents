@@ -1,0 +1,9 @@
+FREQ,REF_AREA,CURRENCY,COLLECTION,UNIT_MULT,DECIMALS,AVAILABILITY,TITLE,TIME_PERIOD,OBS_VALUE,OBS_STATUS,OBS_PRE_BREAK,OBS_CONF
+M,KR,KRW,E,0,6,A, Exchange rates against USD Korea - Won - Monthly - End of period,2026-05,1506.269323,A,,F
+M,KR,KRW,E,0,6,A, Exchange rates against USD Korea - Won - Monthly - End of period,2026-06,1550.886431,A,,F
+M,KR,KRW,E,0,6,A, Exchange rates against USD Korea - Won - Monthly - End of period,2026-07,1443.613409,A,,F
+M,KR,KRW,E,0,6,A, Exchange rates against USD Korea - Won - Monthly - End of period,2026-08,1368.03208,A,,F
+M,XM,EUR,E,0,6,A, Exchange rates against USD Euro area - Euro - Monthly - End of period,2026-05,0.858811,A,,F
+M,XM,EUR,E,0,6,A, Exchange rates against USD Euro area - Euro - Monthly - End of period,2026-06,0.877655,A,,F
+M,XM,EUR,E,0,6,A, Exchange rates against USD Euro area - Euro - Monthly - End of period,2026-07,0.870701,A,,F
+M,XM,EUR,E,0,6,A, Exchange rates against USD Euro area - Euro - Monthly - End of period,2026-08,0.862366,A,,F

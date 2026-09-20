@@ -1,0 +1,764 @@
+# ============================================================
+# [모듈 개요] 정성 소스 메타데이터 — webui/macro/llm/* 전용 (registry.yaml과 분리)
+#
+# 이 파일은 "사람이 관리하는 계약 데이터"다. 정량 지표 레지스트리(registry.yaml)는
+# 다른 담당이 소유하므로, 중앙은행 결정문 페이지·위키피디아 여론조사 문서·에너지
+# 정책 URL 같은 정성 메타는 여기에만 둔다. 로더는 llm/meta.py:load_sources().
+#
+# 확인 방법(2026-09-20 실측): 모든 URL을 curl로 직접 호출해 상태코드를 notes에
+# 남겼다. 추측한 값은 넣지 않는다 — 확인 못 한 값은 null + note로 표기한다.
+#
+# 주의할 실측 결과:
+#  - iea.org/countries/* 는 Cloudflare 봇 차단으로 **항상 403**이다(잘못된 URL이
+#    아님). 슬러그는 iea.org/sitemap-countries.xml(200)에 실제로 존재함을 확인했다.
+#  - 정치 메타는 2026-09-20 기준이다. 선거·당명은 바뀌므로 election 블록은
+#    분기마다 재확인이 필요하다(TR·RU·IN·ID·ZA는 특히 유동적).
+# ============================================================
+
+# ------------------------------------------------------------------ 중앙은행
+# iso → {name_ko, name_en, statements_url, rss, lang, notes}
+#   refer: EU      → 유로 회원국. 자체 문서를 만들지 않고 EU 문서를 참조한다.
+#   link_keywords  → 결정문 링크 선별 패턴. **주면 그 패턴만** 쓴다(strict).
+#                    주지 않으면 모듈 기본 규칙 → 일반 키워드 → 날짜 링크로 완화.
+#   user_agent: browser → WAF가 봇 UA를 막는 사이트(GB·ID·SA)
+#   rss            → 목록이 JS로 렌더링될 때 폴백으로 쓰는 피드
+#
+# 링크 선별 실측 결과 (2026-09-20, LLM 미사용):
+#   본문 확보 성공(8): US 2026-09-16 · EU 2026-09-10(피드) · JP 2026-01-23(이후 회차는
+#     PDF만 제공) · KR 2026-09-20 · CN 2026-09-20 · AR(최신 공표가 과거) · AU 2026-08-11 ·
+#     CA 2026-09-02.  RU는 결정문을 잡지만 URL에 날짜가 없어 최신 회차 보장 안 됨.
+#   링크 없음(5): GB · MX · TR · SA · ZA — 목록이 JS로 렌더링되고 피드도 결정문
+#     단위가 아니다. 링크를 못 찾으면 record_error만 남기고 LLM을 호출하지 않는다.
+#   링크는 잡히나 본문이 비어 있음(3): IN(prid 페이지 JS) · BR(Angular 셸) · ID(JS).
+#     본문 200자 미만은 LLM 전에 버려지므로 잘못된 문서나 비용이 발생하지 않는다.
+#   → 이 8개국은 Phase 3에서 렌더링/전용 API 연동이 필요하다(제안서 8장 리스크).
+central_banks:
+  US:
+    name_ko: 연방준비제도
+    name_en: Federal Reserve (FOMC)
+    statements_url: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+    rss: https://www.federalreserve.gov/feeds/press_monetary.xml
+    lang: en
+    link_keywords: ["pressreleases/monetary"]
+    notes: "200. 회의별 성명 링크(monetary20260128a.htm 등)가 서버 렌더링된다. RSS 200(FRB Press Release - Monetary Policy)."
+  EU:
+    name_ko: 유럽중앙은행
+    name_en: European Central Bank
+    statements_url: https://www.ecb.europa.eu/press/govcdec/mopo/html/index.en.html
+    rss: https://www.ecb.europa.eu/rss/press.html
+    lang: en
+    link_keywords: ["ecb.mp"]
+    notes: >-
+      200. '통화정책 결정' 아카이브(2026-09-10 등). RSS 200이지만 MP 전용이 아니라
+      전체 보도자료다(/rss/mopo.html은 404). /press/pr/date/html/index.en.html은
+      쿼리 페이지로 302되므로 쓰지 않는다.
+  JP:
+    name_ko: 일본은행
+    name_en: Bank of Japan
+    statements_url: https://www.boj.or.jp/en/mopo/mpmdeci/mpr_2026/index.htm
+    rss: https://www.boj.or.jp/en/rss/whatsnew.xml
+    lang: en
+    link_keywords: ["mopo/mpmdeci", "/k26", "/k27"]
+    notes: >-
+      200. 연도별 색인 페이지(k260918a.pdf 등). **매년 URL의 mpr_YYYY를 갱신해야 한다.**
+      허브 /en/mopo/mpmdeci/index.htm(200)은 당해 연도만 링크한다. MP 전용 피드 없음.
+  GB:
+    name_ko: 영란은행
+    name_en: Bank of England (MPC)
+    statements_url: https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes/monetary-policy-summary-and-minutes
+    rss: https://www.bankofengland.co.uk/rss/news
+    lang: en
+    user_agent: browser
+    link_keywords: ["monetary-policy-summary-and-minutes/20"]
+    notes: >-
+      200 — 경로 세그먼트가 **두 번 반복**되어야 한다(단일 세그먼트와 /news/monetary-policy는 404).
+      목록이 JS로 렌더링되어 원문 HTML에 날짜 링크가 없다 → 규칙 파서가 실패할 수 있고
+      항목 URL은 /{year}/{month}-{year} 형태다. RSS 200(뉴스 전체).
+  KR:
+    name_ko: 한국은행
+    name_en: Bank of Korea
+    statements_url: "https://www.bok.or.kr/portal/singl/crncyPolicyDrcMtg/listYear.do?menuNo=200755&mtgSe=A"
+    rss: null
+    lang: ko
+    link_keywords: ["crncyPolicyDrcMtg", "통화정책방향", "결정문"]
+    notes: >-
+      200 — '통화정책방향 결정회의(목록)'. 2026년 회의별 결정문·보도자료 첨부가 붙는다.
+      경고: 흔히 쓰는 게시판 /portal/bbs/P0000559/list.do 는 200이지만 본문이
+      '콘텐츠 준비중입니다'로 비어 있어 쓰지 않는다. RSS 없음(모두 에러페이지).
+  CN:
+    name_ko: 중국인민은행
+    name_en: People's Bank of China
+    statements_url: https://www.pbc.gov.cn/zhengcehuobisi/125207/125213/125440/3876551/index.html
+    rss: https://www.pbc.gov.cn/goutongjiaoliu/113456/2986536/index.html
+    lang: zh
+    link_keywords: ["zhengcehuobisi", "lpr"]
+    notes: >-
+      200 — 贷款市场报价利率(LPR) 공고 목록(2026-09-20, 08-20, 07-20 ...).
+      RSS URL은 content-type이 text/html이지만 실제로는 RSS 2.0 문서이며 LPR 전용이 아니다.
+  IN:
+    name_ko: 인도준비은행
+    name_en: Reserve Bank of India
+    statements_url: https://www.rbi.org.in/Scripts/BS_PressReleaseDisplay.aspx
+    rss: https://www.rbi.org.in/pressreleases_rss.xml
+    lang: en
+    link_keywords: ["prid="]
+    notes: "200 — 서버 렌더링 보도자료 목록(prid 링크). 신 포털 website.rbi.org.in은 200이나 본문이 JS 렌더링이다. RSS 200."
+  BR:
+    name_ko: 브라질중앙은행
+    name_en: Banco Central do Brasil (Copom)
+    statements_url: https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/comunicadoscopom
+    rss: https://www.bcb.gov.br/api/feed/sitebcb/sitefeeds/comunicadoscopom
+    lang: en
+    link_keywords: ["copom", "comunicado"]
+    notes: >-
+      200 — HTML 페이지(/en/monetarypolicy/copomstatements, 200)는 Angular 셸이라
+      원문에 성명이 없다. **Atom 피드를 statements_url로 사용**한다(281ª 회의
+      2026-09-16 등 채워져 있음). `sitefeeds` 없는 경로는 오류 문서를 반환한다.
+  MX:
+    name_ko: 멕시코중앙은행
+    name_en: Banco de México
+    statements_url: https://www.banxico.org.mx/publications-and-press/announcements-of-monetary-policy-decisions/monetary-policy-announcements.html
+    rss: null
+    lang: en
+    link_keywords: ["announcements-of-monetary-policy", "politica-monetaria"]
+    notes: "200 — 서버 렌더링 목록(08/06/26 'kept unchanged at 6.50 per cent' 등). RSS 없음(후보 URL 전부 404)."
+  AR:
+    name_ko: 아르헨티나중앙은행
+    name_en: Banco Central de la República Argentina (BCRA)
+    statements_url: https://www.bcra.gob.ar/ultimos-comunicados-de-politica-monetaria/
+    rss: null
+    lang: es
+    link_keywords: ["comunicado", "politica-monetaria"]
+    notes: >-
+      200 — 'Últimos Comunicados De Política Monetaria' 날짜 목록.
+      최신 항목이 2025-10인 것은 BCRA 자체 공표 주기 탓이며 수집 실패가 아니다.
+      WordPress 피드는 비활성(/feed/ 500).
+  TR:
+    name_ko: 튀르키예중앙은행
+    name_en: Central Bank of the Republic of Türkiye (TCMB)
+    statements_url: https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB+EN/MPC/MPC+Meeting+Decisions
+    rss: https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB+EN/Bottom+Menu/Other/RSS/MPC+Decisions
+    lang: en
+    link_keywords: ["press+release+on+interest+rates"]
+    notes: >-
+      200 — 'Press Release on Interest Rates (2026-28)' 등 금리 결정 목록.
+      RSS는 200이지만 **2025-12 이후 갱신이 멈춘 stale 피드**라 HTML을 긁어야 한다.
+      .../Press+Releases/Press+Releases+on+Interest+Rates 는 404다.
+  SA:
+    name_ko: 사우디중앙은행
+    name_en: Saudi Central Bank (SAMA)
+    statements_url: https://www.sama.gov.sa/en-US/MediaCenter/News/pages/allnews.aspx
+    rss: null
+    lang: en
+    user_agent: browser
+    link_keywords: ["news-", "repo"]
+    notes: >-
+      200 — SharePoint 목록 JSON에 날짜 항목(2026-09-17 등)과 news-1164.aspx 링크가 있다.
+      F5/TSPD 봇 차단이 있어 **브라우저 UA가 필요**하고, 봇 UA로는 '200 + 챌린지 본문'이
+      올 수 있으므로 본문 검증이 필수다. /en-US/News/* 경로는 404다.
+  ZA:
+    name_ko: 남아프리카준비은행
+    name_en: South African Reserve Bank (SARB)
+    statements_url: https://www.resbank.co.za/en/home/publications/statements/mpc-statements
+    rss: https://www.resbank.co.za/bin/sarb/solr/publications/rss
+    lang: en
+    link_keywords: ["monetary-policy-statements"]
+    notes: >-
+      200 — 'MPC Statements'. 목록이 Solr 검색 서비스로 로드되어 원문 HTML에 링크가 없고
+      확인 시점에 '검색 서비스 장애' 메시지가 떠 있었다 → **RSS(200, 뉴스+간행물 통합)**
+      경로를 폴백으로 써야 한다. 항목 URL은 .../statements/monetary-policy-statements/{year}/{month}.
+  ID:
+    name_ko: 인도네시아은행
+    name_en: Bank Indonesia
+    statements_url: https://www.bi.go.id/en/publikasi/ruang-media/news-release/default.aspx
+    rss: null
+    lang: en
+    user_agent: browser
+    link_keywords: ["bi-rate", "moneter"]
+    notes: >-
+      봇 UA로는 연결이 리셋되어 000, **브라우저 UA + HTTP/1.1로는 200**(2026-09-10 등
+      날짜 목록, BI-Rate 결정도 같은 게시판에 올라온다). RSS 없음.
+  AU:
+    name_ko: 호주준비은행
+    name_en: Reserve Bank of Australia
+    statements_url: https://www.rba.gov.au/monetary-policy/int-rate-decisions/
+    rss: https://www.rba.gov.au/rss/rss-cb-media-releases.xml
+    lang: en
+    link_keywords: ["monetary-policy-decision", "media-releases/20"]
+    notes: "200 — 'Monetary Policy Decision' 항목과 int-rate-decisions/2026 링크. RSS 200(RDF 1.0)."
+  CA:
+    name_ko: 캐나다은행
+    name_en: Bank of Canada
+    statements_url: https://www.bankofcanada.ca/press/press-releases/
+    rss: https://www.bankofcanada.ca/content_type/press-releases/feed/
+    lang: en
+    link_keywords: ["fad-press-release"]
+    notes: >-
+      200 — 서버 렌더링. 금리 결정은 `fad-press-release-YYYY-MM-DD` 슬러그라
+      link_keywords로 정확히 걸러진다(2026-09-02 'maintains the policy rate at 2¼%').
+  RU:
+    name_ko: 러시아중앙은행
+    name_en: Bank of Russia
+    statements_url: https://www.cbr.ru/eng/dkp/mp_dec/
+    rss: https://www.cbr.ru/rss/RssPress
+    lang: en
+    link_keywords: ["eng_bor", "dkp/mp_dec"]
+    notes: >-
+      200 — 'Monetary policy decisions' 서버 렌더링 목록(2026-09-11 14.00% 유지 등).
+      /press/keypr/ 는 최신 1건만 렌더링하는 상세 페이지라 목록으로 쓰면 안 된다.
+      RSS 200(러시아어 '보도자료').
+  DE:
+    name_ko: 독일연방은행 (유로존 공통)
+    name_en: Deutsche Bundesbank
+    refer: EU
+    lang: de
+    notes: "유로 회원국 — 통화정책은 ECB 단일 결정이므로 EU 문서를 참조한다(자체 문서 생성 없음)."
+  FR:
+    name_ko: 프랑스은행 (유로존 공통)
+    name_en: Banque de France
+    refer: EU
+    lang: fr
+    notes: "유로 회원국 — EU 문서 참조."
+  IT:
+    name_ko: 이탈리아은행 (유로존 공통)
+    name_en: Banca d'Italia
+    refer: EU
+    lang: it
+    notes: "유로 회원국 — EU 문서 참조."
+
+# ------------------------------------------------------------------ 여론조사·선거
+# 20개 엔트리 = 여론조사 대상 17개국 + not_applicable 3개(CN·SA·EU).
+# party_aliases의 별칭은 **위키 표의 실제 컬럼 헤더 문자열**이다(약칭 그대로).
+#
+# 규칙 파서 실측 추출 건수 (2026-09-20, 표 최대 2개 × 40행):
+#   KR 80 · GB 79 · FR 69 · RU 61 · BR 61 · IT 46 · JP 45 · CA 39 · DE 38 · MX 26 ·
+#   AU 24 · AR 17 · US 6(집계기관 행) · ID 2 · ZA 1 · IN 0 · TR 0
+#   IN=0은 표가 정당 지지율이 아니라 연합별 예상 의석수여서 합계 규칙에 걸리는 것이고,
+#   TR=0은 사용 가능한 위키 문서가 없기 때문이다(둘 다 구조적 한계, 파서 버그 아님).
+polls:
+  KR:
+    wiki_page: Opinion_polling_for_the_next_South_Korean_legislative_election
+    trust: 높음
+    notes: "pageid 79588169, wikitable 4개. 연도 절(2026/2025/2024)로 표가 나뉘고 날짜 칸에 연도가 없다."
+    party_aliases:
+      더불어민주당: ["DPK"]
+      국민의힘: ["PPP"]
+      조국혁신당: ["RKP"]
+      개혁신당: ["RP"]
+      진보당: ["PP"]
+      기본소득당: ["BIP"]
+      사회민주당: ["SDP"]
+      새로운미래: ["NFP"]
+    election:
+      next_election_date: "2028-04-12"
+      election_type: legislative
+      ruling_party_ko: 더불어민주당
+      ruling_lean: center-left
+      second_party_ko: 국민의힘
+      system_note: "국회 300석을 소선거구제와 준연동형 비례대표제로 선출하며, 여론조사는 전국 정당지지율을 측정한다."
+      note: "2026-09-20 위키 인포박스 '늦어도 2028-04-12' 기준. 대통령 이재명(2025-06 취임)."
+  US:
+    wiki_page: 2026_United_States_House_of_Representatives_elections
+    trust: 높음
+    notes: >-
+      전용 generic ballot 문서가 없다(여러 제목 404 확인). 이 문서의
+      '#Generic congressional ballot aggregate polls' 표는 **집계기관 5행**이며
+      개별 조사가 아니다. 대통령 국정지지율은 approval_wiki_page 참조.
+    approval_wiki_page: Opinion_polling_on_the_second_Trump_presidency
+    party_aliases:
+      공화당: ["Republicans", "Republican", "GOP", "R"]
+      민주당: ["Democrats", "Democratic", "D"]
+    election:
+      next_election_date: "2026-11-03"
+      election_type: congressional_midterm
+      ruling_party_ko: 공화당
+      ruling_lean: right
+      second_party_ko: 민주당
+      system_note: "하원 435석 전원과 상원 35석을 단순다수제로 선출하며, 여론조사는 전국 일반투표(generic ballot) 의향과 대통령 국정지지율을 측정한다."
+      note: "집계기관 행만 있어 party_support는 '집계치'로 해석해야 한다."
+  JP:
+    wiki_page: Opinion_polling_for_the_next_Japanese_general_election
+    trust: 높음
+    notes: "pageid 82154618, wikitable 7개. 2026-02-08 총선(자민당 316석 압승) 이후 문서로 교체됨."
+    party_aliases:
+      자유민주당: ["LDP"]
+      일본유신회: ["Ishin"]
+      국민민주당: ["DPFP", "DPP"]
+      입헌민주당: ["CDP"]
+      공명당: ["Komei"]
+      일본공산당: ["JCP"]
+      참정당: ["Sansei"]
+      팀미라이: ["Mirai"]
+      민주개혁당: ["DRP"]
+      중도개혁연합: ["CRA"]
+      레이와신선조: ["Reiwa"]
+      일본보수당: ["CPJ"]
+      사회민주당: ["SDP"]
+    election:
+      next_election_date: "2030-02-08"
+      election_type: general
+      ruling_party_ko: 자유민주당
+      ruling_lean: right
+      second_party_ko: 일본유신회
+      system_note: "중의원 465석을 소선거구·비례대표 병립제로 선출하며, 여론조사는 비례 정당지지율과 내각 지지율을 측정한다."
+      note: "'늦어도 2030-02-08'이며 조기 해산 가능성이 높다. 2026-09-17 중도개혁연합 해산(공명당·민주개혁당으로 분리)."
+  CN:
+    not_applicable_reason: "중국은 경쟁 정당 선거가 없어 정당 지지율 여론조사가 존재하지 않는다."
+    trust: 해당없음
+    reference_url: https://en.wikipedia.org/wiki/Elections_in_China
+    election: null
+  EU:
+    not_applicable_reason: "유로존은 국가가 아니라 통화연합이어서 집권당·정부 지지율 개념이 없다. 회원국별 지표를 참조한다."
+    trust: 해당없음
+    reference_url: https://en.wikipedia.org/wiki/Politics_of_the_European_Union
+    election: null
+  SA:
+    not_applicable_reason: "사우디아라비아는 정당이 법으로 금지되어 정당 지지율 여론조사가 존재하지 않는다."
+    trust: 해당없음
+    reference_url: https://en.wikipedia.org/wiki/Politics_of_Saudi_Arabia
+    election: null
+  DE:
+    wiki_page: Opinion_polling_for_the_next_German_federal_election
+    trust: 높음
+    notes: >-
+      pageid 77779249, wikitable 20개. 규칙 파서 실측 통과(pollytix 14–16 Sep 2026).
+      'CDU and CSU'·'Nation-wide CSU' 표는 Union을 CDU/CSU로 쪼갠 변형이라 정당명이
+      갈리므로 heading_exclude로 빼고 표준 Union 표만 쓴다.
+    heading_exclude: ["CDU and CSU", "Nation-wide CSU", "Western Germany", "Eastern Germany"]
+    party_aliases:
+      기독민주·기사연합: ["Union", "CDU/CSU"]
+      기독민주연합: ["CDU"]
+      기독사회연합: ["CSU"]
+      독일을위한대안: ["AfD"]
+      사회민주당: ["SPD"]
+      녹색당: ["Grüne", "Grune", "Greens"]
+      좌파당: ["Linke"]
+      자라바겐크네히트연합: ["BSW"]
+      자유민주당: ["FDP"]
+    election:
+      next_election_date: "2029-03-25"
+      election_type: federal
+      ruling_party_ko: 기독민주·기사연합
+      ruling_lean: center-right
+      second_party_ko: 독일을위한대안
+      system_note: "연방의회 630석을 지역구·정당명부 혼합비례제로 선출하며, 여론조사는 제2투표(정당명부) 지지율을 측정한다."
+      note: "총리 Friedrich Merz(CDU), SPD와 대연정. AfD가 현재 여론조사 1위."
+  FR:
+    wiki_page: Opinion_polling_for_the_2027_French_presidential_election
+    trust: 높음
+    notes: >-
+      **후보 단위** 조사다(정당 단위 아님). 컬럼 헤더가 '성 + 정당약칭' 형태여서
+      규칙 파서는 약칭으로 매핑한다. 총선 여론조사 문서는 존재하지 않음(404 확인).
+    party_aliases:
+      국민연합: ["RN"]
+      굴복하지않는프랑스: ["LFI"]
+      르네상스: ["RE", "ENS"]
+      오리종: ["HOR"]
+      공화당: ["LR"]
+      사회당: ["PS"]
+      플라스퓌블리크: ["PP"]
+      생태주의자들: ["LE"]
+      르콩케트: ["R!", "REC!"]
+      프랑스공산당: ["PCF"]
+    election:
+      next_election_date: "2027-04-18"
+      election_type: presidential
+      ruling_party_ko: 르네상스
+      ruling_lean: center
+      second_party_ko: 국민연합
+      system_note: "대통령을 2회 결선투표제로 선출하며, 여론조사는 후보별 1차 투표 의향과 결선 대결 구도를 측정한다."
+      note: "1차 투표일. 대통령 Macron, 총리 Sébastien Lecornu(2025-09~)."
+  IT:
+    wiki_page: Opinion_polling_for_the_next_Italian_general_election
+    trust: 높음
+    notes: >-
+      pageid 71355617, wikitable 51개. 2행 헤더가 'Parties FdI'·'Coalitions CSX'처럼
+      그룹명과 합쳐지므로 exclude_columns로 연합 합계(CSX/CDX)를 빼야 정당 합계가
+      105%를 넘지 않는다. 약칭이 1글자인 A(행동)·+E(더유럽)는 매핑되지 않고
+      원문 헤더가 그대로 남는다(계약상 허용).
+    exclude_columns: ["CSX", "CDX"]
+    party_aliases:
+      이탈리아의형제들: ["FdI"]
+      민주당: ["PD"]
+      오성운동: ["M5S"]
+      동맹: ["Lega"]
+      전진이탈리아: ["FI"]
+      녹색좌파동맹: ["AVS"]
+      국가의미래: ["FN"]
+      행동: ["A"]
+      이탈리아비바: ["IV"]
+      더유럽: ["+E"]
+      온건파우리: ["NM"]
+    election:
+      next_election_date: "2027-12-22"
+      election_type: general
+      ruling_party_ko: 이탈리아의형제들
+      ruling_lean: right
+      second_party_ko: 민주당
+      system_note: "하원 400석·상원 200석을 로사텔룸 혼합제로 선출하며, 여론조사는 정당 지지율과 CDX/CSX 연합 합계를 함께 측정한다."
+      note: "'늦어도 2027-12-22'. 총리 Giorgia Meloni."
+  GB:
+    wiki_page: Opinion_polling_for_the_next_United_Kingdom_general_election
+    trust: 높음
+    notes: >-
+      pageid 76989984, wikitable 25개. 규칙 파서 실측 통과(Opinium 16–18 Sep 2026).
+      'Ref'=Reform UK가 실제 정당 컬럼이므로 제외 목록에서 별칭 우선 규칙이 필요하다.
+      Scotland/Wales 지역 표는 최신·대량이라 정렬만으로는 밀려나지 않아
+      heading_exclude로 명시 제외한다(좌석 예측 표는 공통 규칙으로 제외됨).
+    heading_exclude: ["Scotland", "Wales", "London", "Northern Ireland"]
+    party_aliases:
+      노동당: ["Lab"]
+      보수당: ["Con"]
+      리폼UK: ["Ref"]
+      자유민주당: ["LD"]
+      녹색당: ["Grn"]
+      스코틀랜드국민당: ["SNP"]
+      플라이드컴리: ["PC"]
+      리스토어브리튼: ["RB"]
+    election:
+      next_election_date: "2029-08-15"
+      election_type: general
+      ruling_party_ko: 노동당
+      ruling_lean: center-left
+      second_party_ko: 보수당
+      system_note: "하원 650석을 소선거구 단순다수제로 선출하며, 여론조사는 전국 정당 투표의향을 측정한다."
+      note: "의석 기준 제1야당은 보수당(121석)이나 여론조사 2위는 리폼UK다. 총리 Andy Burnham(2026-07-20 취임)."
+  CA:
+    wiki_page: Opinion_polling_for_the_46th_Canadian_federal_election
+    trust: 높음
+    notes: >-
+      wikitable 12개. 연도 절 제목이 없고 '선호 총리' 표가 정당 표보다 앞에 나오므로
+      별칭 매핑 신호로 정당 표를 고른다. 퀘벡 등 지역 표가 뒤따라오므로
+      max_tables를 1로 제한한다.
+    max_tables: 1
+    party_aliases:
+      자유당: ["LPC"]
+      보수당: ["CPC"]
+      블록퀘벡당: ["BQ"]
+      신민주당: ["NDP"]
+      녹색당: ["GPC"]
+      캐나다국민당: ["PPC"]
+    election:
+      next_election_date: "2029-10-15"
+      election_type: federal
+      ruling_party_ko: 자유당
+      ruling_lean: center
+      second_party_ko: 보수당
+      system_note: "하원 343석을 소선거구 단순다수제로 선출하며, 여론조사는 전국 정당 투표의향을 측정한다."
+      note: "고정선거일 '늦어도 2029-10-15', 조기 해산 가능. 총리 Mark Carney."
+  AU:
+    wiki_page: Opinion_polling_for_the_next_Australian_federal_election
+    trust: 높음
+    notes: >-
+      wikitable 46개. 헤더가 'Primary vote ALP'처럼 그룹명과 합쳐지므로 토큰 단위
+      별칭 매칭이 필요하고, LIB/NAT를 나누지 않는 조사기관 행은 L/NP 값이 colspan으로
+      복제돼 합계가 120%가 된다(연장 셀 스킵으로 처리). 성별·연령대 분해표는 공통
+      규칙으로, 주·지역 분해표는 heading_exclude로 제외한다. 분해표가 워낙 많아
+      max_tables를 1로 두고 당해 연도 전국 표만 쓴다.
+    max_tables: 1
+    heading_exclude:
+      ["New South Wales", "Victoria", "Queensland", "Western Australia",
+       "South Australia", "Tasmania", "Capital cities", "Provincial", "Rural",
+       "Australia", "India"]
+    party_aliases:
+      호주노동당: ["ALP"]
+      자유국민연합: ["L/NP"]
+      자유당: ["LIB"]
+      국민당: ["NAT"]
+      호주녹색당: ["GRN"]
+      원네이션: ["ONP"]
+    election:
+      next_election_date: "2028-05-20"
+      election_type: federal
+      ruling_party_ko: 호주노동당
+      ruling_lean: center-left
+      second_party_ko: 자유국민연합
+      system_note: "하원 150석을 선호투표제로, 상원 절반을 단기이양식으로 선출하며, 여론조사는 1차 정당지지와 양당선호를 함께 측정한다."
+      note: "'늦어도 2028-05-20'(하원+상원 절반). 총리 Anthony Albanese."
+  IN:
+    wiki_page: Opinion_polling_for_the_next_Indian_general_election
+    trust: 보통
+    notes: >-
+      wikitable 16개. 컬럼이 **정당이 아니라 연합(NDA/INDIA)** 단위이고 값이
+      지지율이 아니라 **예상 의석수**인 표가 많다 — 합계 ≤105 규칙에서 자동 탈락한다.
+      정당 단위 지지율 시계열은 이 소스로 확보되지 않는다.
+    party_aliases:
+      국민민주연합: ["NDA"]
+      인도국민개발포용연합: ["INDIA"]
+      인도인민당: ["BJP"]
+      인도국민회의: ["INC"]
+    election:
+      next_election_date: null
+      election_type: general
+      ruling_party_ko: 인도인민당
+      ruling_lean: right
+      second_party_ko: 인도국민회의
+      system_note: "로크사바 의석을 소선거구 단순다수제로 선출하며, 여론조사는 주로 연합별 예상 의석수와 총리 선호도를 측정한다."
+      note: "위키는 'By May/June 2029'만 명시하고 확정 일정이 없다(의석 수도 선거구 재획정 대기 TBD). 추측하지 않고 null로 둔다."
+  ID:
+    wiki_page: Opinion_polling_for_the_2029_Indonesian_presidential_election
+    trust: 보통
+    notes: >-
+      정당 단위 여론조사 문서가 없다(총선/입법 관련 제목 404 확인). 이 문서는
+      **대통령 후보 단위**이며 헤더가 후보명이다. party_aliases는 후보명→표기로
+      쓰이므로 party_support 해석 시 '후보 지지율'로 읽어야 한다.
+    party_aliases:
+      프라보워수비안토: ["Prabowo Subianto", "Prabowo"]
+      데디물야디: ["Dedi Mulyadi"]
+      아니스바스웨단: ["Anies Baswedan", "Anies"]
+      간자르프라노워: ["Ganjar Pranowo", "Ganjar"]
+      기브란라카부밍: ["Gibran Rakabuming", "Gibran"]
+      아구스유도요노: ["Agus Yudhoyono"]
+    election:
+      next_election_date: null
+      election_type: presidential
+      ruling_party_ko: 그린드라당
+      ruling_lean: right
+      second_party_ko: null
+      system_note: "대통령을 전국 과반과 지역 요건을 갖춘 2회 결선투표제로 선출하며, 여론조사는 후보 개인 선호도를 측정한다."
+      note: "위키는 'By 20 October 2029'(취임 기한)만 명시하고 KPU 투표일 미공표 → null. 정당 단위 표가 없어 second_party도 null."
+  BR:
+    wiki_page: Opinion_polling_for_the_2026_Brazilian_presidential_election
+    trust: 높음
+    notes: "pageid 78460198, wikitable 12개. 헤더가 '후보 성 + 정당' 2단 구조다."
+    party_aliases:
+      노동자당: ["Lula", "PT"]
+      자유당: ["F. Bolsonaro", "PL"]
+      사회민주당: ["Caiado", "PSD"]
+      노보당: ["Zema", "Novo", "NOVO"]
+      아방치: ["Cury", "Avante"]
+    election:
+      next_election_date: "2026-10-04"
+      election_type: general
+      ruling_party_ko: 노동자당
+      ruling_lean: left
+      second_party_ko: 자유당
+      system_note: "대통령을 2회 결선투표제로 선출하며(연방의회·주지사 동시 선거), 여론조사는 1차 투표 후보별 지지율과 결선 구도를 측정한다."
+      note: "1차 투표 2026-10-04 — 선거 직후 문서가 역사 문서로 바뀌므로 2026-10 이후 wiki_page 교체가 필요하다."
+  MX:
+    wiki_page: Opinion_polling_for_the_2027_Mexican_legislative_election
+    trust: 보통
+    notes: "pageid 82080747, wikitable 2개뿐이라 표본이 적고 하우스 이펙트가 크다."
+    party_aliases:
+      모레나: ["Morena", "MORENA"]
+      국민행동당: ["PAN"]
+      제도혁명당: ["PRI"]
+      시민운동: ["MC"]
+      녹색생태당: ["PVEM"]
+      노동당: ["PT"]
+      평화사회건설당: ["PAZ"]
+      소모스: ["SOMOS"]
+    election:
+      next_election_date: "2027-06-06"
+      election_type: legislative
+      ruling_party_ko: 모레나
+      ruling_lean: left
+      second_party_ko: 국민행동당
+      system_note: "하원 500석을 소선거구 300석과 비례대표 200석으로 선출하며, 여론조사는 전국 정당 투표의향을 측정한다."
+      note: "의석 2위는 연립 파트너 PVEM(77석)이나 제1야당·여론조사 2위는 PAN이다. 대통령 Claudia Sheinbaum."
+  AR:
+    wiki_page: 2027_Argentine_general_election
+    trust: 보통
+    notes: >-
+      전용 여론조사 문서가 없어(제목 404 확인) 본 선거 문서의 '#Opinion polls'
+      절에 표가 있다. wikitable 6개 중 3개가 조사 표이고 일부 헤더가 색상 블록이라
+      규칙 파싱 실패 가능 → LLM 보조 경로가 필요하다.
+    party_aliases:
+      자유전진당: ["La Libertad Avanza", "LLA"]
+      조국의힘: ["Homeland Force", "Fuerza Patria", "FP"]
+      공화제안당: ["Republican Proposal", "PRO"]
+      급진시민연합: ["Radical Civic Union", "UCR"]
+      연합주: ["United Provinces", "PU"]
+      좌파노동자전선: ["Workers' Left Front", "FIT-U", "FIT"]
+    election:
+      next_election_date: "2027-10-24"
+      election_type: general
+      ruling_party_ko: 자유전진당
+      ruling_lean: right
+      second_party_ko: 조국의힘
+      system_note: "대통령을 가중 결선투표제로 선출하고 의회 의석을 부분 갱신하며, 여론조사는 대선 후보 선호도와 정당 투표의향을 측정한다."
+      note: "대선 1차 투표일. 대통령 Javier Milei."
+  TR:
+    wiki_page: null
+    trust: 낮음
+    notes: >-
+      **확인 실패**: 영문 위키에 현행 여론조사 표가 있는 문서가 없다.
+      '..._next_Turkish_general_election'은 2023년 문서로 리다이렉트되고,
+      '..._next_Turkish_parliamentary_election'은 빈 스텁 절로 리다이렉트된다.
+      7개 제목 변형 모두 404. 국내 소스 연동이 필요하다(별도 작업).
+    wiki_page_note: "2026-09-20 확인: 사용 가능한 영문 위키 여론조사 문서 없음 → 수집기는 election 문서만 만든다."
+    party_aliases:
+      정의개발당: ["AK PARTY", "AKP", "AK Parti"]
+      예니당: ["YENİ PARTY", "YENİ", "Yeni Parti"]
+      인민평등민주당: ["DEM PARTİ", "DEM"]
+      민족주의운동당: ["MHP"]
+      공화인민당: ["CHP"]
+      좋은당: ["İYİ PARTİ", "İYİ"]
+    election:
+      next_election_date: "2028-05-07"
+      election_type: general
+      ruling_party_ko: 정의개발당
+      ruling_lean: right
+      second_party_ko: 예니당
+      system_note: "대통령과 의회 600석(정당명부 비례대표, 봉쇄조항)을 동시 선출하며, 대통령은 결선투표제로 선출한다."
+      note: "'늦어도 2028-05-07'. 2026-05 사법 판결로 CHP 분당 → Özgür Özel의 예니당(91석)이 제1야당. 조사 신뢰도 낮음."
+  ZA:
+    wiki_page: Next_South_African_general_election
+    trust: 보통
+    notes: >-
+      전용 여론조사 문서가 없어(제목 404 확인) 본 선거 문서의 조사 표 1개(9행)를 쓴다.
+      갱신이 느리고 최신 조사가 Ipsos 2025-12~2026-01이라 400일 필터에 걸릴 수 있다.
+    party_aliases:
+      아프리카민족회의: ["ANC"]
+      민주동맹: ["DA"]
+      움콘토웨시즈웨당: ["MK"]
+      경제자유투사당: ["EFF"]
+      인카타자유당: ["IFP"]
+      애국동맹: ["PA"]
+      액션SA: ["ASA"]
+    election:
+      next_election_date: null
+      election_type: general
+      ruling_party_ko: 아프리카민족회의
+      ruling_lean: center-left
+      second_party_ko: 민주동맹
+      system_note: "국민의회 400석을 전국·주 정당명부 완전비례대표제로 선출하며, 여론조사는 전국 정당 지지율을 측정한다."
+      note: "위키는 'By 2029'만 명시하고 확정 일자가 없어 null. 대통령 Cyril Ramaphosa, DA 등과 국민통합정부(GNU)."
+  RU:
+    wiki_page: Opinion_polling_for_the_2026_Russian_legislative_election
+    trust: 낮음
+    notes: >-
+      pageid 68871251, wikitable 58개. **2026-09-18~20 투표 진행 중**이라 이 문서는
+      곧 역사 문서가 된다 → 2026-10 중 wiki_page 재확인 필요.
+      국가 검열·데이터 제약 절이 문서에 따로 있고 국영 연계 기관이 조사를 주도한다.
+    party_aliases:
+      통합러시아: ["UR"]
+      러시아연방공산당: ["CPRF"]
+      러시아자유민주당: ["LDPR"]
+      공정러시아: ["SR"]
+      새로운사람들: ["NP"]
+      야블로코: ["Yabloko"]
+      로디나: ["Rodina"]
+    election:
+      next_election_date: "2026-09-20"
+      election_type: legislative
+      ruling_party_ko: 통합러시아
+      ruling_lean: right
+      second_party_ko: 러시아연방공산당
+      system_note: "국가두마 450석을 소선거구 225석과 정당명부 비례대표 225석으로 선출하며, 여론조사는 비례 정당지지율을 측정한다."
+      note: "투표 기간 2026-09-18~20(오늘이 최종일). 조사 신뢰도 낮음 — 독립조사와 수치 격차가 크다."
+
+# ------------------------------------------------------------------ 에너지 정책
+# iso → {sources: [IEA 국가 페이지, 정부 에너지 담당 부처·계획 페이지]}
+# IEA URL은 모두 403(Cloudflare 봇 차단)이지만 슬러그는 sitemap-countries.xml로
+# 존재를 확인했다. energy_policy.py는 개별 URL 실패를 건너뛰고 나머지로 진행한다.
+energy_policy:
+  KR:
+    sources:
+      - https://www.iea.org/countries/korea
+      - https://mcee.go.kr/eng/web/main.do
+    notes: "IEA 403(봇 차단, 슬러그 korea 확인). 정부 200 — 2025-09 조직개편으로 기후에너지환경부(MCEE)가 에너지 담당(구 MOTIE 아님)."
+  US:
+    sources:
+      - https://www.iea.org/countries/united-states
+      - https://www.energy.gov/topics/policy
+    notes: "IEA 403(봇 차단). 정부 200 — energy.gov/policy/energy-policy는 404였다."
+  JP:
+    sources:
+      - https://www.iea.org/countries/japan
+      - https://www.enecho.meti.go.jp/en/
+    notes: "IEA 403(봇 차단). 정부 200 — METI 자원에너지청(에너지기본계획)."
+  CN:
+    sources:
+      - https://www.iea.org/countries/china
+      - https://www.nea.gov.cn/
+    notes: "IEA 403(봇 차단). 정부 200 — 국가에너지국(NEA)."
+  EU:
+    sources:
+      - https://www.iea.org/regions/europe
+      - https://energy.ec.europa.eu/strategy/energy-union_en
+    notes: "IEA regions/europe 403(봇 차단, sitemap-other.xml에 존재). regions/european-union은 없다. EU 200."
+  DE:
+    sources:
+      - https://www.iea.org/countries/germany
+      - https://www.bmwk.de/Redaktion/EN/Dossier/energy-transition.html
+    notes: "IEA 403(봇 차단). 정부 200(bundeswirtschaftsministerium.de로 301)."
+  FR:
+    sources:
+      - https://www.iea.org/countries/france
+      - https://www.ecologie.gouv.fr/politiques-publiques/programmations-pluriannuelles-lenergie-ppe
+    notes: "IEA 403(봇 차단). 정부 200 — 슬러그가 복수형(programmations)이며 단수형은 404. PPE3(2026-2035) 2026-02 공표."
+  IT:
+    sources:
+      - https://www.iea.org/countries/italy
+      - https://www.mase.gov.it/
+    notes: "IEA 403(봇 차단). 정부 200 — MASE(/portale/home으로 리다이렉트)."
+  GB:
+    sources:
+      - https://www.iea.org/countries/united-kingdom
+      - https://www.gov.uk/government/organisations/department-for-energy-security-and-net-zero
+    notes: "IEA 403(봇 차단). 정부 200 — DESNZ."
+  CA:
+    sources:
+      - https://www.iea.org/countries/canada
+      - https://natural-resources.canada.ca/energy-sources
+    notes: "IEA 403(봇 차단). 정부 200 — NRCan 신 도메인(nrcan.gc.ca 아님)."
+  AU:
+    sources:
+      - https://www.iea.org/countries/australia
+      - https://www.dcceew.gov.au/energy
+    notes: "IEA 403(봇 차단). 정부 200 — 단 Akamai WAF 때문에 Accept-Encoding 헤더가 없으면 연결이 끊긴다(requests 기본 헤더에는 포함됨)."
+  IN:
+    sources:
+      - https://www.iea.org/countries/india
+      - https://powermin.gov.in/
+    notes: "IEA 403(봇 차단). 정부 200 — 전력부."
+  ID:
+    sources:
+      - https://www.iea.org/countries/indonesia
+      - https://www.esdm.go.id/
+    notes: "IEA 403(봇 차단). 정부 200 — 에너지광물자원부(ESDM)."
+  BR:
+    sources:
+      - https://www.iea.org/countries/brazil
+      - https://www.gov.br/mme/pt-br
+    notes: "IEA 403(봇 차단). 정부 200 — 광업에너지부(MME)."
+  MX:
+    sources:
+      - https://www.iea.org/countries/mexico
+      - https://www.gob.mx/sener
+    notes: "IEA 403(봇 차단). 정부 200 — SENER."
+  AR:
+    sources:
+      - https://www.iea.org/countries/argentina
+      - https://www.argentina.gob.ar/economia/energia
+    notes: "IEA 403(봇 차단). 정부 200 — 에너지청."
+  TR:
+    sources:
+      - https://www.iea.org/countries/turkiye
+      - https://www.epdk.gov.tr/
+    notes: >-
+      IEA 403(봇 차단, 슬러그는 turkiye — turkey 아님). 에너지부 enerji.gov.tr는
+      이 네트워크에서 443/80이 필터링되어 접속 불가(타임아웃) → 대체로 에너지시장
+      규제청(EPDK) 200을 넣었다.
+  SA:
+    sources:
+      - https://www.iea.org/countries/saudi-arabia
+      - https://www.kapsarc.org/
+    notes: >-
+      IEA 403(봇 차단). **미확인**: 공식 에너지부 moenergy.gov.sa는 DNS는 풀리지만
+      443·80이 모두 필터링되어 접속 불가(000, 404 아님). vision2030.gov.sa는 403 WAF.
+      접속 가능한 유일한 에너지 정책 기관으로 KAPSARC(200)를 넣었다 — 정부 공식 문서가
+      아니므로 사람이 재검토해야 한다.
+  ZA:
+    sources:
+      - https://www.iea.org/countries/south-africa
+      - https://www.dee.gov.za/
+    notes: >-
+      IEA 403(봇 차단). 정부 200 — 2025-04-01 신설된 전기에너지부(DEE).
+      energy.gov.za는 TLS 인증서 오류 후 503, dmre.gov.za는 접속 불가라 쓰지 않는다.
+  RU:
+    sources:
+      - https://www.iea.org/countries/russia
+      - https://minenergo.gov.ru/
+    notes: "IEA 403(봇 차단). 정부 200 — 에너지부."

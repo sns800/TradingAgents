@@ -9,7 +9,9 @@
 #  - POST /api/runs/{id}/restart   기존 실행을 새 깊이로 재실행
 #  - POST /api/runs/{id}/cancel     진행 중 실행 취소 (Fargate 태스크 중지)
 #  - DELETE /api/runs/{id}         종료된 실행 삭제 (레코드 + S3 보고서)
-#  - GET  /api/catalog         종목 카탈로그 조회 (검색/업종/정렬/페이지네이션)
+#  - GET  /api/catalog         종목 카탈로그 조회 (검색/업종/세부시장/전 컬럼 정렬/페이지네이션)
+#  - GET  /api/macro/*         G20 매크로 대시보드 조회 (macro_api.py에 위임)
+#  - POST /api/admin/macro/*   매크로 수동 재수집 · AI 문서 검토 (관리자, macro_api.py)
 #
 # 의존성은 boto3(런타임 내장)뿐이라 별도 패키징 없이 zip 한 장으로 배포됩니다.
 # ============================================================
@@ -18,6 +20,7 @@ import gzip
 import json
 import os
 import re
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +30,16 @@ from urllib.parse import unquote
 import boto3
 from botocore.exceptions import ClientError
 
+# G20 매크로 API(macro_api.py)는 같은 zip에 담겨 Lambda 함수 루트에 함께 놓인다.
+# 파일 경로로 직접 로드되는 경우(devserver·테스트)에도 옆 모듈을 찾을 수 있게 자기
+# 디렉터리를 sys.path에 넣고, 매크로 파일이 동봉되지 않은 zip(구버전)에서도 기존 API가
+# 그대로 동작해야 하므로 임포트 실패는 None으로 두고 /api/macro/*만 503으로 답한다.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import macro_api  # noqa: E402  (sys.path 조정 뒤에 임포트해야 함)
+except ImportError:
+    macro_api = None
+
 TABLE_NAME = os.environ["TABLE_NAME"]
 DATA_BUCKET = os.environ["DATA_BUCKET"]
 CLUSTER_ARN = os.environ["CLUSTER_ARN"]
@@ -34,6 +47,9 @@ TASK_DEF = os.environ["TASK_DEF"]
 SUBNET_IDS = os.environ["SUBNET_IDS"].split(",")
 SECURITY_GROUP = os.environ["SECURITY_GROUP"]
 CONTAINER_NAME = os.environ.get("CONTAINER_NAME", "worker")
+# G20 매크로 대시보드용 DynamoDB 테이블 (CONTRACT 10장). 비어 있으면 매크로 미배포로 보고
+# /api/macro/* 를 503으로 답한다 (기존 실행·카탈로그 API는 영향 없음).
+MACRO_TABLE_NAME = os.environ.get("MACRO_TABLE_NAME", "")
 # 동시 실행 상한: Fargate/Bedrock 비용 폭주 방지용 안전장치.
 # 이 env var은 폴백 기본값이고, 실제 상한은 DynamoDB __config__ 항목이 우선한다
 # (관리자가 재배포 없이 조정 가능 — _get_max_active_runs 참고).
@@ -188,6 +204,42 @@ def _load_catalog(market: str):
     return data
 
 
+# 실행 목록에 종목명을 붙이기 위한 ticker -> name 인덱스.
+# 카탈로그 캐시(_load_catalog) 위에 얹은 메모이즈로, 같은 TTL 주기로 재구성한다.
+_name_index_cache: dict = {"index": {}, "loaded_at": 0.0}
+
+
+def _ticker_name_index() -> dict[str, str]:
+    now = time.time()
+    if _name_index_cache["index"] and now - _name_index_cache["loaded_at"] < _CATALOG_CACHE_TTL:
+        return _name_index_cache["index"]
+    index: dict[str, str] = {}
+    for market in CATALOG_MARKETS:
+        data = _load_catalog(market)
+        if not data:
+            continue
+        for item in data.get("items", []):
+            ticker = str(item.get("ticker") or "")
+            name = item.get("name")
+            if not (ticker and name):
+                continue
+            # 일본·중국 종목은 카탈로그 화면과 동일하게 "한국어이름(원문)" 표기
+            name_ko = item.get("name_ko")
+            index[ticker.upper()] = f"{name_ko}({name})" if name_ko else str(name)
+    if index:
+        _name_index_cache["index"] = index
+        _name_index_cache["loaded_at"] = now
+    return _name_index_cache["index"]
+
+
+def _attach_names(views: list[dict]) -> list[dict]:
+    """실행 view에 카탈로그 종목명(name)을 붙인다. 카탈로그에 없으면(특수자산 등) None."""
+    index = _ticker_name_index()
+    for view in views:
+        view["name"] = index.get(str(view.get("ticker") or "").upper())
+    return views
+
+
 def _is_special_asset(ticker: str) -> bool:
     """카탈로그에 없어도 통과시키는 야후 특수자산 패턴 화이트리스트.
 
@@ -287,15 +339,24 @@ def _run_view(item):
     return {k: _plain(item.get(k)) for k in RUN_FIELDS}
 
 
+# 카탈로그 정렬 가능 컬럼: 문자열 컬럼은 소문자 비교, 숫자 컬럼은 값 비교
+_CATALOG_SORT_STR = ("name", "ticker", "market", "sector")
+_CATALOG_SORT_NUM = ("price", "market_cap")
+
+
 def get_catalog(query):
-    """종목 카탈로그 조회: 검색(q)·업종(sector) 필터, 정렬, 50건 페이지네이션."""
+    """종목 카탈로그 조회: 검색(q)·업종(sector)·세부시장(segment) 필터,
+    전 컬럼 정렬, 50건 페이지네이션."""
     market = str(query.get("market") or "").strip().upper()
     if market not in CATALOG_MARKETS:
         return _err(400, f"market 파라미터는 {', '.join(CATALOG_MARKETS)} 중 하나여야 합니다.")
 
     sort = str(query.get("sort") or "name").strip().lower()
-    if sort not in ("name", "price", "market_cap"):
-        return _err(400, "sort는 name, price, market_cap 중 하나여야 합니다.")
+    if sort not in _CATALOG_SORT_STR + _CATALOG_SORT_NUM:
+        return _err(
+            400,
+            f"sort는 {', '.join(_CATALOG_SORT_STR + _CATALOG_SORT_NUM)} 중 하나여야 합니다.",
+        )
     order = str(query.get("order") or "asc").strip().lower()
     if order not in ("asc", "desc"):
         return _err(400, "order는 asc 또는 desc여야 합니다.")
@@ -311,27 +372,40 @@ def get_catalog(query):
         return _err(404, "카탈로그가 아직 생성되지 않았습니다. 잠시 후 다시 시도해 주세요.")
 
     items = list(data.get("items", []))
-    # 업종 목록은 필터 적용 전, 해당 시장 전체 기준
+    # 업종·세부시장(거래소/보드) 목록은 필터 적용 전, 해당 시장 전체 기준
     sectors = sorted({str(i["sector"]) for i in items if i.get("sector")})
+    segments = sorted({str(i["market"]) for i in items if i.get("market")})
 
     q = str(query.get("q") or "").strip().lower()
     if q:
         items = [
             i for i in items
-            if q in str(i.get("ticker") or "").lower() or q in str(i.get("name") or "").lower()
+            if q in str(i.get("ticker") or "").lower()
+            or q in str(i.get("name") or "").lower()
+            or q in str(i.get("name_ko") or "").lower()
         ]
     sector = str(query.get("sector") or "").strip()
     if sector:
         items = [i for i in items if i.get("sector") == sector]
+    segment = str(query.get("segment") or "").strip()
+    if segment:
+        items = [i for i in items if i.get("market") == segment]
 
     reverse = order == "desc"
     if sort == "name":
-        items.sort(key=lambda i: str(i.get("name") or i.get("ticker") or "").lower(), reverse=reverse)
+        # 화면에는 한국어 이름(name_ko)이 우선 표시되므로 정렬도 표시값 기준
+        items.sort(
+            key=lambda i: str(i.get("name_ko") or i.get("name") or i.get("ticker") or "").lower(),
+            reverse=reverse,
+        )
     else:
-        # 숫자 정렬: 값이 없는(null) 종목은 정렬 방향과 무관하게 항상 뒤로
+        # 값이 없는(null) 종목은 정렬 방향과 무관하게 항상 뒤로
         present = [i for i in items if i.get(sort) is not None]
         missing = [i for i in items if i.get(sort) is None]
-        present.sort(key=lambda i: i[sort], reverse=reverse)
+        if sort in _CATALOG_SORT_NUM:
+            present.sort(key=lambda i: i[sort], reverse=reverse)
+        else:
+            present.sort(key=lambda i: str(i[sort]).lower(), reverse=reverse)
         items = present + missing
 
     total = len(items)
@@ -342,7 +416,9 @@ def get_catalog(query):
         "page": page,
         "page_size": CATALOG_PAGE_SIZE,
         "generated_at": data.get("generated_at"),
+        "enriched_at": data.get("enriched_at"),
         "sectors": sectors,
+        "segments": segments,
     })
 
 
@@ -594,7 +670,7 @@ def list_runs():
     # __config__는 실행이 아닌 런타임 설정 항목이므로 목록에서 제외한다
     items = [i for i in items if i.get("run_id") != CONFIG_RUN_ID]
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return _resp(200, {"runs": [_run_view(i) for i in items[:50]]})
+    return _resp(200, {"runs": _attach_names([_run_view(i) for i in items[:50]])})
 
 
 def get_run(run_id):
@@ -602,7 +678,7 @@ def get_run(run_id):
     if not item:
         return _err(404, "해당 실행을 찾을 수 없습니다.")
     reports = [str(r) for r in item.get("reports", [])]
-    return _resp(200, {"run": _run_view(item), "reports": reports})
+    return _resp(200, {"run": _attach_names([_run_view(item)])[0], "reports": reports})
 
 
 def get_report(run_id, name):
@@ -827,6 +903,18 @@ def handle_admin(event, method, path):
     if not check_admin(event):
         return _err(403, "관리자 권한이 필요합니다.")
 
+    # G20 매크로 관리자 API (수동 재수집 · AI 문서 검토) — macro_api.py에 위임
+    if path.startswith("/api/admin/macro/"):
+        api = _macro_api()
+        if api is None:
+            return _err(503, "매크로 기능이 배포되지 않았습니다.")
+        body, body_error = _parse_body(event)
+        if body_error:
+            return body_error
+        claims = _token_claims(event)
+        actor = str(claims.get("email") or claims.get("username") or "")
+        return api.handle_admin(method, path, body, actor)
+
     if method == "GET" and path == "/api/admin/config":
         return get_config()
     if method == "POST" and path == "/api/admin/config":
@@ -864,6 +952,61 @@ def handle_admin(event, method, path):
     return _err(404, "존재하지 않는 API 경로입니다.")
 
 
+# ---------------- G20 매크로 대시보드 (/api/macro/*) ----------------
+# 구현은 macro_api.py(같은 zip)에 있고, 여기서는 지연 초기화와 위임만 담당한다.
+_macro_api_instance = None
+
+
+def _run_worker_command(command):
+    """워커 이미지를 주어진 command로 1회 실행하고 태스크 ARN을 돌려준다.
+
+    _start_run의 RunTask와 같은 클러스터·태스크 정의·네트워크 설정을 쓰고
+    containerOverrides.command만 교체한다(카탈로그·매크로 배치가 공용 이미지).
+    실패 시 예외를 던지므로 호출자가 사용자 메시지로 바꾼다.
+    """
+    result = ecs.run_task(
+        cluster=CLUSTER_ARN,
+        taskDefinition=TASK_DEF,
+        launchType="FARGATE",
+        count=1,
+        networkConfiguration={
+            "awsvpcConfiguration": {
+                "subnets": SUBNET_IDS,
+                "securityGroups": [SECURITY_GROUP],
+                "assignPublicIp": "ENABLED",
+            }
+        },
+        overrides={
+            "containerOverrides": [{
+                "name": CONTAINER_NAME,
+                "command": list(command),
+            }]
+        },
+    )
+    failures = result.get("failures") or []
+    if failures:
+        raise RuntimeError(failures[0].get("reason", "RunTask failed"))
+    tasks = result.get("tasks") or []
+    if not tasks or not tasks[0].get("taskArn"):
+        raise RuntimeError("RunTask가 태스크를 반환하지 않았습니다.")
+    return tasks[0]["taskArn"]
+
+
+def _macro_api():
+    """MacroApi 인스턴스를 지연 생성해 컨테이너에 캐시한다 (미배포면 None)."""
+    global _macro_api_instance
+    if _macro_api_instance is None:
+        if macro_api is None or not MACRO_TABLE_NAME:
+            return None
+        _macro_api_instance = macro_api.MacroApi(
+            table=dynamodb.Table(MACRO_TABLE_NAME),
+            s3=s3,
+            bucket=DATA_BUCKET,
+            run_task=_run_worker_command,
+        )
+    return _macro_api_instance
+
+
 def _parse_body(event):
     """POST 본문을 JSON으로 파싱한다. (body, 오류 응답) 튜플을 반환한다."""
     try:
@@ -888,6 +1031,13 @@ def handler(event, _context):
         # 관리자 전용 API (계정 관리 · 동시 한도 설정) — 자체 admin 게이트 통과 필요
         if path.startswith("/api/admin/"):
             return handle_admin(event, method, path)
+
+        # G20 매크로 대시보드 조회 API — macro_api.py에 위임
+        if path.startswith("/api/macro/"):
+            api = _macro_api()
+            if api is None:
+                return _err(503, "매크로 기능이 배포되지 않았습니다.")
+            return api.handle(method, path, query)
 
         if method == "POST" and path == "/api/runs":
             body, body_error = _parse_body(event)

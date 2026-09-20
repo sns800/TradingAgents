@@ -58,16 +58,18 @@ def _gz_catalog(market: str, items: list[dict]) -> bytes:
     payload = {
         "market": market,
         "generated_at": "2026-07-31T00:00:00+00:00",
+        "enriched_at": "2026-07-31T01:00:00+00:00",
         "count": len(items),
         "items": items,
     }
     return gzip.compress(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
 
-def _item(ticker, name, sector=None, price=None, market_cap=None, market="US"):
+def _item(ticker, name, sector=None, price=None, market_cap=None, market="US", name_ko=None):
     return {
         "ticker": ticker,
         "name": name,
+        "name_ko": name_ko,
         "market": market,
         "sector": sector,
         "industry": None,
@@ -78,17 +80,20 @@ def _item(ticker, name, sector=None, price=None, market_cap=None, market="US"):
 
 
 _US_ITEMS = [
-    _item("AAPL", "Apple Inc.", "Technology", price=230.5, market_cap=3_500_000_000_000),
-    _item("MSFT", "Microsoft Corporation", "Technology", price=420.0, market_cap=3_100_000_000_000),
-    _item("BRK-B", "Berkshire Hathaway Inc.", "Financial Services", price=470.0, market_cap=1_000_000_000_000),
-    _item("XOM", "Exxon Mobil Corporation", "Energy", price=110.0, market_cap=440_000_000_000),
-    _item("ZETA", "Zeta Holdings", "Technology", price=None, market_cap=None),
+    _item("AAPL", "Apple Inc.", "Technology", price=230.5, market_cap=3_500_000_000_000, market="NASDAQ"),
+    _item("MSFT", "Microsoft Corporation", "Technology", price=420.0, market_cap=3_100_000_000_000, market="NASDAQ"),
+    _item("BRK-B", "Berkshire Hathaway Inc.", "Financial Services", price=470.0, market_cap=1_000_000_000_000, market="NYSE"),
+    _item("XOM", "Exxon Mobil Corporation", "Energy", price=110.0, market_cap=440_000_000_000, market="NYSE"),
+    _item("ZETA", "Zeta Holdings", None, price=None, market_cap=None, market="NASDAQ"),
 ]
 _KR_ITEMS = [
     _item("005930.KS", "삼성전자", "Technology", price=79000, market_cap=470_000_000_000, market="KR"),
 ]
 _JP_ITEMS = [
-    _item("7203.T", "Toyota Motor Corporation", "Consumer Cyclical", price=2800, market_cap=370_000_000_000, market="JP"),
+    _item("7203.T", "Toyota Motor Corporation", "Consumer Cyclical", price=2800,
+          market_cap=370_000_000_000, market="JP", name_ko="토요타자동차"),
+    _item("6758.T", "Sony Group Corporation", "Consumer Cyclical", price=3600,
+          market_cap=140_000_000_000, market="JP", name_ko="소니그룹"),
 ]
 
 
@@ -160,6 +165,8 @@ def test_catalog_search_by_name_and_ticker(api):
     assert body["page"] == 1
     assert body["page_size"] == 50
     assert body["generated_at"] == "2026-07-31T00:00:00+00:00"
+    # 시세·시총 조회 시점(enriched_at)이 응답으로 전달된다
+    assert body["enriched_at"] == "2026-07-31T01:00:00+00:00"
     # 업종 목록은 필터와 무관하게 해당 시장 전체의 distinct 정렬 목록
     assert body["sectors"] == ["Energy", "Financial Services", "Technology"]
 
@@ -184,6 +191,55 @@ def test_catalog_sort_price_desc_nulls_last(api):
     assert tickers[:4] == ["BRK-B", "MSFT", "AAPL", "XOM"]
     # price가 null인 종목은 정렬 방향과 무관하게 맨 뒤
     assert tickers[-1] == "ZETA"
+
+
+def test_catalog_sort_ticker(api):
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "US", "sort": "ticker"})
+    assert status == 200
+    assert [i["ticker"] for i in body["items"]] == ["AAPL", "BRK-B", "MSFT", "XOM", "ZETA"]
+
+
+def test_catalog_sort_sector_nulls_last(api):
+    # 문자열 컬럼도 값이 없는(null) 종목은 정렬 방향과 무관하게 맨 뒤
+    status, body = _call(api, "GET", "/api/catalog",
+                         query={"market": "US", "sort": "sector", "order": "asc"})
+    assert status == 200
+    tickers = [i["ticker"] for i in body["items"]]
+    assert tickers == ["XOM", "BRK-B", "AAPL", "MSFT", "ZETA"]
+
+    status, body = _call(api, "GET", "/api/catalog",
+                         query={"market": "US", "sort": "sector", "order": "desc"})
+    tickers = [i["ticker"] for i in body["items"]]
+    assert tickers[:2] == ["AAPL", "MSFT"]  # Technology 먼저 (stable sort로 원래 순서 유지)
+    assert tickers[-1] == "ZETA"
+
+
+def test_catalog_sort_market(api):
+    status, body = _call(api, "GET", "/api/catalog",
+                         query={"market": "US", "sort": "market", "order": "desc"})
+    assert status == 200
+    markets = [i["market"] for i in body["items"]]
+    assert markets == ["NYSE", "NYSE", "NASDAQ", "NASDAQ", "NASDAQ"]
+
+
+def test_catalog_invalid_sort_rejected(api):
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "US", "sort": "volume"})
+    assert status == 400
+    assert "sort" in body["error"]
+
+
+def test_catalog_segment_filter_and_list(api):
+    # 세부시장(거래소/보드) 목록은 필터와 무관하게 해당 시장 전체 기준
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "US"})
+    assert status == 200
+    assert body["segments"] == ["NASDAQ", "NYSE"]
+
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "US", "segment": "NYSE"})
+    assert status == 200
+    assert sorted(i["ticker"] for i in body["items"]) == ["BRK-B", "XOM"]
+    assert body["total"] == 2
+    # segments 목록은 필터를 걸어도 전체 기준으로 유지
+    assert body["segments"] == ["NASDAQ", "NYSE"]
 
 
 def test_catalog_default_sort_is_name_asc(api):
@@ -234,6 +290,63 @@ def test_catalog_requires_auth(api):
     event["headers"] = {}
     res = api.handler(event, None)
     assert res["statusCode"] == 401
+
+
+# ---------------- 한국어 종목명(name_ko) ----------------
+
+def test_catalog_search_matches_korean_name(api):
+    # 검색어가 한국어 이름(name_ko)에도 걸린다 (원본 name은 영어/원문 그대로)
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "JP", "q": "토요타"})
+    assert status == 200
+    assert [i["ticker"] for i in body["items"]] == ["7203.T"]
+    assert body["items"][0]["name"] == "Toyota Motor Corporation"  # 원본 유지
+    assert body["items"][0]["name_ko"] == "토요타자동차"
+
+
+def test_catalog_name_sort_prefers_korean_name(api):
+    # 이름 정렬은 표시값(name_ko 우선) 기준: 소니그룹 < 토요타자동차
+    status, body = _call(api, "GET", "/api/catalog", query={"market": "JP", "sort": "name"})
+    assert status == 200
+    assert [i["ticker"] for i in body["items"]] == ["6758.T", "7203.T"]
+
+
+# ---------------- 실행 목록/상세의 종목명(name) 보강 ----------------
+
+def test_list_runs_includes_catalog_name(api):
+    api.table.scan.return_value = {"Items": [
+        {"run_id": "r1", "ticker": "AAPL", "status": "completed",
+         "created_at": "2026-07-30T00:00:00+00:00"},
+        {"run_id": "r2", "ticker": "BTC-USD", "status": "completed",
+         "created_at": "2026-07-29T00:00:00+00:00"},
+        {"run_id": "r3", "ticker": "005930.KS", "status": "running",
+         "created_at": "2026-07-28T00:00:00+00:00"},
+    ]}
+    status, body = _call(api, "GET", "/api/runs")
+    assert status == 200
+    by_id = {r["run_id"]: r for r in body["runs"]}
+    assert by_id["r1"]["name"] == "Apple Inc."
+    assert by_id["r3"]["name"] == "삼성전자"  # 다른 시장 카탈로그에서도 찾는다
+    assert by_id["r2"]["name"] is None  # 특수자산(암호화폐)은 카탈로그에 없음
+
+
+def test_list_runs_name_uses_korean_format(api):
+    # 일본·중국 종목은 실행 목록에서도 "한국어이름(원문)" 표기
+    api.table.scan.return_value = {"Items": [
+        {"run_id": "r9", "ticker": "7203.T", "status": "completed",
+         "created_at": "2026-07-30T00:00:00+00:00"},
+    ]}
+    status, body = _call(api, "GET", "/api/runs")
+    assert status == 200
+    assert body["runs"][0]["name"] == "토요타자동차(Toyota Motor Corporation)"
+
+
+def test_get_run_includes_catalog_name(api):
+    api.table.get_item.return_value = {"Item": {
+        "run_id": "abc123def456", "ticker": "MSFT", "status": "completed",
+    }}
+    status, body = _call(api, "GET", "/api/runs/abc123def456")
+    assert status == 200
+    assert body["run"]["name"] == "Microsoft Corporation"
 
 
 # ---------------- POST /api/runs 티커 검증 ----------------

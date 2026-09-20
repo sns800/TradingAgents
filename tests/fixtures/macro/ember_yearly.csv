@@ -1,0 +1,67 @@
+Area,ISO 3 code,Year,Area type,Electricity source,Is aggregated source,Generation (TWh),Generation YoY change (TWh),Generation YoY change (%),Share of generation (%),Share of generation YoY change (% points),Capacity (GW),Emissions (MtCO2e),Emissions YoY change (MtCO2e),Emissions YoY change (%),Share of emissions (%),Emissions intensity (gCO2e/kWh),Continent,Ember region,EU member,OECD member,G20 member,G7 member,ASEAN member
+EU,,2024,Region,Solar,False,307.26,53.22,20.949,11.086,1.712,310.11,14.601,2.529,20.949,2.489,47.52,,,False,False,True,False,False
+EU,,2024,Region,Wind,False,489.338,11.278,2.359,17.656,0.017,231.15,6.062,0.145,2.451,1.033,12.388,,,False,False,True,False,False
+EU,,2024,Region,Hydro,False,369.68,39.24,11.875,13.338,1.145,130.86,8.784,0.933,11.884,1.497,23.761,,,False,False,True,False,False
+EU,,2024,Region,Bioenergy,False,156.85,0.01,0.006,5.659,-0.128,30.58,33.911,0.002,0.006,5.781,216.2,,,False,False,True,False,False
+EU,,2024,Region,Other renewables,False,6.68,-0.04,-0.595,0.241,-0.007,4.31,0.251,-0.002,-0.791,0.043,37.575,,,False,False,True,False,False
+EU,,2024,Region,Nuclear,False,649.55,29.95,4.834,23.437,0.575,97.12,3.134,0.144,4.816,0.534,4.825,,,False,False,True,False,False
+EU,,2024,Region,Coal,False,271.83,-46.76,-14.677,9.808,-1.947,95.29,264.256,-44.935,-14.533,45.05,972.137,,,False,False,True,False,False
+EU,,2024,Region,Gas,False,431.23,-23.59,-5.187,15.559,-1.223,199.55,196.952,-10.558,-5.088,33.576,456.721,,,False,False,True,False,False
+EU,,2024,Region,Other fossil,False,89.11,-1.97,-2.163,3.215,-0.146,32.28,58.634,-1.297,-2.164,9.996,657.996,,,False,False,True,False,False
+EU,,2024,Region,Net imports,False,-12.31,-11.84,2519.149,-0.444,-0.427,,0.0,0.0,,0.0,0.0,,,False,False,True,False,False
+EU,,2024,Region,Wind and solar,True,796.598,64.498,8.81,28.742,1.729,541.26,20.663,2.674,14.865,3.523,25.939,,,False,False,True,False,False
+EU,,2024,Region,"Hydro, bioenergy and other renewables",True,533.21,39.21,7.937,19.239,1.011,165.75,42.946,0.933,2.221,7.321,80.542,,,False,False,True,False,False
+EU,,2024,Region,Renewables,True,1329.808,103.708,8.458,47.981,2.741,707.01,63.609,3.607,6.011,10.844,47.833,,,False,False,True,False,False
+EU,,2024,Region,Clean,True,1979.358,133.658,7.242,71.418,3.316,804.13,66.743,3.751,5.955,11.378,33.72,,,False,False,True,False,False
+EU,,2024,Region,Fossil,True,792.17,-72.32,-8.366,28.582,-3.316,327.12,519.842,-56.79,-9.849,88.622,656.225,,,False,False,True,False,False
+EU,,2024,Region,Total generation,True,2771.528,61.338,2.263,100.0,0.0,1131.25,586.585,-53.039,-8.292,100.0,211.647,,,False,False,True,False,False
+EU,,2024,Region,Demand,True,2759.218,49.498,1.827,99.556,-0.427,,,,,,,,,False,False,True,False,False
+EU,,2025,Region,Solar,False,366.048,58.788,19.133,13.081,1.995,366.39,17.395,2.794,19.136,2.962,47.521,,,False,False,True,False,False
+EU,,2025,Region,Wind,False,479.506,-9.832,-2.009,17.135,-0.521,243.43,5.941,-0.121,-1.996,1.012,12.39,,,False,False,True,False,False
+EU,,2025,Region,Hydro,False,325.723,-43.957,-11.891,11.64,-1.698,131.69,7.739,-1.045,-11.897,1.318,23.759,,,False,False,True,False,False
+EU,,2025,Region,Bioenergy,False,157.32,0.47,0.3,5.622,-0.037,31.04,34.013,0.102,0.301,5.791,216.203,,,False,False,True,False,False
+EU,,2025,Region,Other renewables,False,7.459,0.779,11.662,0.267,0.026,4.39,0.281,0.03,11.952,0.048,37.673,,,False,False,True,False,False
+EU,,2025,Region,Nuclear,False,652.297,2.747,0.423,23.31,-0.127,95.32,3.147,0.013,0.415,0.536,4.824,,,False,False,True,False,False
+EU,,2025,Region,Coal,False,258.319,-13.511,-4.97,9.231,-0.577,90.14,250.512,-13.744,-5.201,42.653,969.778,,,False,False,True,False,False
+EU,,2025,Region,Gas,False,470.142,38.912,9.023,16.8,1.241,204.24,214.608,17.656,8.965,36.54,456.475,,,False,False,True,False,False
+EU,,2025,Region,Other fossil,False,81.601,-7.509,-8.427,2.916,-0.299,32.89,53.693,-4.941,-8.427,9.142,657.994,,,False,False,True,False,False
+EU,,2025,Region,Net imports,False,-23.98,-11.67,94.801,-0.857,-0.413,,0.0,0.0,,0.0,0.0,,,False,False,True,False,False
+EU,,2025,Region,Wind and solar,True,845.554,48.956,6.146,30.215,1.473,609.8199999999999,23.336,2.673,12.936,3.973,27.598,,,False,False,True,False,False
+EU,,2025,Region,"Hydro, bioenergy and other renewables",True,490.502,-42.708,-8.01,17.528,-1.711,167.11999999999998,42.032,-0.914,-2.128,7.156,85.692,,,False,False,True,False,False
+EU,,2025,Region,Renewables,True,1336.056,6.248,0.47,47.743,-0.238,776.94,65.368,1.759,2.765,11.13,48.926,,,False,False,True,False,False
+EU,,2025,Region,Clean,True,1988.353,8.995,0.454,71.053,-0.365,872.26,68.516,1.773,2.656,11.666,34.459,,,False,False,True,False,False
+EU,,2025,Region,Fossil,True,810.062,17.892,2.259,28.947,0.365,327.27,518.814,-1.028,-0.198,88.334,640.462,,,False,False,True,False,False
+EU,,2025,Region,Total generation,True,2798.415,26.887,0.97,100.0,0.0,1199.53,587.329,0.744,0.127,100.0,209.879,,,False,False,True,False,False
+EU,,2025,Region,Demand,True,2774.435,15.217,0.551,99.143,-0.413,,,,,,,,,False,False,True,False,False
+South Korea,KOR,2024,Country or economy,Solar,False,32.72,-0.52,-1.564,5.232,-0.151,26.68,1.555,-0.025,-1.582,0.598,47.524,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Wind,False,3.36,-0.03,-0.885,0.537,-0.012,2.26,0.039,0.0,0.0,0.015,11.607,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Hydro,False,4.3,0.58,15.591,0.688,0.086,1.82,0.102,0.014,15.909,0.039,23.721,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Bioenergy,False,20.34,1.62,8.654,3.252,0.22,2.69,4.398,0.351,8.673,1.692,216.224,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Nuclear,False,188.75,8.26,4.576,30.182,0.952,26.05,0.988,0.043,4.55,0.38,5.234,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Coal,False,190.78,-10.56,-5.245,30.506,-2.1,41.19,156.55,-8.701,-5.265,60.228,820.579,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Gas,False,178.35,8.74,5.153,28.519,1.051,50.26,91.834,4.5,5.153,35.331,514.909,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Other fossil,False,6.78,-0.2,-2.865,1.084,-0.046,3.49,4.461,-0.132,-2.874,1.716,657.965,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Net imports,False,0.0,0.0,,0.0,0.0,,0.0,0.0,,0.0,,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Wind and solar,True,36.08,-0.55,-1.502,5.769,-0.163,28.94,1.594,-0.025,-1.544,0.613,44.18,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,"Hydro, bioenergy and other renewables",True,24.64,2.2,9.804,3.94,0.306,4.51,4.5,0.364,8.801,1.731,182.63,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Renewables,True,60.72,1.65,2.793,9.709,0.143,33.45,6.093,0.339,5.892,2.344,100.346,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Clean,True,249.47,9.91,4.137,39.891,1.095,59.5,7.082,0.382,5.701,2.725,28.388,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Fossil,True,375.91,-2.02,-0.534,60.109,-1.095,94.93999999999998,252.845,-4.333,-1.685,97.275,672.621,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Total generation,True,625.38,7.89,1.278,100.0,0.0,154.43999999999997,259.927,-3.95,-1.497,100.0,415.63,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2024,Country or economy,Demand,True,625.38,7.89,1.278,100.0,0.0,,,,,,,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Solar,False,37.798,5.078,15.52,6.051,0.819,30.35,1.796,0.241,15.498,0.689,47.516,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Wind,False,3.654,0.294,8.75,0.585,0.048,2.45,0.042,0.003,7.692,0.016,11.494,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Hydro,False,3.804,-0.496,-11.535,0.609,-0.079,1.83,0.09,-0.012,-11.765,0.035,23.659,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Bioenergy,False,19.681,-0.659,-3.24,3.151,-0.101,2.71,4.255,-0.143,-3.251,1.633,216.198,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Nuclear,False,184.67,-4.08,-2.162,29.563,-0.619,26.05,0.967,-0.021,-2.126,0.371,5.236,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Coal,False,194.517,3.737,1.959,31.139,0.633,41.74,159.591,3.041,1.943,61.249,820.448,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Gas,False,174.584,-3.766,-2.112,27.948,-0.571,50.26,89.895,-1.939,-2.111,34.501,514.91,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Other fossil,False,5.964,-0.816,-12.035,0.955,-0.129,3.49,3.924,-0.537,-12.038,1.506,657.948,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Net imports,False,0.0,0.0,,0.0,0.0,,0.0,0.0,,0.0,,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Wind and solar,True,41.452,5.372,14.889,6.636,0.867,32.800000000000004,1.838,0.244,15.307,0.705,44.34,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,"Hydro, bioenergy and other renewables",True,23.485,-1.155,-4.688,3.76,-0.18,4.54,4.345,-0.155,-3.444,1.668,185.012,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Renewables,True,64.937,4.217,6.945,10.395,0.686,37.34,6.184,0.091,1.494,2.373,95.231,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Clean,True,249.607,0.137,0.055,39.958,0.067,63.39,7.151,0.069,0.974,2.744,28.649,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Fossil,True,375.065,-0.845,-0.225,60.042,-0.067,95.49,253.41,0.565,0.223,97.255,675.643,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Total generation,True,624.671,-0.709,-0.113,100.0,0.0,158.88,260.561,0.634,0.244,100.0,417.117,Asia,Asia,False,True,True,False,False
+South Korea,KOR,2025,Country or economy,Demand,True,624.671,-0.709,-0.113,100.0,0.0,,,,,,,Asia,Asia,False,True,True,False,False

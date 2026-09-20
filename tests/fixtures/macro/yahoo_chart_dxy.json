@@ -1,0 +1,37 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "DX-Y.NYB",
+     "gmtoffset": -14400,
+     "exchangeTimezoneName": "America/New_York",
+     "dataGranularity": "1d",
+     "regularMarketTime": 1789765199
+    },
+    "timestamp": [
+     1789444800,
+     1789531200,
+     1789617600,
+     1789704000,
+     1789876800
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "close": [
+        99.6500015258789,
+        100.30999755859375,
+        100.22000122070312,
+        100.22000122070312,
+        null
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}

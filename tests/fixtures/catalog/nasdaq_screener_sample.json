@@ -1,0 +1,17 @@
+{
+  "data": {
+    "filters": null,
+    "table": null,
+    "rows": [
+      {"symbol": "AAPL", "name": "Apple Inc. Common Stock", "lastsale": "$229.35", "sector": "Technology", "industry": "Computer Manufacturing"},
+      {"symbol": "MSFT", "name": "Microsoft Corporation Common Stock", "lastsale": "$420.00", "sector": "Technology", "industry": "Computer Software: Prepackaged Software"},
+      {"symbol": "A", "name": "Agilent Technologies Inc. Common Stock", "lastsale": "$120.00", "sector": "Industrials", "industry": "Biotechnology: Laboratory Analytical Instruments"},
+      {"symbol": "IBM", "name": "International Business Machines Corporation Common Stock", "lastsale": "$250.00", "sector": "Technology", "industry": "Computer Manufacturing"},
+      {"symbol": "BRK/A", "name": "Berkshire Hathaway Inc. Class A Common Stock", "lastsale": "$700000.00", "sector": "", "industry": ""},
+      {"symbol": "HEI/A", "name": "HEICO Corporation Class A Common Stock", "lastsale": "$200.00", "sector": "Industrials", "industry": "Aerospace"},
+      {"symbol": "ABR^D", "name": "Arbor Realty Trust Preferred Series D", "lastsale": "$25.00", "sector": "Finance", "industry": "REIT"}
+    ]
+  },
+  "message": null,
+  "status": {"rCode": 200, "bCodeMessage": null, "developerMessage": null}
+}

@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G20 매크로 — 화면 목업 · TradingAgents 분석 대시보드</title>
+<style>
+/* ===== 기존 stock.happymstn.com 테마 변수 (webui/frontend/style.css와 동일) ===== */
+:root {
+  --bg: #0d1117; --bg-elevated: #161b22; --bg-hover: #1c2330; --border: #2d333b;
+  --text: #e6edf3; --text-muted: #8b949e; --accent: #388bfd; --accent-hover: #58a6ff;
+  --green: #3fb950; --green-bg: rgba(63,185,80,.15); --red: #f85149; --red-bg: rgba(248,81,73,.15);
+  --yellow: #d29922; --yellow-bg: rgba(210,153,34,.15); --blue: #388bfd; --blue-bg: rgba(56,139,253,.15);
+  --gray: #8b949e; --gray-bg: rgba(139,148,158,.15); --radius: 10px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* ===== 데이터 색 역할 (다크 표면 #161b22 기준 검증 통과) ===== */
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --other:#8b949e; --grid:#2c2c2a; --axis:#383835;
+  --neg3:#1c5cab; --neg2:#3987e5; --neg1:#86b6ef; --neu:#2d333b; --pos1:#f0a070; --pos2:#d95926; --pos3:#a3401c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.5; }
+a { color: var(--accent-hover); }
+.site-header { background: var(--bg-elevated); border-bottom: 1px solid var(--border); padding: 16px 0; }
+.header-inner { max-width: 1180px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.site-header h1 { margin: 0; font-size: 1.3rem; font-weight: 700; }
+.header-user { margin-left: auto; color: var(--text-muted); font-size: .85rem; display: flex; gap: 10px; align-items: center; }
+.container { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px; font-size: .76rem; font-weight: 600; white-space: nowrap; }
+.badge-warning { background: var(--yellow-bg); color: var(--yellow); }
+.badge-gray { background: var(--gray-bg); color: var(--gray); }
+.badge-blue { background: var(--blue-bg); color: var(--accent-hover); }
+.badge-green { background: var(--green-bg); color: var(--green); }
+.badge-red { background: var(--red-bg); color: var(--red); }
+.app-nav { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.nav-tab { display: inline-block; padding: 8px 18px; color: var(--text-muted); text-decoration: none; font-size: .95rem; font-weight: 600; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.nav-tab.active { color: var(--accent-hover); border-bottom-color: var(--accent); }
+.macro-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.macro-head h2 { margin: 0; font-size: 1.15rem; }
+.sub-nav { display: inline-flex; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 3px; gap: 2px; }
+.sub-nav button, .seg button { background: transparent; border: none; color: var(--text-muted); font: inherit; font-size: .88rem; font-weight: 600; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+.sub-nav button.active, .seg button.active { background: var(--blue-bg); color: var(--accent-hover); }
+.sub-nav button:hover, .seg button:hover { color: var(--text); }
+.filter-row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin: 14px 0 18px; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); }
+.filter { display: flex; align-items: center; gap: 8px; font-size: .82rem; color: var(--text-muted); font-weight: 600; }
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px; }
+.seg button { padding: 4px 10px; font-size: .82rem; }
+.filter-row .asof { margin-left: auto; font-family: var(--mono); font-size: .8rem; color: var(--text-muted); }
+.card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 18px; }
+.card h3 { margin: 0 0 12px; font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.card h3 .sub { color: var(--text-muted); font-weight: 500; font-size: .82rem; }
+.card h3 .right { margin-left: auto; display: flex; gap: 6px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; }
+@media (max-width: 900px) { .grid2, .overview-grid, .grid3, .grid4 { grid-template-columns: 1fr; } .sm-grid { grid-template-columns: repeat(2,1fr) !important; } }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+table.tbl { width: 100%; border-collapse: collapse; }
+table.tbl th, table.tbl td { padding: 7px 10px; font-size: .86rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.tbl th { background: var(--bg); color: var(--text-muted); font-size: .74rem; font-weight: 600; position: sticky; top: 0; }
+table.tbl th.num, table.tbl td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+table.tbl tr:hover td { background: var(--bg-hover); }
+/* 히트맵 */
+table.heat td.cell { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; cursor: pointer; padding: 6px 10px; border-left: 2px solid var(--bg-elevated); font-size: .84rem; }
+table.heat td.cell:hover, table.heat td.cell:focus { outline: 2px solid var(--text); outline-offset: -2px; }
+table.heat td.cell.ink-dark { color: #0d1117; }
+table.heat th.country, table.heat td.country { position: sticky; left: 0; background: var(--bg-elevated); z-index: 1; font-weight: 600; }
+table.heat th small { display: block; font-weight: 500; color: var(--text-muted); }
+.scale-legend { display: flex; align-items: center; gap: 6px; font-size: .76rem; color: var(--text-muted); margin-top: 10px; flex-wrap: wrap; }
+.scale-legend i { display: inline-block; width: 22px; height: 12px; border-radius: 2px; }
+/* 차트 공통 */
+.chart-box { position: relative; width: 100%; }
+svg.chart { display: block; overflow: visible; font-family: var(--font); }
+svg.chart text { fill: var(--text-muted); font-size: 11px; }
+svg.chart text.end-label { fill: var(--text); font-weight: 600; font-size: 11.5px; }
+svg.chart line.grid { stroke: var(--grid); stroke-width: 1; }
+svg.chart line.axis { stroke: var(--axis); stroke-width: 1; }
+svg.chart line.base { stroke: var(--text-muted); stroke-width: 1; }
+svg.chart line.crosshair { stroke: var(--text-muted); stroke-width: 1; pointer-events: none; }
+svg.chart text.val { fill: var(--text); font-size: 11px; font-family: var(--mono); }
+svg.chart text.lab { fill: var(--text); font-size: 12px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .8rem; color: var(--text-muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i.line { width: 16px; height: 2px; display: inline-block; border-radius: 1px; }
+.legend i.rect { width: 10px; height: 10px; display: inline-block; border-radius: 2px; }
+details.table-view { margin-top: 10px; font-size: .82rem; }
+details.table-view summary { cursor: pointer; color: var(--accent-hover); font-weight: 600; list-style: none; display: inline-flex; gap: 6px; }
+details.table-view summary::before { content: "▸"; } details.table-view[open] summary::before { content: "▾"; }
+details.table-view .table-wrap { margin-top: 8px; max-height: 260px; overflow: auto; }
+.chart-note { font-size: .78rem; color: var(--text-muted); margin-top: 8px; }
+.tooltip { position: fixed; z-index: 50; background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: .8rem; pointer-events: none; box-shadow: 0 6px 24px rgba(0,0,0,.45); min-width: 150px; }
+.tooltip .tt-title { color: var(--text-muted); margin-bottom: 4px; font-weight: 600; }
+.tooltip .tt-row { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.tooltip .tt-row i { width: 12px; height: 2px; display: inline-block; flex: none; }
+.tooltip .tt-row b { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--text); margin-left: auto; }
+.tooltip .tt-row span { color: var(--text-muted); }
+/* 스탯 타일 */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.tile { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.tile .lab { font-size: .76rem; color: var(--text-muted); font-weight: 600; }
+.tile .val { font-size: 1.35rem; font-weight: 700; margin: 2px 0; }
+.tile .delta { font-size: .76rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.tile .delta svg { margin-left: auto; }
+/* 미터 */
+.meter-wrap { margin: 6px 0 4px; }
+.meter-labels { display: flex; justify-content: space-between; font-size: .76rem; color: var(--text-muted); }
+/* 프로필 헤더 */
+.profile-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.profile-head .flag { font-size: 2rem; }
+.profile-head .name { font-size: 1.25rem; font-weight: 700; }
+.profile-head .meta { color: var(--text-muted); font-size: .86rem; display: flex; gap: 14px; flex-wrap: wrap; }
+.profile-head select, .indicator-bar select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 6px 10px; font: inherit; font-size: .88rem; color-scheme: dark; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+.chip.on { color: var(--text); border-color: var(--text-muted); }
+.chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.indicator-bar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; font-size: .84rem; color: var(--text-muted); font-weight: 600; }
+.doc-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: .85rem; }
+.doc-card .q { border-left: 2px solid var(--border); padding-left: 10px; color: var(--text-muted); margin: 6px 0; font-size: .8rem; }
+.event-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.event-list li { display: grid; grid-template-columns: 44px 1fr; gap: 8px; font-size: .84rem; }
+.event-list .d { color: var(--text-muted); font-family: var(--mono); font-size: .78rem; }
+.sm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.sm { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 4px; }
+.sm .h { display: flex; justify-content: space-between; font-size: .8rem; margin-bottom: 2px; }
+.sm .h b { font-weight: 600; }
+.sm .h span { color: var(--text-muted); font-family: var(--mono); font-size: .76rem; }
+/* 드로어 */
+.drawer { position: fixed; top: 0; right: 0; width: 400px; max-width: 100vw; height: 100vh; background: var(--bg-elevated); border-left: 1px solid var(--border); box-shadow: -12px 0 40px rgba(0,0,0,.5); z-index: 60; padding: 18px 20px; overflow-y: auto; }
+.drawer h3 { margin: 0 0 4px; font-size: 1rem; }
+.drawer .close { position: absolute; right: 14px; top: 12px; background: transparent; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 4px 10px; cursor: pointer; font: inherit; }
+.drawer .hero { font-size: 2.2rem; font-weight: 700; margin: 8px 0 2px; }
+.drawer .hero small { font-size: .95rem; color: var(--text-muted); font-weight: 500; margin-left: 6px; }
+.drawer dl { display: grid; grid-template-columns: 96px 1fr; gap: 6px 10px; font-size: .84rem; margin: 14px 0; }
+.drawer dt { color: var(--text-muted); } .drawer dd { margin: 0; word-break: break-all; }
+.drawer .sect { font-size: .78rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 6px; }
+.footer-src { color: var(--text-muted); font-size: .76rem; margin-top: 30px; border-top: 1px solid var(--border); padding-top: 12px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <h1>📈 TradingAgents 분석 대시보드</h1>
+    <span class="badge badge-warning">⚠️ 연구용 도구로 투자 조언이 아님</span>
+    <span class="badge badge-red">화면 목업 · 샘플 데이터(실제 값 아님)</span>
+    <div class="header-user"><span>family@happymstn.com</span><span class="badge badge-gray">로그아웃</span></div>
+  </div>
+</header>
+<main class="container">
+  <nav class="app-nav">
+    <a class="nav-tab" href="#">분석</a>
+    <a class="nav-tab" href="#">종목 탐색</a>
+    <a class="nav-tab active" href="#overview">G20 매크로</a>
+    <a class="nav-tab" href="#">관리자</a>
+  </nav>
+
+  <div class="macro-head">
+    <h2>G20 매크로</h2>
+    <nav class="sub-nav" id="sub-nav">
+      <button data-view="overview">개요</button>
+      <button data-view="country">국가 프로필</button>
+      <button data-view="indicator">지표 비교</button>
+      <button data-view="fx">통화가치</button>
+      <button data-view="politics">정치</button>
+    </nav>
+    <span class="badge badge-gray" id="ingest-badge">마지막 수집 2026-09-20 06:04 KST · 소스 11/11 정상</span>
+  </div>
+
+  <div class="filter-row">
+    <div class="filter">기간 단위 <span class="seg" data-filter="freq"><button data-v="M" class="active">월</button><button data-v="Q">분기</button><button data-v="Y">년</button></span></div>
+    <div class="filter">범위 <span class="seg" data-filter="range"><button data-v="1y">1년</button><button data-v="3y">3년</button><button data-v="5y" class="active">5년</button><button data-v="10y">10년</button><button data-v="all">전체</button></span></div>
+    <div class="filter">국가군 <span class="seg" data-filter="group"><button data-v="G20" class="active">G20</button><button data-v="G7">G7</button><button data-v="BRICS">BRICS</button><button data-v="ASIA">아시아</button></span></div>
+    <span class="asof">기준 2026-08 (월) · 2026-Q2 (분기) · 2025 (년)</span>
+  </div>
+
+  <!-- ① 개요 -->
+  <section id="view-overview">
+    <div class="overview-grid">
+      <div>
+        <div class="card">
+          <h3>국가 × 지표 히트맵 <span class="sub">최신값 · 셀 색 = 해당 지표의 G20 중앙값 대비 위치</span><span class="right"><span class="badge badge-gray">셀 클릭 → 관측치 상세</span></span></h3>
+          <div class="table-wrap" style="max-height: 760px;"><table class="tbl heat" id="heat"></table></div>
+          <div class="scale-legend"><span>중앙값보다 낮음</span><i style="background:var(--neg3)"></i><i style="background:var(--neg2)"></i><i style="background:var(--neg1)"></i><i style="background:var(--neu)"></i><i style="background:var(--pos1)"></i><i style="background:var(--pos2)"></i><i style="background:var(--pos3)"></i><span>높음</span><span style="margin-left:12px">색은 순위 위치이며 좋음/나쁨 판단이 아님 · 연간 지표(GDP·국방비)는 기간 단위와 무관하게 최신 연도</span></div>
+          <details class="table-view" id="heat-table-view"><summary>표 보기 · CSV</summary></details>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3>이번 주 이벤트</h3>
+          <ul class="event-list">
+            <li><span class="d">09-18</span><span><span class="badge badge-blue">금리</span> 🇺🇸 FOMC 25bp 인하 (3.75%) · 성명 "추가 인하 데이터 의존"</span></li>
+            <li><span class="d">09-17</span><span><span class="badge badge-blue">금리</span> 🇬🇧 BoE 동결 (3.75%) · 7:2 표결</span></li>
+            <li><span class="d">09-16</span><span><span class="badge badge-blue">금리</span> 🇧🇷 BCB 동결 (14.50%) · 매파 유지</span></li>
+            <li><span class="d">09-14</span><span><span class="badge badge-gray">선거</span> 🇩🇪 노르트라인베스트팔렌 지방선거</span></li>
+            <li><span class="d">09-12</span><span><span class="badge badge-gray">통계</span> 🇰🇷 8월 고용동향 · 🇺🇸 8월 CPI 2.8%</span></li>
+            <li><span class="d">09-25</span><span><span class="badge badge-gray">예정</span> 🇯🇵 BoJ 회의 · 🇲🇽 Banxico 회의</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>주간 G20 브리프 <span class="badge badge-blue">AI 생성 · 근거 12건</span></h3>
+          <p style="margin:0;font-size:.86rem;color:var(--text-muted)">(샘플) 이번 주 G20 중앙은행 3곳이 회의를 열어 1곳 인하·2곳 동결. 신흥국 통화는 달러 약세 속 브라질·멕시코 강세. 유럽 정치는 독일 지방선거에서 집권 연합 약세…</p>
+          <p style="margin:8px 0 0;font-size:.78rem"><a href="#">근거 문서 12건 보기</a> · 검토 상태: <span class="badge badge-green">승인</span></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② 국가 프로필 -->
+  <section id="view-country" hidden>
+    <div class="profile-head">
+      <span class="flag" id="pf-flag">🇰🇷</span>
+      <div><div class="name" id="pf-name">한국</div><div class="meta" id="pf-meta"></div></div>
+      <select id="pf-select" style="margin-left:auto"></select>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>정치 <span class="sub">정당 지지율 · 여론조사 평균(30일)</span><span class="right"><span class="badge badge-blue">AI 추출</span></span></h3><div class="chart-box" id="pf-politics"></div><div id="pf-polls"></div></div>
+      <div class="card"><h3>통화정책 <span class="sub">정책금리 · 중앙은행 기조</span></h3><div class="chart-box" id="pf-rate"></div><div class="meter-wrap"><div class="meter-labels"><span>비둘기파 (완화)</span><b id="pf-stance-label" style="color:var(--text)">기조 지수</b><span>매파 (긴축)</span></div><div id="pf-meter"></div></div><div id="pf-stance-doc"></div><div class="tiles" style="grid-template-columns:1fr 1fr;margin-top:10px" id="pf-money"></div></div>
+      <div class="card"><h3>재정·규모 <span class="sub">연간 · USD 기준</span></h3><div class="tiles" id="pf-fiscal"></div><div class="chart-box" style="margin-top:12px" id="pf-mil"></div></div>
+      <div class="card"><h3>경제구조 <span class="sub">산업 비중 · 상위 수출 · 시총 상위 기업</span></h3><div id="pf-sectors"></div><div class="grid2" style="margin-top:12px;gap:14px"><div id="pf-exports"></div><div id="pf-companies"></div></div></div>
+      <div class="card"><h3>에너지 <span class="sub">발전 믹스 · 연료별 해외의존도</span></h3><div id="pf-energy-mix"></div><div class="chart-box" style="margin-top:12px" id="pf-energy-dep"></div><div id="pf-energy-doc" style="margin-top:12px"></div></div>
+      <div class="card"><h3>시장경제 <span class="sub">전년 동기 대비 % · 같은 축 척도</span></h3><div class="grid3" id="pf-market"></div></div>
+    </div>
+  </section>
+
+  <!-- ③ 지표 비교 -->
+  <section id="view-indicator" hidden>
+    <div class="card">
+      <div class="indicator-bar">
+        <span>지표 <select id="ind-select"><option value="rate">정책금리 (%)</option><option value="cpi">CPI 전년비 (%)</option><option value="ppi">PPI 전년비 (%)</option><option value="hpi">주택가격 전년비 (%)</option><option value="m2">M2 전년비 (%)</option></select></span>
+        <span>국가 <span class="chips" id="ind-chips"></span></span>
+        <span>강조 <select id="ind-emph"><option value="KR">한국</option><option value="none">전체 색상(최대 8)</option></select></span>
+        <span>변환 <span class="seg" id="ind-transform"><button data-v="level" class="active">수준</button><button data-v="index">지수화 (기간 시작=100)</button></span></span>
+      </div>
+      <h3 id="ind-title">정책금리</h3>
+      <div class="chart-box" id="ind-chart"></div>
+      <p class="chart-note">강조 모드: 선택 국가만 고정 색, 나머지는 회색. 8개국을 넘기면 소형 다중 패널로 자동 전환. 이중 축 없음 — 규모가 다른 지표는 지수화로 비교.</p>
+    </div>
+  </section>
+
+  <!-- ④ 통화가치 -->
+  <section id="view-fx" hidden>
+    <div class="card">
+      <h3>달러 대비 통화가치 지수 <span class="sub">기준 = 범위 시작 시점 100 · 100 아래 = 달러 대비 약세</span><span class="right"><span class="badge badge-gray">지수 = 기준일 환율 ÷ 현재 환율 × 100 (환율 = 현지통화/USD)</span></span></h3>
+      <div class="sm-grid" id="fx-grid"></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h3>기간 변화율 <span class="sub">통화가치, 범위 시작 대비 %</span></h3><div class="chart-box" id="fx-bars"></div></div>
+      <div class="card"><h3>달러지수 (DXY) <span class="sub">별도 차트 — 이중 축 대신</span></h3><div class="chart-box" id="fx-dxy"></div><p class="chart-note">출처: BIS WS_XRU(월) · Yahoo Finance(일, 참고용) · FRED DTWEXBGS</p></div>
+    </div>
+  </section>
+
+  <!-- ⑤ 정치 -->
+  <section id="view-politics" hidden>
+    <div class="card">
+      <h3>G20 정당 지지율·집권당 <span class="sub">여론조사 평균(최근 30일) · 국가 간 직접 비교 불가</span><span class="right"><span class="badge badge-blue">AI 추출 + 규칙 검증</span></span></h3>
+      <div class="table-wrap"><table class="tbl" id="pol-table"></table></div>
+      <p class="chart-note">중국·사우디아라비아: 경쟁 정당 없음 → 정부 신뢰 지표로 대체 표기. 신뢰도 배지는 조사기관 수·표본·독립성 기준(낮음/보통/높음).</p>
+    </div>
+    <div class="card">
+      <h3 id="pol-kr-title">🇰🇷 한국 정당 지지율 <span class="sub">월 평균 · 최대 4당, 나머지 '기타'</span></h3>
+      <div class="chart-box" id="pol-kr-chart"></div>
+    </div>
+  </section>
+
+  <p class="footer-src">출처: BIS · OECD · World Bank · IMF · FRED · Ember(CC BY 4.0) · Our World in Data · WITS · 각국 중앙은행 · 위키피디아 여론조사 문서. 이 목업의 모든 수치는 화면 구조 확인용 샘플이며 실제 통계가 아닙니다.</p>
+</main>
+
+<aside id="drawer" class="drawer" hidden>
+  <button class="close" id="drawer-close">닫기</button>
+  <div class="sect">관측치 상세</div>
+  <h3 id="dr-title">—</h3>
+  <div class="hero" id="dr-value">—</div>
+  <dl id="dr-fields"></dl>
+  <div class="sect">개정 이력</div>
+  <dl id="dr-rev"></dl>
+  <div class="sect">관련 문서</div>
+  <div id="dr-docs"></div>
+</aside>
+<div id="tooltip" class="tooltip" hidden></div>
+
+<script>
+(function () {
+'use strict';
+// ------------------------------------------------------------------
+// 샘플 데이터 (결정론적 난수) — 화면 구조 확인용. 실제 통계가 아님.
+// ------------------------------------------------------------------
+function rng(seed) { var a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+var SLOT = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+var OTHER = '#8b949e', ACCENT = '#388bfd', SURFACE = '#161b22';
+var COUNTRIES = [
+  { iso: 'KR', name: '한국', flag: '🇰🇷', grp: ['G20', 'ASIA'], slot: 0, ccy: 'KRW', base: { rate: 2.5, cpi: 2.1, ppi: 1.5, hpi: 3.2, m2: 6.0, gdp: 1.9, mil: 9.2, party: 44, fx: 1380 }, ruling: '더불어민주당', lean: '중도좌파', second: '국민의힘', gov: 45, next: '2028-04 총선', trust: '높음' },
+  { iso: 'US', name: '미국', flag: '🇺🇸', grp: ['G20', 'G7'], slot: 1, ccy: 'USD', base: { rate: 3.75, cpi: 2.8, ppi: 2.2, hpi: 2.5, m2: 4.0, gdp: 2.1, mil: 13.0, party: 41, fx: 1 }, ruling: '공화당', lean: '우파', second: '민주당', gov: 42, next: '2026-11 중간선거', trust: '높음' },
+  { iso: 'JP', name: '일본', flag: '🇯🇵', grp: ['G20', 'G7', 'ASIA'], slot: 2, ccy: 'JPY', base: { rate: 0.75, cpi: 2.3, ppi: 2.9, hpi: 4.1, m2: 1.5, gdp: 0.8, mil: 5.6, party: 30, fx: 150 }, ruling: '자유민주당', lean: '보수', second: '국민민주당', gov: 38, next: '2028-10 이전 총선', trust: '높음' },
+  { iso: 'CN', name: '중국', flag: '🇨🇳', grp: ['G20', 'BRICS', 'ASIA'], slot: 3, ccy: 'CNY', base: { rate: 3.0, cpi: 0.4, ppi: -1.8, hpi: -4.5, m2: 7.5, gdp: 4.8, mil: 5.3, party: null, fx: 7.2 }, ruling: '공산당 (단일)', lean: '—', second: '—', gov: null, next: '— (경쟁 선거 없음)', trust: '해당 없음' },
+  { iso: 'EU', name: '유로존', flag: '🇪🇺', grp: ['G20', 'EU'], slot: 4, ccy: 'EUR', base: { rate: 2.0, cpi: 2.0, ppi: 0.6, hpi: 1.8, m2: 3.0, gdp: 1.0, mil: 4.0, party: null, fx: 0.92 }, ruling: '— (유럽의회 EPP 최대)', lean: '중도우파', second: 'S&D', gov: null, next: '2029-06 유럽의회', trust: '보통', euro: true },
+  { iso: 'GB', name: '영국', flag: '🇬🇧', grp: ['G20', 'G7'], slot: 5, ccy: 'GBP', base: { rate: 3.75, cpi: 3.1, ppi: 2.4, hpi: 2.8, m2: 2.5, gdp: 1.1, mil: 5.2, party: 22, fx: 0.77 }, ruling: '노동당', lean: '중도좌파', second: '개혁UK', gov: 27, next: '2029-08 이전 총선', trust: '높음' },
+  { iso: 'IN', name: '인도', flag: '🇮🇳', grp: ['G20', 'BRICS', 'ASIA'], slot: 6, ccy: 'INR', base: { rate: 5.5, cpi: 3.5, ppi: 2.0, hpi: 5.0, m2: 10.0, gdp: 6.5, mil: 8.5, party: 38, fx: 86 }, ruling: '인도국민당(BJP)', lean: '우파', second: '국민회의(INC)', gov: 60, next: '2029-05 총선', trust: '보통' },
+  { iso: 'BR', name: '브라질', flag: '🇧🇷', grp: ['G20', 'BRICS'], slot: 7, ccy: 'BRL', base: { rate: 14.5, cpi: 4.8, ppi: 3.0, hpi: 6.0, m2: 9.0, gdp: 2.2, mil: 3.1, party: 35, fx: 5.6 }, ruling: '노동자당(PT)', lean: '좌파', second: '자유당(PL)', gov: 40, next: '2026-10 대선·총선', trust: '높음' },
+  { iso: 'DE', name: '독일', flag: '🇩🇪', grp: ['G20', 'G7', 'EU'], slot: -1, ccy: 'EUR', base: { rate: 2.0, cpi: 2.2, ppi: 0.8, hpi: 1.5, m2: 3.0, gdp: 0.6, mil: 6.1, party: 27, fx: 0.92 }, ruling: '기민·기사연합(CDU/CSU)', lean: '중도우파', second: '독일대안(AfD)', gov: 30, next: '2029-03 이전 총선', trust: '높음', euro: true },
+  { iso: 'FR', name: '프랑스', flag: '🇫🇷', grp: ['G20', 'G7', 'EU'], slot: -1, ccy: 'EUR', base: { rate: 2.0, cpi: 1.2, ppi: 0.5, hpi: 0.5, m2: 3.0, gdp: 0.7, mil: 3.6, party: 33, fx: 0.92 }, ruling: '르네상스(대통령 진영)', lean: '중도', second: '국민연합(RN)', gov: 24, next: '2027-04 대선', trust: '높음', euro: true },
+  { iso: 'IT', name: '이탈리아', flag: '🇮🇹', grp: ['G20', 'G7', 'EU'], slot: -1, ccy: 'EUR', base: { rate: 2.0, cpi: 1.6, ppi: 1.0, hpi: 3.0, m2: 3.0, gdp: 0.5, mil: 3.0, party: 30, fx: 0.92 }, ruling: '이탈리아형제들(FdI)', lean: '우파', second: '민주당(PD)', gov: 41, next: '2027-10 이전 총선', trust: '높음', euro: true },
+  { iso: 'CA', name: '캐나다', flag: '🇨🇦', grp: ['G20', 'G7'], slot: -1, ccy: 'CAD', base: { rate: 2.5, cpi: 2.0, ppi: 1.5, hpi: -1.0, m2: 5.0, gdp: 1.2, mil: 3.5, party: 43, fx: 1.37 }, ruling: '자유당', lean: '중도', second: '보수당', gov: 50, next: '2029-10 이전 총선', trust: '높음' },
+  { iso: 'AU', name: '호주', flag: '🇦🇺', grp: ['G20', 'ASIA'], slot: -1, ccy: 'AUD', base: { rate: 3.35, cpi: 2.7, ppi: 3.2, hpi: 6.5, m2: 6.0, gdp: 1.8, mil: 5.0, party: 35, fx: 1.5 }, ruling: '노동당', lean: '중도좌파', second: '자유·국민연합', gov: 48, next: '2028-05 이전 총선', trust: '높음' },
+  { iso: 'MX', name: '멕시코', flag: '🇲🇽', grp: ['G20'], slot: -1, ccy: 'MXN', base: { rate: 7.0, cpi: 3.8, ppi: 3.5, hpi: 7.0, m2: 8.0, gdp: 0.6, mil: 2.0, party: 55, fx: 18.5 }, ruling: '국가재생운동(MORENA)', lean: '좌파', second: '국민행동당(PAN)', gov: 70, next: '2027-06 중간선거', trust: '보통' },
+  { iso: 'ID', name: '인도네시아', flag: '🇮🇩', grp: ['G20', 'ASIA'], slot: -1, ccy: 'IDR', base: { rate: 5.0, cpi: 2.2, ppi: 1.8, hpi: 1.5, m2: 6.5, gdp: 5.0, mil: 4.5, party: 20, fx: 16300 }, ruling: '게린드라(연합)', lean: '민족주의', second: '투쟁민주당(PDI-P)', gov: 75, next: '2029-02 총선·대선', trust: '보통' },
+  { iso: 'TR', name: '튀르키예', flag: '🇹🇷', grp: ['G20'], slot: -1, ccy: 'TRY', base: { rate: 40.0, cpi: 30.0, ppi: 25.0, hpi: 30.0, m2: 35.0, gdp: 3.0, mil: 6.0, party: 32, fx: 41 }, ruling: '정의개발당(AKP)', lean: '보수', second: '공화인민당(CHP)', gov: 40, next: '2028-05 대선·총선', trust: '낮음' },
+  { iso: 'SA', name: '사우디아라비아', flag: '🇸🇦', grp: ['G20'], slot: -1, ccy: 'SAR', base: { rate: 4.75, cpi: 2.0, ppi: 1.0, hpi: 3.0, m2: 8.0, gdp: 3.5, mil: 21.0, party: null, fx: 3.75 }, ruling: '— (절대군주제)', lean: '—', second: '—', gov: null, next: '— (정당 없음)', trust: '해당 없음' },
+  { iso: 'ZA', name: '남아프리카공화국', flag: '🇿🇦', grp: ['G20', 'BRICS'], slot: -1, ccy: 'ZAR', base: { rate: 7.0, cpi: 3.5, ppi: 2.5, hpi: 2.0, m2: 6.0, gdp: 1.0, mil: 2.5, party: 40, fx: 17.5 }, ruling: '아프리카민족회의(ANC, 연합)', lean: '중도좌파', second: '민주동맹(DA)', gov: 38, next: '2029-05 총선', trust: '보통' },
+  { iso: 'AR', name: '아르헨티나', flag: '🇦🇷', grp: ['G20'], slot: -1, ccy: 'ARS', base: { rate: 29.0, cpi: 30.0, ppi: 25.0, hpi: 5.0, m2: 40.0, gdp: 4.0, mil: 2.0, party: 40, fx: 1350 }, ruling: '자유전진(LLA)', lean: '자유주의 우파', second: '조국연합(UP)', gov: 45, next: '2027-10 대선', trust: '보통' },
+  { iso: 'RU', name: '러시아', flag: '🇷🇺', grp: ['G20', 'BRICS'], slot: -1, ccy: 'RUB', base: { rate: 17.0, cpi: 8.0, ppi: 5.0, hpi: 8.0, m2: 15.0, gdp: 1.0, mil: 32.0, party: 40, fx: 82 }, ruling: '통합러시아', lean: '권위주의 보수', second: '공산당(KPRF)', gov: 75, next: '2026-09 총선', trust: '낮음' }
+];
+var BY = {}; COUNTRIES.forEach(function (c) { BY[c.iso] = c; });
+var MONTHS = []; (function () { for (var y = 2016; y <= 2026; y++) for (var m = 1; m <= 12; m++) { if (y === 2026 && m > 8) break; MONTHS.push(y + '-' + (m < 10 ? '0' : '') + m); } })();
+var YEARS = []; for (var yy = 2015; yy <= 2025; yy++) YEARS.push(String(yy));
+var KEYS = { rate: { name: '정책금리', unit: '%', d: 2, vol: 0.02 }, cpi: { name: 'CPI 전년비', unit: '%', d: 1, vol: 0.25 }, ppi: { name: 'PPI 전년비', unit: '%', d: 1, vol: 0.5 }, hpi: { name: '주택가격 전년비', unit: '%', d: 1, vol: 0.5 }, m2: { name: 'M2 전년비', unit: '%', d: 1, vol: 0.35 }, fx: { name: '환율(현지통화/USD)', unit: '', d: 2 }, fxv: { name: '통화가치 지수', unit: '', d: 1 }, gdp: { name: 'GDP 성장률', unit: '%', d: 1 }, mil: { name: '국방비/정부지출', unit: '%', d: 1 }, party: { name: '집권당 지지율', unit: '%', d: 0 } };
+var SRC = { rate: { org: 'BIS', id: 'WS_CBPOL/1.0/D.{iso}', url: 'https://data.bis.org/topics/CBPOL/data', method: '월말 기준값 (원천: 일별)' }, cpi: { org: 'OECD', id: 'OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL/{iso}.M.N.CPI._T.N.GY', url: 'https://data-explorer.oecd.org', method: '월 지수 전년비 (서버 계산)' }, ppi: { org: 'OECD / 국가통계', id: 'PPI (국가별 소스 분산)', url: 'https://data-explorer.oecd.org', method: '월 지수 전년비 (서버 계산)' }, hpi: { org: 'BIS', id: 'WS_SPP/1.0/Q.{iso}.N.628', url: 'https://data.bis.org/topics/SPP', method: '분기 지수 전년비 · 월 화면에서는 최근 분기값' }, m2: { org: 'IMF MFS (폴백 FRED·ECOS)', id: 'MFS 광의통화 {iso}', url: 'https://data.imf.org', method: '월말 잔액 전년비 (서버 계산)' }, fx: { org: 'BIS (월) · Yahoo (일)', id: 'WS_XRU/1.0/M.{iso}.USD.A', url: 'https://data.bis.org', method: '월말값 · 기간평균 토글' }, fxv: { org: '파생 (BIS/Yahoo)', id: 'base_fx / fx × 100', url: '', method: '기준일 환율 ÷ 현재 환율 × 100' }, gdp: { org: 'World Bank', id: 'NY.GDP.MKTP.KD.ZG', url: 'https://api.worldbank.org/v2/', method: '연간 · 최신 연도' }, mil: { org: 'World Bank (SIPRI)', id: 'MS.MIL.XPND.ZS', url: 'https://api.worldbank.org/v2/', method: '연간 · 국방비/일반정부지출' }, party: { org: '위키피디아 여론조사 표 + LLM 추출', id: 'DOC#poll → poll-of-polls', url: 'https://en.wikipedia.org', method: '최근 30일 표본가중 평균 (서버 계산) · AI 추출' } };
+
+var CACHE = {};
+function seriesMonthly(iso, key) {
+  // 유로존 회원국: 정책금리·M2·환율은 ECB/유로 단일값을 참조 (화면에 '유로존 공통' 배지)
+  if (BY[iso].euro && iso !== 'EU' && (key === 'rate' || key === 'm2' || key === 'fx')) return seriesMonthly('EU', key);
+  var ck = iso + '|' + key; if (CACHE[ck]) return CACHE[ck];
+  var c = BY[iso], base = c.base[key], out = [], i;
+  var r = rng((iso.charCodeAt(0) * 131 + iso.charCodeAt(1) * 17 + key.length * 977) >>> 0);
+  if (key === 'rate') {
+    var lvl = Math.max(0, base - 1.5 + r() * 1.5), step = base > 10 ? 1 : 0.25;
+    for (i = 0; i < MONTHS.length; i++) { var u = r(); var target = i < 50 ? base * 0.35 : i < 78 ? base * 1.25 : base; if (u < 0.22) lvl += (lvl < target ? step : -step) * (r() < 0.8 ? 1 : 2); lvl = Math.max(0, lvl); out.push({ t: MONTHS[i], v: Math.round(lvl / step) * step }); }
+    out[out.length - 1].v = base;
+  } else if (key === 'fx') {
+    var lv = base * (0.82 + r() * 0.1);
+    for (i = 0; i < MONTHS.length; i++) { lv *= 1 + (r() - 0.48) * (base > 100 || key === 'fx' && (iso === 'TR' || iso === 'AR') ? 0.03 : 0.018) + (iso === 'TR' || iso === 'AR' ? 0.02 : 0); out.push({ t: MONTHS[i], v: lv }); }
+    var scale = base / out[out.length - 1].v; out.forEach(function (p) { p.v *= scale; });
+    if (iso === 'US') out.forEach(function (p) { p.v = 1; });
+  } else {
+    var v = base, vol = (KEYS[key].vol || 0.3) * (Math.abs(base) > 10 ? 4 : 1), phi = 0.9;
+    for (i = 0; i < MONTHS.length; i++) { var mean = base + (i > 60 && i < 84 && (key === 'cpi' || key === 'ppi') ? (Math.abs(base) > 10 ? 15 : 3.5) : 0); v = mean + phi * (v - mean) + (r() - 0.5) * vol * 2; out.push({ t: MONTHS[i], v: v }); }
+    var d = base - out[out.length - 1].v; out.forEach(function (p, j) { p.v += d * j / (out.length - 1); });
+  }
+  CACHE[ck] = out; return out;
+}
+function seriesYearly(iso, key) {
+  var ck = iso + '|Y|' + key; if (CACHE[ck]) return CACHE[ck];
+  var base = BY[iso].base[key], r = rng((iso.charCodeAt(1) * 733 + key.length * 31) >>> 0), out = [];
+  for (var i = 0; i < YEARS.length; i++) { var v = base + (r() - 0.5) * (key === 'gdp' ? 3 : 1.6); if (key === 'gdp' && YEARS[i] === '2020') v = -4 + r() * 3; out.push({ t: YEARS[i], v: v }); }
+  out[out.length - 1].v = base; CACHE[ck] = out; return out;
+}
+function aggregate(series, freq) {
+  if (freq === 'M') return series;
+  var out = [], bucket = null, last = null;
+  series.forEach(function (p) { var y = p.t.slice(0, 4), m = +p.t.slice(5, 7); var key = freq === 'Q' ? y + '-Q' + Math.ceil(m / 3) : y; if (key !== bucket) { if (last) out.push(last); bucket = key; } last = { t: key, v: p.v, src: p.t }; });
+  if (last) out.push(last); return out;
+}
+var RANGE_MONTHS = { '1y': 12, '3y': 36, '5y': 60, '10y': 120, 'all': 9999 };
+function slice(series, range) { var n = RANGE_MONTHS[range]; return series.slice(Math.max(0, series.length - n - 1)); }
+function view(iso, key) { return aggregate(slice(seriesMonthly(iso, key), state.range), state.freq); }
+function fxIndex(iso) { var s = slice(seriesMonthly(iso, 'fx'), state.range); var b = s[0].v; var idx = s.map(function (p) { return { t: p.t, v: b / p.v * 100 }; }); return aggregate(idx, state.freq); }
+function ytd(iso) { var s = seriesMonthly(iso, 'fx'); var dec = s.filter(function (p) { return p.t === '2025-12'; })[0]; var last = s[s.length - 1]; return (dec.v / last.v - 1) * 100; }
+
+// ------------------------------------------------------------------
+// 유틸 · 툴팁 · 차트 프리미티브 (인라인 SVG)
+// ------------------------------------------------------------------
+var NS = 'http://www.w3.org/2000/svg';
+function svg(tag, attrs) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function fmt(v, d) { if (v == null || isNaN(v)) return '—'; return v.toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function sgn(v, d) { return (v > 0 ? '+' : '') + fmt(v, d); }
+function niceTicks(min, max, n) { if (min === max) { min -= 1; max += 1; } var raw = (max - min) / (n - 1); var mag = Math.pow(10, Math.floor(Math.log10(raw))); var norm = raw / mag; var step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag; var lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step; var t = []; for (var v = lo; v <= hi + step / 2; v += step) t.push(+v.toFixed(10)); return t; }
+function colorOf(c) { return c.slot >= 0 ? SLOT[c.slot] : OTHER; }
+var tip = document.getElementById('tooltip');
+function showTip(ev, title, rows) {
+  tip.textContent = ''; tip.appendChild(el('div', 'tt-title', title));
+  rows.forEach(function (r) { var d = el('div', 'tt-row'); var i = document.createElement('i'); i.style.background = r.color || 'transparent'; d.appendChild(i); d.appendChild(el('span', null, r.label)); d.appendChild(el('b', null, r.value)); tip.appendChild(d); });
+  tip.hidden = false; var x = ev.clientX + 14, y = ev.clientY + 14; var w = tip.offsetWidth, h = tip.offsetHeight; if (x + w > window.innerWidth - 8) x = ev.clientX - w - 14; if (y + h > window.innerHeight - 8) y = ev.clientY - h - 14; tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+function hideTip() { tip.hidden = true; }
+function tableView(container, columns, rows, label) {
+  var det = el('details', 'table-view'); det.appendChild(el('summary', null, label || '표 보기 · CSV'));
+  var wrap = el('div', 'table-wrap'), tb = el('table', 'tbl'), thead = el('thead'), tr = el('tr'); columns.forEach(function (c, i) { var th = el('th', i ? 'num' : null, c); tr.appendChild(th); }); thead.appendChild(tr); tb.appendChild(thead);
+  var tbody = el('tbody'); rows.forEach(function (r) { var t = el('tr'); r.forEach(function (v, i) { t.appendChild(el('td', i ? 'num' : null, v)); }); tbody.appendChild(t); }); tb.appendChild(tbody); wrap.appendChild(tb); det.appendChild(wrap); container.appendChild(det);
+}
+function lineChart(container, opt) {
+  container.textContent = '';
+  var W = container.clientWidth || 600, H = opt.height || 240;
+  var PAD = { top: 14, right: opt.endLabel === false ? 16 : 70, bottom: 26, left: 46 };
+  var s = svg('svg', { width: W, height: H, 'class': 'chart' }); s.setAttribute('role', 'img');
+  var n = 0; opt.series.forEach(function (sr) { n = Math.max(n, sr.values.length); });
+  var vals = []; opt.series.forEach(function (sr) { sr.values.forEach(function (p) { vals.push(p.v); }); });
+  var yMin = Math.min.apply(null, vals), yMax = Math.max.apply(null, vals); if (opt.baseline != null) { yMin = Math.min(yMin, opt.baseline); yMax = Math.max(yMax, opt.baseline); }
+  if (opt.yMin != null) yMin = Math.min(yMin, opt.yMin); if (opt.yMax != null) yMax = Math.max(yMax, opt.yMax);
+  var ticks = niceTicks(yMin, yMax, opt.yTicks || 5); yMin = ticks[0]; yMax = ticks[ticks.length - 1];
+  var pw = W - PAD.left - PAD.right, ph = H - PAD.top - PAD.bottom;
+  var x = function (i) { return PAD.left + (n > 1 ? i / (n - 1) : 0.5) * pw; }, y = function (v) { return PAD.top + (1 - (v - yMin) / (yMax - yMin || 1)) * ph; };
+  ticks.forEach(function (t) { s.appendChild(svg('line', { x1: PAD.left, x2: W - PAD.right, y1: y(t), y2: y(t), 'class': 'grid' })); var tx = svg('text', { x: PAD.left - 6, y: y(t) + 4, 'text-anchor': 'end' }); tx.textContent = opt.yFmt ? opt.yFmt(t) : fmt(t, 0); s.appendChild(tx); });
+  var labels = opt.series[0].values.map(function (p) { return p.t; }); var nx = Math.max(2, Math.min(6, Math.floor(pw / 95), n)); for (var k = 0; k < nx; k++) { var i = Math.round((n - 1) * k / Math.max(1, nx - 1)); var tx2 = svg('text', { x: x(i), y: H - 8, 'text-anchor': k === 0 ? 'start' : k === nx - 1 ? 'end' : 'middle' }); tx2.textContent = pw < 200 ? labels[i].slice(2) : labels[i]; s.appendChild(tx2); }
+  if (opt.baseline != null) s.appendChild(svg('line', { x1: PAD.left, x2: W - PAD.right, y1: y(opt.baseline), y2: y(opt.baseline), 'class': 'base' }));
+  opt.series.forEach(function (sr) { if (sr.emph === false) drawSeries(sr); }); opt.series.forEach(function (sr) { if (sr.emph !== false) drawSeries(sr); });
+  function drawSeries(sr) {
+    var d = sr.values.map(function (p, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(p.v).toFixed(1); }).join(' ');
+    if (opt.area && sr.emph !== false) { var a = svg('path', { d: d + ' L' + x(sr.values.length - 1).toFixed(1) + ',' + y(opt.baseline != null ? Math.max(yMin, Math.min(yMax, opt.baseline)) : yMin).toFixed(1) + ' L' + x(0).toFixed(1) + ',' + y(opt.baseline != null ? Math.max(yMin, Math.min(yMax, opt.baseline)) : yMin).toFixed(1) + ' Z', fill: sr.color, 'fill-opacity': 0.1 }); s.appendChild(a); }
+    s.appendChild(svg('path', { d: d, fill: 'none', stroke: sr.color, 'stroke-width': sr.emph === false ? 1.5 : 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', opacity: sr.emph === false ? 0.85 : 1 }));
+    if (sr.emph !== false) { var last = sr.values[sr.values.length - 1], lx = x(sr.values.length - 1), ly = y(last.v); s.appendChild(svg('circle', { cx: lx, cy: ly, r: 6, fill: SURFACE })); s.appendChild(svg('circle', { cx: lx, cy: ly, r: 4, fill: sr.color })); if (opt.endLabel !== false) { var t = svg('text', { x: lx + 10, y: ly + 4, 'class': 'end-label' }); t.textContent = (opt.yFmt ? opt.yFmt(last.v) : fmt(last.v, 1)) + (opt.series.length > 1 ? ' ' + sr.name : ''); s.appendChild(t); } }
+  }
+  var cross = svg('line', { x1: 0, x2: 0, y1: PAD.top, y2: H - PAD.bottom, 'class': 'crosshair' }); cross.style.display = 'none'; s.appendChild(cross);
+  var hover = svg('rect', { x: PAD.left, y: PAD.top, width: pw, height: ph, fill: 'transparent' }); hover.style.cursor = 'crosshair';
+  hover.addEventListener('pointermove', function (ev) { var rect = s.getBoundingClientRect(); var i = Math.round((ev.clientX - rect.left - PAD.left) / pw * (n - 1)); i = Math.max(0, Math.min(n - 1, i)); cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.style.display = ''; var rows = opt.series.map(function (sr) { var p = sr.values[i]; return { color: sr.color, label: sr.name, value: p ? (opt.yFmt ? opt.yFmt(p.v) : fmt(p.v, 2)) : '—', v: p ? p.v : -Infinity }; }).sort(function (a, b) { return b.v - a.v; }); showTip(ev, labels[i], rows); });
+  hover.addEventListener('pointerleave', function () { cross.style.display = 'none'; hideTip(); }); s.appendChild(hover);
+  container.appendChild(s);
+  if (opt.series.length > 1 && opt.legend !== false) { var lg = el('div', 'legend'); opt.series.forEach(function (sr) { var sp = el('span'); var i = document.createElement('i'); i.className = 'line'; i.style.background = sr.color; sp.appendChild(i); sp.appendChild(document.createTextNode(sr.name)); lg.appendChild(sp); }); container.appendChild(lg); }
+  if (opt.table !== false) { var cols = ['기간'].concat(opt.series.map(function (sr) { return sr.name; })); var rows = labels.map(function (t, i) { return [t].concat(opt.series.map(function (sr) { var p = sr.values[i]; return p ? fmt(p.v, opt.d != null ? opt.d : 2) : '—'; })); }); tableView(container, cols, rows); }
+}
+function hbars(container, opt) {
+  container.textContent = ''; var W = container.clientWidth || 400, rowH = 26, barH = 14, labelW = opt.labelW || 110, valW = 64; var H = opt.items.length * rowH + 6;
+  var s = svg('svg', { width: W, height: H, 'class': 'chart' }); var max = opt.max || Math.max.apply(null, opt.items.map(function (i) { return Math.abs(i.value); })); var x0 = labelW, x1 = W - valW;
+  s.appendChild(svg('line', { x1: x0, x2: x0, y1: 0, y2: H, 'class': 'axis' }));
+  opt.items.forEach(function (it, idx) { var yc = 3 + idx * rowH + rowH / 2; var lab = svg('text', { x: x0 - 8, y: yc + 4, 'text-anchor': 'end', 'class': 'lab' }); lab.textContent = it.label; s.appendChild(lab); var w = Math.max(3, Math.abs(it.value) / max * (x1 - x0)); var p = svg('path', { d: 'M' + x0 + ',' + (yc - barH / 2) + ' h' + (w - 4) + ' a4,4 0 0 1 4,4 v' + (barH - 8) + ' a4,4 0 0 1 -4,4 h-' + (w - 4) + ' Z', fill: it.color || ACCENT }); s.appendChild(p); var v = svg('text', { x: x0 + w + 8, y: yc + 4, 'class': 'val' }); v.textContent = opt.fmt ? opt.fmt(it.value) : fmt(it.value, 1); s.appendChild(v); var hit = svg('rect', { x: 0, y: yc - rowH / 2, width: W, height: rowH, fill: 'transparent' }); hit.addEventListener('pointermove', function (ev) { p.setAttribute('opacity', 0.8); showTip(ev, it.label, [{ color: it.color || ACCENT, label: opt.unitLabel || '값', value: opt.fmt ? opt.fmt(it.value) : fmt(it.value, 1) }].concat(it.extra || [])); }); hit.addEventListener('pointerleave', function () { p.removeAttribute('opacity'); hideTip(); }); s.appendChild(hit); });
+  container.appendChild(s);
+  if (opt.table !== false) tableView(container, [opt.labelHead || '항목', opt.unitLabel || '값'], opt.items.map(function (i) { return [i.label, opt.fmt ? opt.fmt(i.value) : fmt(i.value, 1)]; }));
+}
+function divBars(container, opt) {
+  container.textContent = ''; var W = container.clientWidth || 400, rowH = 22, barH = 12, labelW = 120, H = opt.items.length * rowH + 6; var s = svg('svg', { width: W, height: H, 'class': 'chart' });
+  var max = Math.max.apply(null, opt.items.map(function (i) { return Math.abs(i.value); })) || 1; var cx = labelW + (W - labelW - 60) / 2, half = (W - labelW - 60) / 2 - 40;
+  s.appendChild(svg('line', { x1: cx, x2: cx, y1: 0, y2: H, 'class': 'axis' }));
+  opt.items.forEach(function (it, idx) { var yc = 3 + idx * rowH + rowH / 2; var lab = svg('text', { x: labelW - 10, y: yc + 4, 'text-anchor': 'end', 'class': 'lab' }); lab.textContent = it.label; s.appendChild(lab); var w = Math.max(2, Math.abs(it.value) / max * half); var neg = it.value < 0; var d = neg ? 'M' + cx + ',' + (yc - barH / 2) + ' h-' + (w - 4) + ' a4,4 0 0 0 -4,4 v' + (barH - 8) + ' a4,4 0 0 0 4,4 h' + (w - 4) + ' Z' : 'M' + cx + ',' + (yc - barH / 2) + ' h' + (w - 4) + ' a4,4 0 0 1 4,4 v' + (barH - 8) + ' a4,4 0 0 1 -4,4 h-' + (w - 4) + ' Z'; var p = svg('path', { d: d, fill: neg ? '#3987e5' : '#d95926' }); s.appendChild(p); var v = svg('text', { x: neg ? cx - w - 6 : cx + w + 6, y: yc + 4, 'text-anchor': neg ? 'end' : 'start', 'class': 'val' }); v.textContent = sgn(it.value, 1) + '%'; s.appendChild(v); var hit = svg('rect', { x: 0, y: yc - rowH / 2, width: W, height: rowH, fill: 'transparent' }); hit.addEventListener('pointermove', function (ev) { showTip(ev, it.label, [{ color: neg ? '#3987e5' : '#d95926', label: '통화가치 변화', value: sgn(it.value, 2) + '%' }]); }); hit.addEventListener('pointerleave', hideTip); s.appendChild(hit); });
+  container.appendChild(s); var lg = el('div', 'legend'); [['#3987e5', '달러 대비 약세(음)'], ['#d95926', '달러 대비 강세(양)']].forEach(function (a) { var sp = el('span'); var i = document.createElement('i'); i.className = 'rect'; i.style.background = a[0]; sp.appendChild(i); sp.appendChild(document.createTextNode(a[1])); lg.appendChild(sp); }); container.appendChild(lg);
+  tableView(container, ['통화', '변화율 %'], opt.items.map(function (i) { return [i.label, sgn(i.value, 2)]; }));
+}
+function stackedH(container, opt) {
+  container.textContent = ''; var W = container.clientWidth || 400, barH = 20, gap = 2, H = barH + 4; var s = svg('svg', { width: W, height: H, 'class': 'chart' }); var total = opt.segments.reduce(function (a, b) { return a + b.value; }, 0); var xcur = 0;
+  opt.segments.forEach(function (sg, i) { var w = sg.value / total * W; var rw = Math.max(0, w - (i < opt.segments.length - 1 ? gap : 0)); var r = svg('rect', { x: xcur, y: 2, width: rw, height: barH, fill: sg.color, rx: i === 0 || i === opt.segments.length - 1 ? 3 : 0 }); s.appendChild(r); var label = sg.label + ' ' + fmt(sg.value, 0) + '%'; if (label.length * 7.2 + 12 < rw) { var t = svg('text', { x: xcur + rw / 2, y: 2 + barH / 2 + 4, 'text-anchor': 'middle' }); t.textContent = label; t.style.fill = lum(sg.color) > 0.35 ? '#0d1117' : '#fff'; t.style.fontSize = '11px'; t.style.pointerEvents = 'none'; s.appendChild(t); } r.addEventListener('pointermove', function (ev) { r.setAttribute('opacity', 0.8); showTip(ev, opt.title || '', [{ color: sg.color, label: sg.label, value: fmt(sg.value, 1) + '%' }]); }); r.addEventListener('pointerleave', function () { r.removeAttribute('opacity'); hideTip(); }); xcur += w; });
+  container.appendChild(s); var lg = el('div', 'legend'); opt.segments.forEach(function (sg) { var sp = el('span'); var i = document.createElement('i'); i.className = 'rect'; i.style.background = sg.color; sp.appendChild(i); sp.appendChild(document.createTextNode(sg.label + ' ' + fmt(sg.value, 1) + '%')); lg.appendChild(sp); }); container.appendChild(lg);
+}
+function lum(hex) { var r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255; function f(c) { return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); } return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); }
+function meter(container, score) {
+  container.textContent = ''; var W = container.clientWidth || 300, H = 30; var s = svg('svg', { width: W, height: H, 'class': 'chart' }); var pad = 6, tw = W - pad * 2, cx = pad + tw / 2;
+  s.appendChild(svg('rect', { x: pad, y: 11, width: tw, height: 8, rx: 4, fill: '#2d333b' })); var w = Math.abs(score) / 2 * tw / 2; var fill = score < 0 ? '#3987e5' : '#d95926'; s.appendChild(svg('rect', { x: score < 0 ? cx - w : cx, y: 11, width: w, height: 8, rx: 4, fill: fill }));
+  s.appendChild(svg('line', { x1: cx, x2: cx, y1: 6, y2: 24, 'class': 'base' })); [-2, -1, 1, 2].forEach(function (t) { s.appendChild(svg('line', { x1: cx + t / 2 * tw / 2, x2: cx + t / 2 * tw / 2, y1: 21, y2: 25, 'class': 'axis' })); });
+  var mx = cx + score / 2 * tw / 2; s.appendChild(svg('circle', { cx: mx, cy: 15, r: 7, fill: SURFACE })); s.appendChild(svg('circle', { cx: mx, cy: 15, r: 5, fill: fill })); container.appendChild(s);
+}
+function sparkline(values, color) { var w = 84, h = 26, s = svg('svg', { width: w, height: h }); var min = Math.min.apply(null, values), max = Math.max.apply(null, values); var x = function (i) { return 2 + i / (values.length - 1) * (w - 10); }, y = function (v) { return 3 + (1 - (v - min) / (max - min || 1)) * (h - 6); }; s.appendChild(svg('path', { d: values.map(function (v, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(v).toFixed(1); }).join(' '), fill: 'none', stroke: OTHER, 'stroke-width': 1.5 })); s.appendChild(svg('circle', { cx: x(values.length - 1), cy: y(values[values.length - 1]), r: 3, fill: color || ACCENT })); return s; }
+function tile(label, value, delta, spark) { var t = el('div', 'tile'); t.appendChild(el('div', 'lab', label)); t.appendChild(el('div', 'val', value)); var d = el('div', 'delta'); d.appendChild(el('span', null, delta || '')); if (spark) d.appendChild(spark); t.appendChild(d); return t; }
+
+// ------------------------------------------------------------------
+// 상태 · 필터 · 라우팅
+// ------------------------------------------------------------------
+var state = { freq: 'M', range: '5y', group: 'G20', view: 'overview', country: 'KR', ind: 'rate', indCountries: ['KR', 'US', 'JP', 'CN', 'EU', 'GB'], emph: 'KR', transform: 'level' };
+function groupCountries() { return COUNTRIES.filter(function (c) { return c.grp.indexOf(state.group) >= 0; }); }
+function periodLabel() { return state.freq === 'M' ? '2026-08' : state.freq === 'Q' ? '2026-Q3 (진행 중, 8월 말)' : '2026 (진행 중)'; }
+document.querySelectorAll('.seg[data-filter]').forEach(function (seg) { seg.addEventListener('click', function (ev) { var b = ev.target.closest('button'); if (!b) return; seg.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); }); b.classList.add('active'); state[seg.dataset.filter] = b.dataset.v; render(); }); });
+var subnav = document.getElementById('sub-nav'); subnav.addEventListener('click', function (ev) { var b = ev.target.closest('button'); if (b) location.hash = b.dataset.view; });
+window.addEventListener('hashchange', route); window.addEventListener('resize', debounce(render, 150));
+function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+function route() { var raw = (location.hash || '#overview').replace('#', ''); var parts = raw.split('?'); var h = parts[0]; var q = parts[1] || ''; if (!document.getElementById('view-' + h)) h = 'overview'; var dm = q.match(/drawer=([A-Z]{2}),([a-z0-9]+)/); state.pendingDrawer = dm ? [dm[1], dm[2]] : null; state.view = h; ['overview', 'country', 'indicator', 'fx', 'politics'].forEach(function (v) { document.getElementById('view-' + v).hidden = v !== h; }); subnav.querySelectorAll('button').forEach(function (b) { b.classList.toggle('active', b.dataset.view === h); }); render(); }
+function render() { hideTip(); if (state.view === 'overview') renderOverview(); else if (state.view === 'country') renderCountry(); else if (state.view === 'indicator') renderIndicator(); else if (state.view === 'fx') renderFx(); else renderPolitics(); if (state.pendingDrawer) { var pd = state.pendingDrawer; state.pendingDrawer = null; if (BY[pd[0]] && KEYS[pd[1]]) openDrawer(BY[pd[0]], pd[1], latest(pd[0], pd[1])); } }
+
+// ------------------------------------------------------------------
+// ① 개요 — 히트맵
+// ------------------------------------------------------------------
+var HEAT_COLS = [{ key: 'rate', name: '정책금리', unit: '%', d: 2 }, { key: 'cpi', name: 'CPI', unit: 'YoY %', d: 1 }, { key: 'ppi', name: 'PPI', unit: 'YoY %', d: 1 }, { key: 'hpi', name: '집값', unit: 'YoY %', d: 1 }, { key: 'fxv', name: '통화가치', unit: 'YTD %', d: 1 }, { key: 'm2', name: 'M2', unit: 'YoY %', d: 1 }, { key: 'gdp', name: 'GDP 성장', unit: '% · 연', d: 1 }, { key: 'mil', name: '국방비/지출', unit: '% · 연', d: 1 }, { key: 'party', name: '집권당 지지', unit: '%', d: 0 }];
+function latest(iso, key) { if (key === 'fxv') return iso === 'US' ? null : ytd(iso); if (key === 'gdp' || key === 'mil') return seriesYearly(iso, key)[YEARS.length - 1].v; if (key === 'party') return BY[iso].base.party; var s = view(iso, key); return s[s.length - 1].v; }
+function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }); var m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+function heatColor(z) { if (z == null) return null; if (Math.abs(z) < 0.35) return ['#2d333b', false]; if (z > 0) return z > 1.6 ? ['#a3401c', false] : z > 0.9 ? ['#d95926', false] : ['#f0a070', true]; return z < -1.6 ? ['#1c5cab', false] : z < -0.9 ? ['#3987e5', false] : ['#86b6ef', true]; }
+function renderOverview() {
+  var table = document.getElementById('heat'); table.textContent = ''; var cs = groupCountries();
+  var thead = el('thead'), tr = el('tr'); var th0 = el('th', 'country', '국가'); tr.appendChild(th0); HEAT_COLS.forEach(function (c) { var th = el('th', 'num', c.name); th.appendChild(el('small', null, c.unit)); tr.appendChild(th); }); thead.appendChild(tr); table.appendChild(thead);
+  var vals = {}; HEAT_COLS.forEach(function (c) { vals[c.key] = cs.map(function (k) { return latest(k.iso, c.key); }); });
+  var stats = {}; HEAT_COLS.forEach(function (c) { var a = vals[c.key].filter(function (v) { return v != null; }); var med = median(a); var mad = median(a.map(function (v) { return Math.abs(v - med); })) * 1.4826 || 1; stats[c.key] = { med: med, mad: mad }; });
+  var tbody = el('tbody'), csvRows = [];
+  cs.forEach(function (c, ri) { var r = el('tr'); var td0 = el('td', 'country'); td0.textContent = c.flag + ' ' + c.name; if (c.euro) { var b = el('span', 'badge badge-gray', '유로존'); b.style.marginLeft = '6px'; td0.appendChild(b); } r.appendChild(td0); var row = [c.name];
+    HEAT_COLS.forEach(function (col) { var v = vals[col.key][ri]; var td = el('td', 'cell'); td.tabIndex = 0; if (v == null) { td.textContent = '—'; td.style.color = 'var(--text-muted)'; } else { var z = (v - stats[col.key].med) / stats[col.key].mad; var hc = heatColor(z); td.style.background = hc[0]; if (hc[1]) td.classList.add('ink-dark'); td.textContent = fmt(v, col.d); var tipFn = function (ev) { showTip(ev, c.flag + ' ' + c.name + ' · ' + col.name, [{ color: hc[0], label: col.unit, value: fmt(v, col.d) }, { label: state.group + ' 중앙값', value: fmt(stats[col.key].med, col.d) }, { label: '기간', value: col.key === 'gdp' || col.key === 'mil' ? '2025 (연)' : periodLabel() }]); }; td.addEventListener('pointermove', tipFn); td.addEventListener('focus', function () { }); td.addEventListener('pointerleave', hideTip); td.addEventListener('click', function () { openDrawer(c, col.key, v); }); td.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') openDrawer(c, col.key, v); }); } r.appendChild(td); row.push(v == null ? '' : fmt(v, col.d)); });
+    tbody.appendChild(r); csvRows.push(row); });
+  table.appendChild(tbody);
+  var tv = document.getElementById('heat-table-view'); var old = tv.querySelector('.table-wrap'); if (old) old.remove(); var wrap = el('div', 'table-wrap'), tb = el('table', 'tbl'); var h = el('tr'); ['국가'].concat(HEAT_COLS.map(function (c) { return c.name + ' (' + c.unit + ')'; })).forEach(function (t, i) { h.appendChild(el('th', i ? 'num' : null, t)); }); tb.appendChild(h); csvRows.forEach(function (row) { var t = el('tr'); row.forEach(function (v, i) { t.appendChild(el('td', i ? 'num' : null, v || '—')); }); tb.appendChild(t); }); wrap.appendChild(tb); tv.appendChild(wrap);
+}
+
+// ------------------------------------------------------------------
+// 관측치 상세 드로어
+// ------------------------------------------------------------------
+var drawer = document.getElementById('drawer'); document.getElementById('drawer-close').addEventListener('click', function () { drawer.hidden = true; }); document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') drawer.hidden = true; });
+function openDrawer(c, key, v, periodOverride) {
+  var K = KEYS[key], S = SRC[key]; var period = periodOverride || (key === 'gdp' || key === 'mil' ? '2025 (연)' : periodLabel()); var freqName = key === 'gdp' || key === 'mil' ? '연' : state.freq === 'M' ? '월' : state.freq === 'Q' ? '분기' : '년';
+  document.getElementById('dr-title').textContent = c.flag + ' ' + c.name + ' · ' + K.name; var hv = document.getElementById('dr-value'); hv.textContent = fmt(v, K.d); var sm = el('small', null, K.unit + ' · ' + period); hv.appendChild(sm);
+  var dl = document.getElementById('dr-fields'); dl.textContent = '';
+  var rows = [['빈도', freqName + (state.freq !== 'M' && key !== 'gdp' && key !== 'mil' ? ' (' + S.method + ')' : '')], ['집계 방법', S.method], ['출처 기관', S.org], ['시리즈 ID', S.id.replace('{iso}', c.iso)], ['URL', S.url || '—'], ['수집 시각', '2026-09-20 06:03 KST'], ['데이터 vintage', '2026-09-19'], ['플래그', [c.euro && (key === 'rate' || key === 'm2') ? 'euro_area_shared' : null, key === 'party' ? 'ai_generated' : null, key === 'fxv' ? 'derived' : null].filter(Boolean).join(', ') || '없음'], ['원본 응답', 'S3 macro/raw/' + S.org.split(' ')[0].toLowerCase() + '/2026-09-20/' + key + '_' + c.iso + '.json.gz (관리자)']];
+  rows.forEach(function (r) { dl.appendChild(el('dt', null, r[0])); var dd = el('dd'); if (r[0] === 'URL' && r[1] !== '—') { var a = el('a', null, r[1]); a.href = r[1]; a.target = '_blank'; a.rel = 'noopener'; dd.appendChild(a); } else dd.textContent = r[1]; dl.appendChild(dd); });
+  var rv = document.getElementById('dr-rev'); rv.textContent = ''; [['2026-09-19', fmt(v, K.d) + ' (현재)'], ['2026-09-12', fmt(v, K.d)], ['2026-09-05', fmt(v + (key === 'rate' ? 0 : 0.1), K.d) + (key === 'rate' ? '' : ' → 개정')]].forEach(function (r) { rv.appendChild(el('dt', null, r[0])); rv.appendChild(el('dd', null, r[1])); });
+  var docs = document.getElementById('dr-docs'); docs.textContent = '';
+  if (key === 'rate' || key === 'm2') { var d = el('div', 'doc-card'); var h = el('div'); h.appendChild(el('b', null, c.name + ' 중앙은행 최근 결정문 요약')); var b = el('span', 'badge badge-blue', 'AI 판정 · 신뢰도 0.86'); b.style.marginLeft = '8px'; h.appendChild(b); d.appendChild(h); d.appendChild(el('div', null, '(샘플) 기준금리 동결. 성장 하방 위험과 가계부채 증가를 함께 언급, 추가 인하 여지는 열어둠 → 기조 지수 −0.5 (완화 쪽 중립).')); d.appendChild(el('div', 'q', '“…향후 통화정책은 성장세 회복과 금융안정 리스크를 함께 점검하면서…”')); var a2 = el('a', null, '원문 보기 →'); a2.href = '#'; d.appendChild(a2); docs.appendChild(d); }
+  else if (key === 'party') { var d2 = el('div', 'doc-card'); d2.appendChild(el('b', null, '원자료 여론조사 (최근 30일, 6건)')); d2.appendChild(el('div', null, '(샘플) 한국갤럽 9/12 · NBS 9/11 · 리얼미터 9/8 … 표본 1,000~2,000 · 위키피디아 표에서 LLM 추출 후 합계·날짜 검증 통과')); d2.appendChild(el('div', 'q', '검토 상태: 자동 승인 (규칙 검증 통과)')); docs.appendChild(d2); }
+  else docs.appendChild(el('p', 'chart-note', '연결된 정성 문서 없음'));
+  drawer.hidden = false;
+}
+
+// ------------------------------------------------------------------
+// ② 국가 프로필
+// ------------------------------------------------------------------
+var pfSel = document.getElementById('pf-select'); COUNTRIES.forEach(function (c) { var o = el('option', null, c.flag + ' ' + c.name); o.value = c.iso; pfSel.appendChild(o); }); pfSel.addEventListener('change', function () { state.country = pfSel.value; render(); });
+var PROFILE = { KR: { parties: [['더불어민주당', 42, 0], ['국민의힘', 30, 1], ['조국혁신당', 6, 2], ['기타·무당층', 22, -1]], gdp: '$1.87T', gni: '$1.92T', budget: '$493B (673조원)', milShare: 9.2, milGdp: 2.6, sectors: [['농림어업', 1.6], ['제조업', 25.4], ['기타 산업(건설·광업·전기)', 7.2], ['서비스', 58.3], ['순생산물세', 7.5]], exports: [['반도체', 20.8], ['자동차', 10.6], ['석유제품', 7.1], ['기계', 6.9], ['선박', 3.9], ['철강', 3.7], ['디스플레이', 2.8]], exportsGdp: 44, companies: [['삼성전자', '반도체', 520], ['SK하이닉스', '반도체', 210], ['LG에너지솔루션', '2차전지', 68], ['삼성바이오로직스', '바이오', 55], ['현대차', '자동차', 50], ['기아', '자동차', 40], ['셀트리온', '바이오', 32], ['KB금융', '금융', 30], ['NAVER', '인터넷', 28], ['현대모비스', '자동차부품', 22]], mix: [['원자력', 31], ['석탄', 29], ['가스', 27], ['재생에너지', 10], ['기타', 3]], dep: [['원유', 100], ['천연가스', 99], ['석탄', 99], ['우라늄', 100], ['1차에너지 전체', 93]], policy: '11차 전력수급기본계획: 2038년 원전 35%·재생 29% 목표, 석탄 단계적 폐지. 최근 변화: 신규 원전 2기 부지 선정 절차 착수(샘플).', stance: -0.5, stanceText: '한국은행 8월 통화정책방향: 동결. 성장 하방 위험 + 가계부채·환율 경계 병기 → 완화 쪽 중립.' } };
+function profileOf(c) { if (PROFILE[c.iso]) return PROFILE[c.iso]; var r = rng(c.iso.charCodeAt(0) * 91); var p = { parties: [[c.ruling.split('(')[0], c.base.party || 40, 0], [c.second, Math.max(10, (c.base.party || 40) - 6 - r() * 10), 1], ['제3당', 8 + r() * 8, 2], ['기타·무당층', 0, -1]], gdp: '$' + fmt(0.4 + r() * 3, 2) + 'T', gni: '$' + fmt(0.4 + r() * 3, 2) + 'T', budget: '$' + fmt(150 + r() * 900, 0) + 'B', milShare: c.base.mil, milGdp: fmt(1 + r() * 2.5, 1), sectors: [['농림어업', 2 + r() * 8], ['제조업', 10 + r() * 15], ['기타 산업', 6 + r() * 6], ['서비스', 0], ['순생산물세', 6]], exports: [['품목 A', 18], ['품목 B', 12], ['품목 C', 9], ['품목 D', 7], ['품목 E', 5], ['품목 F', 4], ['품목 G', 3]], exportsGdp: Math.round(15 + r() * 40), companies: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (i) { return ['기업 ' + i + ' (샘플)', '업종', Math.round(300 / i)]; }), mix: [['가스', 30 + r() * 20], ['석탄', 10 + r() * 30], ['원자력', r() * 20], ['재생에너지', 15 + r() * 25], ['기타', 3]], dep: [['원유', Math.round(r() * 100)], ['천연가스', Math.round(r() * 100)], ['석탄', Math.round(r() * 100)], ['1차에너지 전체', Math.round(r() * 100)]], policy: '(샘플) 에너지 정책 요약 — Phase 2에서 LLM 요약으로 채움. 출처 링크·검토 상태 병기.', stance: Math.round((r() * 3 - 1.5) * 2) / 2, stanceText: '(샘플) 최근 결정문 요약 — Phase 2에서 채움.' };
+  p.parties[3][1] = Math.max(5, 100 - p.parties[0][1] - p.parties[1][1] - p.parties[2][1]); p.sectors[3][1] = 100 - p.sectors[0][1] - p.sectors[1][1] - p.sectors[2][1] - 6; var mt = p.mix.reduce(function (a, b) { return a + b[1]; }, 0); p.mix.forEach(function (m) { m[1] = m[1] / mt * 100; }); return p; }
+function partySeries(c, idx, base) { var r = rng(c.iso.charCodeAt(1) * 53 + idx * 7); var out = [], v = base + (r() - 0.5) * 8; var ms = MONTHS.slice(MONTHS.length - 44); for (var i = 0; i < ms.length; i++) { v = base + 0.88 * (v - base) + (r() - 0.5) * 3; out.push({ t: ms[i], v: v }); } out[out.length - 1].v = base; return out; }
+function renderCountry() {
+  var c = BY[state.country], P = profileOf(c); pfSel.value = c.iso; document.getElementById('pf-flag').textContent = c.flag; document.getElementById('pf-name').textContent = c.name;
+  var meta = document.getElementById('pf-meta'); meta.textContent = ''; [['집권', c.ruling + (c.lean !== '—' ? ' · ' + c.lean : '')], ['정부 지지율', c.gov == null ? '해당 없음' : c.gov + '%'], ['다음 선거', c.next], ['통화', c.ccy + (c.euro ? ' (유로존 공통 정책)' : '')]].forEach(function (m) { var s = el('span'); s.appendChild(el('b', null, m[0] + ' ')); s.appendChild(document.createTextNode(m[1])); meta.appendChild(s); });
+  // 정치
+  var pol = document.getElementById('pf-politics'); var polls = document.getElementById('pf-polls'); polls.textContent = '';
+  if (c.base.party == null) { pol.textContent = ''; pol.appendChild(el('p', 'chart-note', '경쟁 정당이 없는 체제 — 정부 신뢰 지표(외부 조사)로 대체 표시. 해당 데이터는 Phase 2 범위.')); }
+  else { var ps = P.parties.filter(function (p) { return p[2] >= 0; }).map(function (p) { return { name: p[0], color: SLOT[p[2]], values: aggregate(slice(partySeries(c, p[2], p[1]), state.range === 'all' ? '10y' : state.range), state.freq) }; }); lineChart(pol, { series: ps, height: 200, yFmt: function (v) { return fmt(v, 0) + '%'; }, d: 1 });
+    var tw = el('div', 'table-wrap'); tw.style.marginTop = '10px'; var tb = el('table', 'tbl'); var h = el('tr'); ['조사기관', '조사 종료', '표본', P.parties[0][0], P.parties[1][0], '출처'].forEach(function (t, i) { h.appendChild(el('th', i >= 2 && i <= 4 ? 'num' : null, t)); }); tb.appendChild(h); [['한국갤럽', '09-12', '1,001', P.parties[0][1] + 1, P.parties[1][1] - 1], ['NBS', '09-11', '1,006', P.parties[0][1] - 1, P.parties[1][1] + 2], ['리얼미터', '09-08', '2,010', P.parties[0][1] + 2, P.parties[1][1] - 2]].forEach(function (r) { var t = el('tr'); r.forEach(function (v, i) { t.appendChild(el('td', i >= 2 ? 'num' : null, i >= 3 ? fmt(v, 0) + '%' : v)); }); var td = el('td'); var a = el('a', null, '위키 표'); a.href = '#'; td.appendChild(a); t.appendChild(td); tb.appendChild(t); }); tw.appendChild(tb); polls.appendChild(tw); }
+  // 통화정책
+  var rateSeries = [{ name: c.name, color: colorOf(c) === OTHER ? ACCENT : colorOf(c), values: view(c.iso, 'rate') }]; if (c.iso !== 'US') rateSeries.push({ name: '미국 (참고)', color: OTHER, values: view('US', 'rate'), emph: false }); lineChart(document.getElementById('pf-rate'), { series: rateSeries, height: 190, yFmt: function (v) { return fmt(v, 2) + '%'; }, d: 2 });
+  meter(document.getElementById('pf-meter'), P.stance); document.getElementById('pf-stance-label').textContent = '기조 지수 ' + sgn(P.stance, 1) + ' · ' + (P.stance <= -1 ? '완화' : P.stance < 0 ? '완화 쪽 중립' : P.stance === 0 ? '중립' : P.stance < 1 ? '긴축 쪽 중립' : '긴축');
+  var sd = document.getElementById('pf-stance-doc'); sd.textContent = ''; var dc = el('div', 'doc-card'); var dh = el('div'); dh.appendChild(el('b', null, '최근 결정문 요약')); var bb = el('span', 'badge badge-blue', 'AI 판정 · 근거 인용 3건'); bb.style.marginLeft = '8px'; dh.appendChild(bb); dc.appendChild(dh); dc.appendChild(el('div', null, P.stanceText)); sd.appendChild(dc);
+  var money = document.getElementById('pf-money'); money.textContent = ''; var m2 = view(c.iso, 'm2'); money.appendChild(tile('M2 전년비', fmt(m2[m2.length - 1].v, 1) + '%', '전기 대비 ' + sgn(m2[m2.length - 1].v - m2[m2.length - 2].v, 1) + 'p', sparkline(m2.slice(-12).map(function (p) { return p.v; })))); if (c.iso !== 'US') { var fi = fxIndex(c.iso); money.appendChild(tile('통화가치 지수 (범위 시작=100)', fmt(fi[fi.length - 1].v, 1), 'YTD ' + sgn(ytd(c.iso), 1) + '% · ' + c.ccy + '/USD ' + fmt(seriesMonthly(c.iso, 'fx').slice(-1)[0].v, c.base.fx > 100 ? 0 : 2), sparkline(fi.slice(-12).map(function (p) { return p.v; })))); } else money.appendChild(tile('달러지수 (DXY)', '98.4', 'YTD −6.1%', sparkline([104, 103, 101, 100, 99, 99.5, 98, 97.5, 98.2, 98.9, 98.1, 98.4])));
+  // 재정
+  var fis = document.getElementById('pf-fiscal'); fis.textContent = ''; var g = seriesYearly(c.iso, 'gdp'); fis.appendChild(tile('명목 GDP (2025)', P.gdp, '실질성장 ' + fmt(g[g.length - 1].v, 1) + '%', sparkline(g.map(function (p) { return p.v; })))); fis.appendChild(tile('GNI (2025)', P.gni, '1인당 GNI 세계은행 기준')); fis.appendChild(tile('정부 예산 (2026)', P.budget, '지출/GDP ' + fmt(22 + (c.iso.charCodeAt(0) % 20), 0) + '%')); fis.appendChild(tile('국방비/정부지출', fmt(P.milShare, 1) + '%', 'GDP 대비 ' + P.milGdp + '% · SIPRI'));
+  document.getElementById('pf-mil').textContent = ''; lineChart(document.getElementById('pf-mil'), { series: [{ name: '국방비/정부지출', color: ACCENT, values: seriesYearly(c.iso, 'mil') }], height: 150, yFmt: function (v) { return fmt(v, 1) + '%'; }, d: 1, table: false }); document.getElementById('pf-mil').insertBefore(el('div', 'chart-note', '국방비/정부지출 추이 (%, 연간 · World Bank/SIPRI) — 점 클릭 시 관측치 상세'), document.getElementById('pf-mil').firstChild);
+  // 경제구조
+  var sec = document.getElementById('pf-sectors'); sec.textContent = ''; sec.appendChild(el('div', 'chart-note', '산업별 부가가치 비중 (GDP, %) · 수출/GDP ' + P.exportsGdp + '%')); var sb = el('div', 'chart-box'); sec.appendChild(sb); stackedH(sb, { title: '산업 비중', segments: P.sectors.map(function (s, i) { return { label: s[0], value: s[1], color: [SLOT[2], SLOT[0], SLOT[6], SLOT[1], OTHER][i] }; }) });
+  var ex = document.getElementById('pf-exports'); ex.textContent = ''; ex.appendChild(el('div', 'chart-note', '상위 수출 품목 (총수출 대비 %, WITS HS2)')); var eb = el('div', 'chart-box'); ex.appendChild(eb); hbars(eb, { items: P.exports.map(function (e) { return { label: e[0], value: e[1], color: ACCENT }; }), fmt: function (v) { return fmt(v, 1) + '%'; }, labelW: 90, unitLabel: '비중 %', labelHead: '품목' });
+  var co = document.getElementById('pf-companies'); co.textContent = ''; co.appendChild(el('div', 'chart-note', '시총 상위 10 기업 (십억 USD, 카탈로그 기준 2026-09-19)')); var tw2 = el('div', 'table-wrap'); tw2.style.maxHeight = '240px'; var tb2 = el('table', 'tbl'); var h2 = el('tr'); ['기업', '업종', '시총'].forEach(function (t, i) { h2.appendChild(el('th', i === 2 ? 'num' : null, t)); }); tb2.appendChild(h2); P.companies.forEach(function (r) { var t = el('tr'); t.appendChild(el('td', null, r[0])); t.appendChild(el('td', null, r[1])); t.appendChild(el('td', 'num', fmt(r[2], 0))); tb2.appendChild(t); }); tw2.appendChild(tb2); co.appendChild(tw2);
+  // 에너지
+  var em = document.getElementById('pf-energy-mix'); em.textContent = ''; em.appendChild(el('div', 'chart-note', '발전 믹스 (전력 생산 비중 %, Ember 2025)')); var mb = el('div', 'chart-box'); em.appendChild(mb); stackedH(mb, { title: '발전 믹스', segments: P.mix.map(function (m, i) { return { label: m[0], value: m[1], color: [SLOT[6], '#8b949e', SLOT[1], SLOT[2], '#5c6370'][i] }; }) });
+  var ed = document.getElementById('pf-energy-dep'); hbars(ed, { items: P.dep.map(function (d) { return { label: d[0], value: d[1], color: SLOT[3] }; }), fmt: function (v) { return fmt(v, 0) + '%'; }, max: 100, labelW: 110, unitLabel: '해외의존도 %', labelHead: '연료' }); ed.appendChild(el('p', 'chart-note', '해외의존도 = 1 − 생산/소비 (OWID) · 추정치(estimated) 플래그'));
+  var edoc = document.getElementById('pf-energy-doc'); edoc.textContent = ''; var dc2 = el('div', 'doc-card'); var h3 = el('div'); h3.appendChild(el('b', null, '에너지 정책 요약')); var b3 = el('span', 'badge badge-blue', 'AI 요약 · 출처 2건'); b3.style.marginLeft = '8px'; h3.appendChild(b3); dc2.appendChild(h3); dc2.appendChild(el('div', null, P.policy)); edoc.appendChild(dc2);
+  // 시장경제
+  var mk = document.getElementById('pf-market'); mk.textContent = ''; var series3 = ['ppi', 'cpi', 'hpi'].map(function (k) { return view(c.iso, k); }); var all = []; series3.forEach(function (s) { s.forEach(function (p) { all.push(p.v); }); }); var lo = Math.min.apply(null, all.concat([0])), hi = Math.max.apply(null, all.concat([0]));
+  ['ppi', 'cpi', 'hpi'].forEach(function (k, i) { var box = el('div', 'sm'); var hh = el('div', 'h'); hh.appendChild(el('b', null, KEYS[k].name)); hh.appendChild(el('span', null, sgn(series3[i][series3[i].length - 1].v, 1) + '%')); box.appendChild(hh); var cb = el('div', 'chart-box'); box.appendChild(cb); mk.appendChild(box); var padded = series3[i].slice(); lineChart(cb, { series: [{ name: KEYS[k].name, color: ACCENT, values: padded.concat([]) }], height: 150, yFmt: function (v) { return fmt(v, 0) + '%'; }, baseline: 0, area: true, endLabel: false, table: false, d: 1, yMin: lo, yMax: hi, yTicks: 4 }); });
+}
+
+// ------------------------------------------------------------------
+// ③ 지표 비교
+// ------------------------------------------------------------------
+var chips = document.getElementById('ind-chips'); COUNTRIES.forEach(function (c) { var b = el('button', 'chip'); b.type = 'button'; var i = document.createElement('i'); i.style.background = colorOf(c); b.appendChild(i); b.appendChild(document.createTextNode(c.flag + ' ' + c.iso)); b.dataset.iso = c.iso; b.addEventListener('click', function () { var k = state.indCountries.indexOf(c.iso); if (k >= 0) state.indCountries.splice(k, 1); else state.indCountries.push(c.iso); render(); }); chips.appendChild(b); });
+document.getElementById('ind-select').addEventListener('change', function (ev) { state.ind = ev.target.value; render(); }); document.getElementById('ind-emph').addEventListener('change', function (ev) { state.emph = ev.target.value; render(); }); document.getElementById('ind-transform').addEventListener('click', function (ev) { var b = ev.target.closest('button'); if (!b) return; ev.currentTarget.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); }); b.classList.add('active'); state.transform = b.dataset.v; render(); });
+function renderIndicator() {
+  chips.querySelectorAll('.chip').forEach(function (b) { b.classList.toggle('on', state.indCountries.indexOf(b.dataset.iso) >= 0); });
+  var K = KEYS[state.ind]; document.getElementById('ind-title').textContent = K.name + (state.transform === 'index' ? ' — 지수화 (범위 시작=100)' : ' (' + K.unit + ')') + ' · ' + (state.freq === 'M' ? '월' : state.freq === 'Q' ? '분기' : '년');
+  var box = document.getElementById('ind-chart'); var cs = state.indCountries.map(function (i) { return BY[i]; });
+  var mk = function (c) { var s = view(c.iso, state.ind); if (state.transform === 'index') { var b = s[0].v || 1; s = s.map(function (p) { return { t: p.t, v: p.v / b * 100 }; }); } return s; };
+  if (cs.length > 8) { box.textContent = ''; var g = el('div', 'sm-grid'); box.appendChild(g); cs.forEach(function (c) { var sm = el('div', 'sm'); var h = el('div', 'h'); h.appendChild(el('b', null, c.flag + ' ' + c.name)); var s = mk(c); h.appendChild(el('span', null, fmt(s[s.length - 1].v, K.d))); sm.appendChild(h); var cb = el('div', 'chart-box'); sm.appendChild(cb); g.appendChild(sm); lineChart(cb, { series: [{ name: c.name, color: ACCENT, values: s }], height: 120, yFmt: function (v) { return fmt(v, K.d > 1 ? 1 : K.d); }, endLabel: false, table: false, baseline: state.transform === 'index' ? 100 : null }); }); box.appendChild(el('p', 'chart-note', '8개국 초과 → 소형 다중 패널 (색 추가 생성 금지 규칙)')); return; }
+  var series = cs.map(function (c, i) { var emph = state.emph === 'none' ? true : c.iso === state.emph; var color = state.emph === 'none' ? (c.slot >= 0 ? SLOT[c.slot] : SLOT[i % 8]) : (emph ? (colorOf(c) === OTHER ? ACCENT : colorOf(c)) : OTHER); return { name: c.flag + ' ' + c.name, color: color, values: mk(c), emph: emph }; });
+  series.sort(function (a, b) { return (a.emph === false ? 0 : 1) - (b.emph === false ? 0 : 1); });
+  lineChart(box, { series: series, height: 340, yFmt: function (v) { return fmt(v, K.d > 1 ? 1 : K.d) + (state.transform === 'index' ? '' : K.unit); }, d: K.d, baseline: state.transform === 'index' ? 100 : null });
+}
+
+// ------------------------------------------------------------------
+// ④ 통화가치
+// ------------------------------------------------------------------
+function renderFx() {
+  var grid = document.getElementById('fx-grid'); grid.textContent = ''; var cs = groupCountries().filter(function (c) { return c.iso !== 'US' && !(c.euro && c.iso !== 'EU'); }); var items = [];
+  cs.forEach(function (c) { var s = fxIndex(c.iso); var last = s[s.length - 1].v; items.push({ label: c.flag + ' ' + c.ccy, value: last - 100 }); var sm = el('div', 'sm'); var h = el('div', 'h'); h.appendChild(el('b', null, c.flag + ' ' + c.ccy + ' · ' + c.name)); h.appendChild(el('span', null, fmt(last, 1) + ' (' + sgn(last - 100, 1) + '%)')); sm.appendChild(h); var cb = el('div', 'chart-box'); sm.appendChild(cb); grid.appendChild(sm); lineChart(cb, { series: [{ name: c.ccy, color: ACCENT, values: s }], height: 110, yFmt: function (v) { return fmt(v, 0); }, baseline: 100, area: true, endLabel: false, table: false }); });
+  items.sort(function (a, b) { return b.value - a.value; }); divBars(document.getElementById('fx-bars'), { items: items });
+  var dxy = slice(seriesMonthly('IN', 'cpi'), state.range).map(function (p, i, arr) { return { t: p.t, v: 100 + (p.v - 3.5) * 2.5 }; }); lineChart(document.getElementById('fx-dxy'), { series: [{ name: 'DXY', color: ACCENT, values: aggregate(dxy, state.freq) }], height: 220, yFmt: function (v) { return fmt(v, 0); }, d: 1 });
+}
+
+// ------------------------------------------------------------------
+// ⑤ 정치
+// ------------------------------------------------------------------
+function renderPolitics() {
+  var t = document.getElementById('pol-table'); t.textContent = ''; var h = el('tr'); ['국가', '집권당 (성향)', '1위 정당 지지율', '2위', '정부 지지율', '다음 선거', '조사 신뢰도'].forEach(function (x, i) { h.appendChild(el('th', i === 2 || i === 3 || i === 4 ? 'num' : null, x)); }); var th = el('thead'); th.appendChild(h); t.appendChild(th); var tb = el('tbody');
+  groupCountries().forEach(function (c) { var r = el('tr'); r.appendChild(el('td', null, c.flag + ' ' + c.name)); r.appendChild(el('td', null, c.ruling + (c.lean !== '—' ? ' (' + c.lean + ')' : '')));
+    var td = el('td', 'num'); if (c.base.party == null) { td.textContent = '—'; } else { var w = el('span'); w.style.display = 'inline-flex'; w.style.alignItems = 'center'; w.style.gap = '8px'; var bar = el('i'); bar.style.display = 'inline-block'; bar.style.height = '8px'; bar.style.width = (c.base.party * 1.6) + 'px'; bar.style.background = colorOf(c) === OTHER ? ACCENT : colorOf(c); bar.style.borderRadius = '0 4px 4px 0'; w.appendChild(bar); w.appendChild(document.createTextNode(c.base.party + '%')); td.appendChild(w); td.style.cursor = 'pointer'; td.addEventListener('click', function () { openDrawer(c, 'party', c.base.party, '2026-09 (30일 평균)'); }); } r.appendChild(td);
+    r.appendChild(el('td', 'num', c.base.party == null ? '—' : c.second + ' ' + Math.max(8, c.base.party - 8 - (c.iso.charCodeAt(1) % 9)) + '%')); r.appendChild(el('td', 'num', c.gov == null ? '해당 없음' : c.gov + '%')); r.appendChild(el('td', null, c.next)); var tdT = el('td'); var bd = el('span', 'badge ' + (c.trust === '높음' ? 'badge-green' : c.trust === '보통' ? 'badge-yellow' : c.trust === '낮음' ? 'badge-red' : 'badge-gray'), c.trust); bd.style.background = c.trust === '높음' ? 'var(--green-bg)' : c.trust === '보통' ? 'var(--yellow-bg)' : c.trust === '낮음' ? 'var(--red-bg)' : 'var(--gray-bg)'; bd.style.color = c.trust === '높음' ? 'var(--green)' : c.trust === '보통' ? 'var(--yellow)' : c.trust === '낮음' ? 'var(--red)' : 'var(--gray)'; tdT.appendChild(bd); r.appendChild(tdT); tb.appendChild(r); });
+  t.appendChild(tb);
+  var P = PROFILE.KR; lineChart(document.getElementById('pol-kr-chart'), { series: P.parties.map(function (p) { return { name: p[0], color: p[2] >= 0 ? SLOT[p[2]] : OTHER, values: aggregate(slice(partySeries(BY.KR, Math.max(0, p[2]) + (p[2] < 0 ? 3 : 0), p[1]), state.range === 'all' ? '10y' : state.range), state.freq), emph: p[2] >= 0 }; }), height: 260, yFmt: function (v) { return fmt(v, 0) + '%'; }, d: 1 });
+}
+
+route();
+})();
+</script>
+</body>
+</html>

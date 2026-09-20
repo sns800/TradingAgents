@@ -1,0 +1,1146 @@
+# ============================================================
+# [모듈 개요] G20 매크로 지표 레지스트리 — CONTRACT.md 2장의 단일 구현체
+#
+# 이 파일은 "어떤 국가"의 "어떤 지표"를 "어떤 소스·시리즈"에서 받아 어떤 빈도로
+# 저장하는지를 선언한다. webui/macro/registry.py 가 읽어 Country/Indicator/Registry
+# 객체로 바꾸고, 수집기(sources/*)·집계(aggregate.py)·저장(store.py)·API가 모두 이
+# 선언만 참조한다. 하드코딩된 국가·시리즈 목록을 다른 모듈에 두지 않는다.
+#
+# 형식
+#   countries: CONTRACT 1장 20개(19개국 + 유로존 EU). iso(ISO 3166-1 alpha-2)가 시스템 키.
+#     codes.bis      BIS ISO2        (유로존 XM)
+#     codes.oecd     OECD ISO3       (유로존 EA20)
+#     codes.wb       World Bank ISO3 (유로존 EMU). 응답의 country.id는 "XC"이므로 국가 매칭은
+#                    반드시 `countryiso3code=EMU`로 한다 (2026-09-20 실측)
+#     codes.imf      IMF ISO3       (유로존 U2 — MFS_MA에는 U2 시계열이 없다, imf.py 실측)
+#     codes.yahoo_fx { symbol, invert } · invert=true면 심볼이 USD/현지통화이므로 1/x 해야
+#                    CONTRACT의 fx_usd(현지통화/USD)가 된다. US는 null(환율 1).
+#     codes.fred_fx  FRB H.10 일별 환율 시리즈. `DEXUS*` 로 시작하면 USD/현지통화이므로
+#                    yahoo_fx.invert 와 같은 규칙으로 역수를 취한다. 없으면 null.
+#     codes.ember    Ember 국가명(name) + iso3. API는 ISO3를 `entity_code`로 받고, 유로존은
+#                    entity_code 옵션에 없어 **집계 엔티티 `entity=EU`**로만 받는다(iso3 없음).
+#                    공개 CSV도 유로존은 Area='EU'(ISO 3 code 빈 값) — 같은 'EU' 문자열을 쓴다
+#     codes.owid     OWID 에너지 CSV 국가명 + iso_code
+#   indicators: CONTRACT 2장 "지표 id 고정 목록" 38개 전부. id·순서를 registry.py의
+#     INDICATOR_IDS 와 정확히 일치시킨다(validate()가 차이를 ValueError로 보고).
+#     unit         "%" | index | usd | usd_bn | lcu_bn | lcu_per_usd | pct_gdp | pct_share | score
+#                  usd_bn=10억 USD, usd=USD 원단위(World Bank 원값), lcu_bn=자국통화 10억
+#                  (m2_level. USD 환산을 하지 않으므로 국가 간 절대값 비교 금지)
+#     category     politics | monetary | fx | structure | energy | fiscal | market
+#     native_freq  D | W | M | Q | Y | E  (원천 빈도)
+#     store_freqs  저장 빈도. native 이하(같거나 더 낮은 빈도)만 허용
+#     agg          last(기말) | mean | sum | none(원천 빈도 그대로만 저장)
+#     yoy_from     전년비 파생의 원천 지표 id (aggregate.yoy 입력)
+#     derived_from 그 외 파생의 원천 지표 id (aggregate.fx_value_index 등)
+#     composite    true면 value 대신 payload(JSON 목록)에 저장 (CONTRACT 3장)
+#     coverage_note 2026-09-20 소스 모듈 실측 커버리지 메모(자유 문자열, 선택). registry.py의
+#                  Indicator.extra 로 흡수되며 검증·API 메타(to_api_meta)에는 쓰이지 않는다.
+#     sources      우선순위 순. 앞선 소스 실패/무자료 시 다음 소스로 폴백하며
+#                  flags 에 fallback_source 를 붙인다. only 가 있으면 해당 iso 전용.
+#                  key/note/freq 는 소스 모듈용 힌트(선택 필드). freq 를 적으면 그 항목만
+#                  원천 빈도가 다르다는 뜻이다(예: 연간 폴백).
+#                  via 는 name=derived 인 파생 항목의 원자료 제공 소스(예: owid)이며,
+#                  registry.indicators_for_source("owid") 가 이 값도 함께 본다.
+#
+# 수정 시 CONTRACT.md 2장을 준수한다. unit/category/freq/agg 열거값, 지표 id 목록,
+# 유로 참조 규칙(policy_rate/m2_*/fx_* 는 euro 회원국 수집 제외)은 CONTRACT가 기준이며
+# 이 파일이 아니라 CONTRACT.md 를 먼저 고친다.
+# ============================================================
+
+countries:
+  - iso: KR
+    iso3: KOR
+    name_ko: 한국
+    name_en: South Korea
+    ccy: KRW
+    groups: [G20, ASIA]
+    euro: false
+    codes:
+      bis: KR
+      oecd: KOR
+      wb: KOR
+      imf: KOR
+      yahoo_fx: { symbol: "KRW=X", invert: false }
+      fred_fx: DEXKOUS
+      ember: { name: South Korea, iso3: KOR }
+      owid: { name: South Korea, iso3: KOR }
+
+  - iso: US
+    iso3: USA
+    name_ko: 미국
+    name_en: United States
+    ccy: USD
+    groups: [G20, G7]
+    euro: false
+    codes:
+      bis: US
+      oecd: USA
+      wb: USA
+      imf: USA
+      yahoo_fx: null        # 기준통화 → 환율 1
+      fred_fx: null
+      ember: { name: United States, iso3: USA }
+      owid: { name: United States, iso3: USA }
+
+  - iso: JP
+    iso3: JPN
+    name_ko: 일본
+    name_en: Japan
+    ccy: JPY
+    groups: [G20, G7, ASIA]
+    euro: false
+    codes:
+      bis: JP
+      oecd: JPN
+      wb: JPN
+      imf: JPN
+      yahoo_fx: { symbol: "JPY=X", invert: false }
+      fred_fx: DEXJPUS
+      ember: { name: Japan, iso3: JPN }
+      owid: { name: Japan, iso3: JPN }
+
+  - iso: CN
+    iso3: CHN
+    name_ko: 중국
+    name_en: China
+    ccy: CNY
+    groups: [G20, BRICS, ASIA]
+    euro: false
+    codes:
+      bis: CN
+      oecd: CHN
+      wb: CHN
+      imf: CHN
+      yahoo_fx: { symbol: "CNY=X", invert: false }
+      fred_fx: DEXCHUS
+      ember: { name: China, iso3: CHN }
+      owid: { name: China, iso3: CHN }
+
+  - iso: EU
+    iso3: EA20
+    name_ko: 유로존
+    name_en: Euro area
+    ccy: EUR
+    groups: [G20, EU]
+    euro: false             # 유로존 자체는 참조 대상(피참조)이므로 false
+    codes:
+      bis: XM
+      oecd: EA20
+      wb: EMU
+      imf: U2
+      yahoo_fx: { symbol: "EURUSD=X", invert: true }
+      fred_fx: DEXUSEU
+      ember: { name: EU }   # API 집계 엔티티·CSV Area 모두 'EU' (entity_code 없음)
+      owid: { name: European Union (27), iso3: OWID_EU27 }
+
+  - iso: DE
+    iso3: DEU
+    name_ko: 독일
+    name_en: Germany
+    ccy: EUR
+    groups: [G20, G7, EU]
+    euro: true              # policy_rate/m2_*/fx_* 는 EU 값 참조 (수집 제외)
+    codes:
+      bis: DE
+      oecd: DEU
+      wb: DEU
+      imf: DEU
+      yahoo_fx: { symbol: "EURUSD=X", invert: true }
+      fred_fx: DEXUSEU
+      ember: { name: Germany, iso3: DEU }
+      owid: { name: Germany, iso3: DEU }
+
+  - iso: FR
+    iso3: FRA
+    name_ko: 프랑스
+    name_en: France
+    ccy: EUR
+    groups: [G20, G7, EU]
+    euro: true
+    codes:
+      bis: FR
+      oecd: FRA
+      wb: FRA
+      imf: FRA
+      yahoo_fx: { symbol: "EURUSD=X", invert: true }
+      fred_fx: DEXUSEU
+      ember: { name: France, iso3: FRA }
+      owid: { name: France, iso3: FRA }
+
+  - iso: IT
+    iso3: ITA
+    name_ko: 이탈리아
+    name_en: Italy
+    ccy: EUR
+    groups: [G20, G7, EU]
+    euro: true
+    codes:
+      bis: IT
+      oecd: ITA
+      wb: ITA
+      imf: ITA
+      yahoo_fx: { symbol: "EURUSD=X", invert: true }
+      fred_fx: DEXUSEU
+      ember: { name: Italy, iso3: ITA }
+      owid: { name: Italy, iso3: ITA }
+
+  - iso: GB
+    iso3: GBR
+    name_ko: 영국
+    name_en: United Kingdom
+    ccy: GBP
+    groups: [G20, G7]
+    euro: false
+    codes:
+      bis: GB
+      oecd: GBR
+      wb: GBR
+      imf: GBR
+      yahoo_fx: { symbol: "GBPUSD=X", invert: true }
+      fred_fx: DEXUSUK
+      ember: { name: United Kingdom, iso3: GBR }
+      owid: { name: United Kingdom, iso3: GBR }
+
+  - iso: CA
+    iso3: CAN
+    name_ko: 캐나다
+    name_en: Canada
+    ccy: CAD
+    groups: [G20, G7]
+    euro: false
+    codes:
+      bis: CA
+      oecd: CAN
+      wb: CAN
+      imf: CAN
+      yahoo_fx: { symbol: "CAD=X", invert: false }
+      fred_fx: DEXCAUS
+      ember: { name: Canada, iso3: CAN }
+      owid: { name: Canada, iso3: CAN }
+
+  - iso: AU
+    iso3: AUS
+    name_ko: 호주
+    name_en: Australia
+    ccy: AUD
+    groups: [G20, ASIA]
+    euro: false
+    codes:
+      bis: AU
+      oecd: AUS
+      wb: AUS
+      imf: AUS
+      yahoo_fx: { symbol: "AUDUSD=X", invert: true }
+      fred_fx: DEXUSAL
+      ember: { name: Australia, iso3: AUS }
+      owid: { name: Australia, iso3: AUS }
+
+  - iso: IN
+    iso3: IND
+    name_ko: 인도
+    name_en: India
+    ccy: INR
+    groups: [G20, BRICS, ASIA]
+    euro: false
+    codes:
+      bis: IN
+      oecd: IND
+      wb: IND
+      imf: IND
+      yahoo_fx: { symbol: "INR=X", invert: false }
+      fred_fx: DEXINUS
+      ember: { name: India, iso3: IND }
+      owid: { name: India, iso3: IND }
+
+  - iso: ID
+    iso3: IDN
+    name_ko: 인도네시아
+    name_en: Indonesia
+    ccy: IDR
+    groups: [G20, ASIA]
+    euro: false
+    codes:
+      bis: ID
+      oecd: IDN
+      wb: IDN
+      imf: IDN
+      yahoo_fx: { symbol: "IDR=X", invert: false }
+      fred_fx: null         # H.10 미수록
+      ember: { name: Indonesia, iso3: IDN }
+      owid: { name: Indonesia, iso3: IDN }
+
+  - iso: BR
+    iso3: BRA
+    name_ko: 브라질
+    name_en: Brazil
+    ccy: BRL
+    groups: [G20, BRICS]
+    euro: false
+    codes:
+      bis: BR
+      oecd: BRA
+      wb: BRA
+      imf: BRA
+      yahoo_fx: { symbol: "BRL=X", invert: false }
+      fred_fx: DEXBZUS
+      ember: { name: Brazil, iso3: BRA }
+      owid: { name: Brazil, iso3: BRA }
+
+  - iso: MX
+    iso3: MEX
+    name_ko: 멕시코
+    name_en: Mexico
+    ccy: MXN
+    groups: [G20]
+    euro: false
+    codes:
+      bis: MX
+      oecd: MEX
+      wb: MEX
+      imf: MEX
+      yahoo_fx: { symbol: "MXN=X", invert: false }
+      fred_fx: DEXMXUS
+      ember: { name: Mexico, iso3: MEX }
+      owid: { name: Mexico, iso3: MEX }
+
+  - iso: AR
+    iso3: ARG
+    name_ko: 아르헨티나
+    name_en: Argentina
+    ccy: ARS
+    groups: [G20]
+    euro: false
+    codes:
+      bis: AR
+      oecd: ARG
+      wb: ARG
+      imf: ARG
+      yahoo_fx: { symbol: "ARS=X", invert: false }
+      fred_fx: null         # H.10 미수록
+      ember: { name: Argentina, iso3: ARG }
+      owid: { name: Argentina, iso3: ARG }
+
+  - iso: TR
+    iso3: TUR
+    name_ko: 튀르키예
+    name_en: Türkiye
+    ccy: TRY
+    groups: [G20]
+    euro: false
+    codes:
+      bis: TR
+      oecd: TUR
+      wb: TUR
+      imf: TUR
+      yahoo_fx: { symbol: "TRY=X", invert: false }
+      fred_fx: null         # H.10 미수록
+      ember: { name: Türkiye, iso3: TUR }
+      owid: { name: Turkey, iso3: TUR }   # OWID는 아직 Turkey 표기 (확인 필요)
+
+  - iso: SA
+    iso3: SAU
+    name_ko: 사우디아라비아
+    name_en: Saudi Arabia
+    ccy: SAR
+    groups: [G20]
+    euro: false
+    codes:
+      bis: SA
+      oecd: SAU
+      wb: SAU
+      imf: SAU
+      yahoo_fx: { symbol: "SAR=X", invert: false }
+      fred_fx: null         # H.10 미수록 (USD 페그)
+      ember: { name: Saudi Arabia, iso3: SAU }
+      owid: { name: Saudi Arabia, iso3: SAU }
+
+  - iso: ZA
+    iso3: ZAF
+    name_ko: 남아프리카공화국
+    name_en: South Africa
+    ccy: ZAR
+    groups: [G20, BRICS]
+    euro: false
+    codes:
+      bis: ZA
+      oecd: ZAF
+      wb: ZAF
+      imf: ZAF
+      yahoo_fx: { symbol: "ZAR=X", invert: false }
+      fred_fx: DEXSFUS
+      ember: { name: South Africa, iso3: ZAF }
+      owid: { name: South Africa, iso3: ZAF }
+
+  - iso: RU
+    iso3: RUS
+    name_ko: 러시아
+    name_en: Russia
+    ccy: RUB
+    groups: [G20, BRICS]
+    euro: false
+    codes:
+      bis: RU
+      oecd: RUS
+      wb: RUS
+      imf: RUS
+      yahoo_fx: { symbol: "RUB=X", invert: false }
+      fred_fx: null         # H.10 미수록
+      ember: { name: Russia, iso3: RUS }
+      owid: { name: Russia, iso3: RUS }
+
+indicators:
+  # ---------- 통화·금리 ----------
+  - id: policy_rate
+    name_ko: 정책금리
+    unit: "%"
+    category: monetary
+    native_freq: D
+    store_freqs: [D, M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "16/20 (2026-09-20 BIS 실측). AR 없음 — BIS 미제공이고 대체 소스(BCRA) 미구현이라
+                    LATEST 항목이 생기지 않는다(프론트 '—'). DE/FR/IT는 EU 값 참조."
+    sources:
+      - { name: bis, series: "WS_CBPOL/1.0/D.{bis}", priority: 1,
+          note: "일별 기말. 2026-09-20 실측 커버리지 16/20 (AR 미수록, DE/FR/IT는 EU 참조).
+                 AR: BIS 미제공, 대체 소스 미구현(BCRA)" }
+      - { name: fred, series: "FEDFUNDS", only: [US], freq: M, priority: 2,
+          note: "US 폴백(연방기금 실효금리 월평균). BIS가 US를 덮으므로 보조용" }
+
+  - id: fx_usd
+    name_ko: 환율(현지통화/USD)
+    unit: lcu_per_usd
+    category: fx
+    native_freq: D
+    store_freqs: [D, M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 4
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20 (2026-09-20 BIS WS_XRU 기말 실측). 월별 1차는 BIS, 실패 시 yahoo 일별을
+                    D→M 기말 집계해 채운다(flags: fallback_source)."
+    sources:
+      - { name: bis, series: "WS_XRU/1.0/M.{bis}.{ccy}.E", freq: M, priority: 1,
+          note: "키는 {FREQ}.{REF_AREA}.{CURRENCY}.{COLLECTION}. 3번째 차원은 현지통화(US만 USD),
+                 COLLECTION은 E=기말(A=기간평균). 제안서 부록 A의 `M.{ISO}.USD.A`는 2026-09-20
+                 실측으로 오류 확인. 커버리지 20/20" }
+      - { name: yahoo, series: "{yahoo_fx}", freq: D, priority: 2,
+          note: "codes.yahoo_fx.invert=true면 1/x (비공식 소스, 일별 보조)" }
+      - { name: fred, series: "{fred_fx}", freq: D, priority: 3,
+          note: "H.10. DEXUS* 는 USD/현지통화이므로 역수" }
+
+  - id: fx_value_index
+    name_ko: 통화가치 지수
+    unit: index
+    category: fx
+    native_freq: D
+    store_freqs: [D, M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: fx_usd
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "fx_usd 파생 → 커버리지는 fx_usd(20/20)와 같다. US는 환율 1이라 항상 100."
+    sources:
+      - { name: derived, series: "aggregate.fx_value_index(fx_usd, base)", priority: 1,
+          note: "기준환율/환율 × 100 (값 상승 = 통화 강세)" }
+
+  - id: m2_level
+    name_ko: 광의통화(M2) 잔액
+    unit: lcu_bn
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "IMF 11/20 (최신 9개국 KR JP AU BR ID MX TR ZA AR · 정지 2개국 CA 2008-12, RU 2021-11)
+                    + FRED US 1개국 = 12/20. EU·CN·GB·IN·SA: ECB/국가통계 소스 미구현."
+    unit_note: "자국통화 10억 단위 잔액(lcu_bn) — imf.py의 M2_LEVEL_UNIT/METHOD_LEVEL과 일치한다.
+                원천(IMF MFS BM_MAI.XDC.M)은 자국통화 원단위이고 소스 모듈이 1e9로 나눠 저장한다
+                (CSV의 SCALE 열은 표시용 힌트라 곱하지 않는다). USD 환산을 하지 않으므로 국가 간
+                절대값 비교는 금지이고, m2_yoy는 환율 효과가 없는 자국통화 기준 증가율이다.
+                US 폴백(FRED M2SL)만 entry unit이 usd_bn(10억 달러)이다."
+    sources:
+      - { name: imf, series: "MFS_MA/{imf}.BM_MAI.XDC.M", priority: 1,
+          note: "IMF SDMX 3.0 IMF.STA/MFS_MA. 차원 COUNTRY.INDICATOR.UNIT.FREQUENCY이며 와일드카드가
+                 동작하지 않아 4개 차원을 모두 채운다. 기간 필터는 c[TIME_PERIOD]=ge:YYYY-MM.
+                 2026-09-20 실측 11/20 — 최신 KR JP AU BR ID MX TR ZA AR, 정지 CA·RU,
+                 미제공 US CN EU DE FR IT GB IN SA. codes.imf의 EU=U2는 MFS_MA에 없다" }
+      - { name: fred, series: "M2SL", only: [US], freq: M, unit: usd_bn, priority: 2,
+          note: "US 전용. 계절조정 10억 달러 잔액이라 entry unit은 usd_bn(지표 기본 lcu_bn과 다름)" }
+
+  - id: m2_yoy
+    name_ko: 광의통화 전년비
+    unit: "%"
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: m2_level
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "m2_level(12/20)에서 파생 + World Bank 연간 폴백. 월별은 IMF·FRED가 주는 국가만."
+    sources:
+      - { name: derived, series: "aggregate.yoy(m2_level, lag=12)", priority: 1,
+          note: "자국통화(lcu_bn) 기준이라 환율 효과가 없다. imf.py도 같은 계산을 직접 내보낸다
+                 (source=imf, METHOD_YOY)" }
+      - { name: worldbank, series: "FM.LBL.BMNY.ZG", freq: Y, unit: "%", priority: 9,
+          note: "연간 폴백(freq Y). 월별 소스가 없는 국가(EU·CN·GB·IN·SA 등)에만 쓴다" }
+
+  # ---------- 물가 ----------
+  - id: cpi_index
+    name_ko: 소비자물가지수
+    unit: index
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "18/20 (2026-09-20 OECD 실측, 데이터플로 3개 합산) — AR·RU 없음(RU는 2022-03 이후 정지).
+                    기준연도가 다른 지수를 이어 붙이지 않도록 oecd.py가 국가별로 데이터플로 하나만 고정한다."
+    sources:
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_G20_PRICES@DF_G20_PRICES",
+          key: "{oecd}.M..CPI.IX._T.N._Z", priority: 1,
+          note: "차원 순서 REF_AREA.FREQ.METHODOLOGY.MEASURE.UNIT_MEASURE.EXPENDITURE.ADJUSTMENT.TRANSFORMATION.
+                 METHODOLOGY는 국가마다 N/HICP라 비워 둔다(와일드카드). 이 데이터플로의 유로존 REF_AREA는
+                 EA20이 아니라 EA — oecd.py가 codes.oecd EA20→EA 별칭으로 흡수한다. 2026-08까지 최신" }
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_PRICES_COICOP2018@DF_PRICES_C2018_ALL",
+          key: "{oecd}.M.N.CPI.IX._T.N._Z", priority: 2,
+          note: "COICOP 2018. CAN·DEU·FRA·ITA·JPN·MEX·SAU·TUR·ZAF가 2026-07/08까지 최신" }
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL",
+          key: "{oecd}.M.N.CPI.IX._T.N._Z", priority: 3,
+          note: "COICOP 1999(제안서가 가리킨 데이터플로). 9개국이 정지 상태
+                 (JPN 2021-06 · MEX 2024-07 · EA20/FRA/ITA/TUR 2025-12 · RUS 2022-03 등)라 보강용" }
+      - { name: fred, series: "CPIAUCSL", only: [US], freq: M, unit: index, priority: 4,
+          note: "US 폴백(계절조정). OECD가 US를 덮으므로 보조용" }
+
+  - id: cpi_yoy
+    name_ko: 소비자물가 전년비
+    unit: "%"
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: cpi_index
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "19/20 (2026-09-20 OECD DF_G20_PRICES 실측) — RU 없음(2022-03 이후 정지) →
+                    World Bank 연간 폴백으로만 채운다."
+    sources:
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_G20_PRICES@DF_G20_PRICES",
+          key: "{oecd}.M..CPI.PA._T.N.GY", priority: 1,
+          note: "OECD가 주는 전년비(UNIT_MEASURE=PA, TRANSFORMATION=GY)를 그대로 쓴다(월별 YoY 평균 금지).
+                 유로존 REF_AREA는 EA(별칭). 국가별 데이터플로 선택은 cpi_index와 같은 순서
+                 (G20 → COICOP2018 → COICOP1999)를 따른다" }
+      - { name: derived, series: "aggregate.yoy(cpi_index, lag=12)", priority: 2,
+          note: "원천이 전년비를 주지 않는 국가·기간 보강" }
+      - { name: worldbank, series: "FP.CPI.TOTL.ZG", freq: Y, unit: "%", priority: 9,
+          note: "연간 폴백(freq Y). RU처럼 OECD 월별이 정지한 국가" }
+
+  - id: core_cpi_yoy
+    name_ko: 근원 소비자물가 전년비
+    unit: "%"
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "11/20 (2026-09-20 OECD 실측). DF_G20_PRICES는 전체(_T) 전용이라 근원 CPI가 없어
+                    COICOP2018·COICOP1999 데이터플로만 쓴다."
+    sources:
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_PRICES_COICOP2018@DF_PRICES_C2018_ALL",
+          key: "{oecd}.M.N.CPI.PA._TXCP01_NRG.N.GY", priority: 1,
+          note: "식료품·에너지 제외(EXPENDITURE=_TXCP01_NRG), METHODOLOGY=N(국가 정의),
+                 UNIT_MEASURE=PA·TRANSFORMATION=GY(전년비)" }
+      - { name: oecd, series: "OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL",
+          key: "{oecd}.M.N.CPI.PA._TXCP01_NRG.N.GY", priority: 2,
+          note: "COICOP 1999. AUS·DEU·GBR·KOR·USA는 이쪽 근원 계열이 최신" }
+
+  - id: ppi_index
+    name_ko: 생산자물가지수
+    unit: index
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "최신값은 US(FRED)만. OECD KEI는 원천이 2023-02에서 정지(38개국, KR·JP·CN·IN 미포함)라
+                    과거 시계열 보강용이다. Eurostat(EU)·ECOS(KR) 소스는 미구현(후속)."
+    sources:
+      - { name: fred, series: "PPIACO", only: [US], freq: M, unit: index, priority: 1,
+          note: "전 품목 생산자물가지수(US 전용). 최신 PPI를 주는 유일한 구현 소스. 전년비는 derived" }
+      - { name: oecd, series: "OECD.SDD.STES,DSD_KEI@DF_KEI",
+          key: "{oecd}.M.PP.IX.C._Z._Z", priority: 2,
+          note: "단기경제지표 MEASURE=PP(Producer prices). 차원 순서
+                 REF_AREA.FREQ.MEASURE.UNIT_MEASURE.ACTIVITY.ADJUSTMENT.TRANSFORMATION.
+                 원천 2023-02에서 정지(oecd.PPI_FROZEN_UNTIL), KR·JP·CN·IN 미포함;
+                 Eurostat(EU)·ECOS(KR) 소스는 미구현(후속)" }
+
+  - id: ppi_yoy
+    name_ko: 생산자물가 전년비
+    unit: "%"
+    category: monetary
+    native_freq: M
+    store_freqs: [M, Q, Y]
+    agg: last
+    yoy_from: ppi_index
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "ppi_index(최신은 US만)에서 파생 + OECD KEI 전년비(2023-02까지). 개요 기본 지표지만
+                    대부분 국가는 최신값이 없어 프론트가 '—'를 표시한다."
+    sources:
+      - { name: derived, series: "aggregate.yoy(ppi_index, lag=12)", priority: 1,
+          note: "US는 FRED PPIACO 지수에서 파생" }
+      - { name: oecd, series: "OECD.SDD.STES,DSD_KEI@DF_KEI",
+          key: "{oecd}.M.PP.GR.C._Z.GY", priority: 2,
+          note: "KEI가 주는 전년비(UNIT_MEASURE=GR, TRANSFORMATION=GY). 원천 2023-02에서 정지,
+                 KR·JP·CN·IN 미포함; Eurostat(EU)·ECOS(KR) 소스는 미구현(후속)" }
+
+  # ---------- 집값 ----------
+  - id: house_price_index
+    name_ko: 주택가격지수(명목)
+    unit: index
+    category: market
+    native_freq: Q
+    store_freqs: [Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "18/20 (2026-09-20 BIS WS_SPP 실측) — AR·SA 없음, JP는 1분기 지연.
+                    유로 회원국(DE/FR/IT)은 각국 고유 계열이 있어 그대로 수집한다."
+    sources:
+      - { name: bis, series: "WS_SPP/1.0/Q.{bis}.N.628", priority: 1,
+          note: "N=명목, 628=지수(2010=100). 실질은 R.628. 2026-09-20 실측 커버리지 18/20
+                 (AR·SA 미수록, JP는 1분기 지연)" }
+      - { name: fred, series: "CSUSHPINSA", only: [US], freq: M, unit: index, priority: 2,
+          note: "케이스-실러 전국 주택가격지수(비조정, 월). entry unit은 index" }
+
+  - id: house_price_yoy
+    name_ko: 주택가격 전년비
+    unit: "%"
+    category: market
+    native_freq: Q
+    store_freqs: [Q, Y]
+    agg: last
+    yoy_from: house_price_index
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "house_price_index(18/20)에서 파생 → AR·SA 없음, JP는 1분기 지연."
+    sources:
+      - { name: derived, series: "aggregate.yoy(house_price_index, lag=4)", priority: 1 }
+
+  # ---------- 국민계정 ----------
+  - id: gdp_usd
+    name_ko: 명목 GDP(USD)
+    unit: usd
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 0
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭. unit=usd는 USD 원단위(10억/조 환산은 프론트 몫)."
+    sources:
+      - { name: worldbank, series: "NY.GDP.MKTP.CD", priority: 1 }
+
+  - id: gdp_growth
+    name_ko: 실질 GDP 성장률
+    unit: "%"
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NY.GDP.MKTP.KD.ZG", priority: 1 }
+
+  - id: gni_usd
+    name_ko: 국민총소득(USD)
+    unit: usd
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 0
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭. unit=usd는 USD 원단위."
+    sources:
+      - { name: worldbank, series: "NY.GNP.MKTP.CD", priority: 1 }
+
+  - id: gni_pc
+    name_ko: 1인당 GNI(USD)
+    unit: usd
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 0
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭. unit=usd는 USD 원단위."
+    sources:
+      - { name: worldbank, series: "NY.GNP.PCAP.CD", priority: 1 }
+
+  # ---------- 재정·국방 ----------
+  - id: gov_expense_gdp
+    name_ko: 정부지출/GDP
+    unit: pct_gdp
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "18/20 (2026-09-20 World Bank 실측) — CN·ID 없음. 중앙정부 기준이라 국가 간 정의 차이가 있다."
+    sources:
+      - { name: worldbank, series: "GC.XPN.TOTL.GD.ZS", priority: 1 }
+
+  - id: gov_revenue_gdp
+    name_ko: 정부수입/GDP
+    unit: pct_gdp
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "18/20 (2026-09-20 World Bank 실측) — ID·JP 없음."
+    sources:
+      - { name: worldbank, series: "GC.REV.XGRT.GD.ZS", priority: 1 }
+
+  - id: gov_debt_gdp
+    name_ko: 정부부채/GDP
+    unit: pct_gdp
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "11/20 (2026-09-20 World Bank 실측) — AR·CN·DE·EU(EMU)·FR·ID·IT·JP·SA 없음.
+                    IMF FM 폴백 미구현이라 이 9개국은 값이 없다(프론트 '—')."
+    sources:
+      - { name: worldbank, series: "GC.DOD.TOTL.GD.ZS", priority: 1,
+          note: "중앙정부 부채/GDP. 11/20 — AR·CN·DE·EMU·FR·ID·IT·JP·SA 결측" }
+      - { name: imf, series: "Fiscal Monitor 일반정부 부채 (imf.py가 결정)", priority: 2,
+          note: "WB 중앙정부 부채 결측 국가(중국 등) 폴백 — **미구현**(imf.py는 MFS 통화량만 수집)" }
+
+  - id: mil_gdp
+    name_ko: 국방비/GDP
+    unit: pct_gdp
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2024 (2026-09-20 World Bank 실측)."
+    sources:
+      - { name: worldbank, series: "MS.MIL.XPND.GD.ZS", priority: 1, note: "원자료 SIPRI" }
+
+  - id: mil_expenditure_share
+    name_ko: 국방비/정부지출
+    unit: pct_share
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "19/20, 최신 2024 (2026-09-20 World Bank 실측) — TR 없음."
+    sources:
+      - { name: worldbank, series: "MS.MIL.XPND.ZS", priority: 1, note: "원자료 SIPRI" }
+
+  - id: mil_usd
+    name_ko: 국방비(USD)
+    unit: usd
+    category: fiscal
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 0
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2024 (2026-09-20 World Bank 실측). unit=usd는 USD 원단위."
+    sources:
+      - { name: worldbank, series: "MS.MIL.XPND.CD", priority: 1, note: "원자료 SIPRI" }
+
+  # ---------- 경제구조 ----------
+  - id: va_agri
+    name_ko: 농림어업 부가가치 비중
+    unit: pct_gdp
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NV.AGR.TOTL.ZS", priority: 1 }
+
+  - id: va_industry
+    name_ko: 산업 부가가치 비중
+    unit: pct_gdp
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NV.IND.TOTL.ZS", priority: 1 }
+
+  - id: va_manuf
+    name_ko: 제조업 부가가치 비중
+    unit: pct_gdp
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NV.IND.MANF.ZS", priority: 1 }
+
+  - id: va_services
+    name_ko: 서비스업 부가가치 비중
+    unit: pct_gdp
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NV.SRV.TOTL.ZS", priority: 1 }
+
+  - id: exports_gdp
+    name_ko: 수출/GDP
+    unit: pct_gdp
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2025 (2026-09-20 World Bank 실측). 유로존은 응답의 countryiso3code=EMU로 매칭."
+    sources:
+      - { name: worldbank, series: "NE.EXP.GNFS.ZS", priority: 1 }
+
+  - id: exports_top_hs2
+    name_ko: 상위 수출품목(HS2)
+    unit: pct_share
+    category: structure
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: true
+    coverage_note: "19/20 — EU 없음(WITS에 유로존/EU 집계 리포터가 없다). 최신 연도 2023
+                    (2024는 404 · 연도는 wits.py가 (올해-2)부터 역순 탐색)."
+    sources:
+      - { name: wits, series: "tradestats-trade/{wb}/product/all/indicator/XPRT-TRD-VL",
+          priority: 1,
+          note: "수출액(XPRT-TRD-VL, US$ 천)을 받아 합계 대비 비중을 계산한다. product 차원은 HS2 챕터 97개가
+                 아니라 HS 챕터 구간 16개 품목군(01-05_Animal … 90-99_Miscellan)이라 payload.hs2는
+                 '84-85' 같은 구간 문자열이다. payload.items=[{label, value(비중%), hs2, label_ko, label_en,
+                 usd_mn}] 상위 10개 + total_usd_mn·n_groups. 최신 연도 2023, EU 집계 리포터 없음" }
+
+  # ---------- 에너지 ----------
+  - id: elec_mix
+    name_ko: 발전 믹스
+    unit: pct_share
+    category: energy
+    native_freq: M
+    store_freqs: [M, Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: true
+    coverage_note: "20/20 (2026-09-20 EMBER_API_KEY 재실측). 유로존은 API의 집계 엔티티 entity=EU로 받고
+                    (entity_code 옵션 209개는 3자 ISO뿐이라 유로존이 없다), 그 요청이 막히면 공개 CSV의
+                    Area='EU'(ISO3 빈 값) 행으로 그 국가만 보충한다(flags=fallback_source)."
+    sources:
+      - { name: ember, series: "electricity-generation/{monthly|yearly}", priority: 1,
+          note: "네 경로를 ember.py가 내부에서 처리하므로 레지스트리 항목은 하나다.
+                 (1) API https://api.ember-energy.org/v1/electricity-generation/{yearly|monthly} — EMBER_API_KEY 필요.
+                 인증은 쿼리 파라미터 api_key(헤더 X-API-Key는 키가 유효해도 403 — 실측).
+                 ISO3 19개국은 entity_code로, 유로존은 집계 엔티티 entity=EU로 **요청을 나눠** 보낸다
+                 (한 요청에 같이 넣으면 AND로 걸려 0행),
+                 (2) API 응답에 없는 국가만 공개 CSV로 보충(flags=fallback_source).
+                 다른 해상도를 API가 준 국가는 보충하지 않는다(ID·SA는 Ember에 월간 시계열이 없다 — 실측),
+                 (3) 키가 없거나 API 요청이 실패하면 무키 공개 CSV 전체: files.ember-energy.org 의
+                 /public-downloads/generation/outputs/release_generation_{yearly|monthly}_global.csv
+                 — 유로존은 Area='EU'(ISO3 빈 값). 이 경로 관측치에는 flags=fallback_source.
+                 (4) CSV까지 실패하면 owid 연간 폴백.
+                 'Net imports'는 발전이 아니라 제외하고 비중을 재계산한다.
+                 payload.items=[{label(석탄/가스/원자력/수력/풍력/태양광/바이오/기타), value(%), twh}] + total_twh" }
+
+  - id: energy_import_dep
+    name_ko: 에너지 수입의존도
+    unit: pct_share
+    category: energy
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "20/20, 최신 2023 (2026-09-20 World Bank 실측). OWID 파생 폴백은 삭제했다 —
+                    OWID 에너지 CSV에 primary_energy_production 열이 없어 계산 불가(owid.ENERGY_IMPORT_DEP_NOTE)."
+    sources:
+      - { name: worldbank, series: "EG.IMP.CONS.ZS", priority: 1,
+          note: "순에너지수입/에너지사용량(%). 2026-09-20 실측 20/20, 최신 2023" }
+
+  - id: fuel_dep_oil
+    name_ko: 원유 해외의존도
+    unit: pct_share
+    category: energy
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "19/20 — EU 없음(OWID에 유로존 행이 없고 OWID_EU27만 있다). Observation.source는 owid,
+                    flags=[estimated, derived]."
+    sources:
+      - { name: derived, via: owid,
+          series: "owid: aggregate.fuel_dependency(oil_production, oil_consumption)",
+          priority: 1,
+          note: "max(0, 1 - 생산/소비) × 100 (원유 생산·소비 열, 단위 TWh). Observation.source=owid이고
+                 flags에 estimated+derived. 소비가 있는데 생산 열이 결측이면 생산을 0으로 간주해 100%로
+                 본다(owid.ASSUME_MISSING_PRODUCTION_ZERO) — 재수출·재고 변동 미반영 추정치" }
+
+  - id: fuel_dep_gas
+    name_ko: 천연가스 해외의존도
+    unit: pct_share
+    category: energy
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "19/20 — EU 없음(OWID에 유로존 행이 없고 OWID_EU27만 있다). Observation.source는 owid,
+                    flags=[estimated, derived]."
+    sources:
+      - { name: derived, via: owid,
+          series: "owid: aggregate.fuel_dependency(gas_production, gas_consumption)",
+          priority: 1,
+          note: "max(0, 1 - 생산/소비) × 100 (천연가스 생산·소비 열, 단위 TWh). Observation.source=owid이고
+                 flags에 estimated+derived. 소비가 있는데 생산 열이 결측이면 생산을 0으로 간주해 100%로
+                 본다(owid.ASSUME_MISSING_PRODUCTION_ZERO) — 재수출·재고 변동 미반영 추정치" }
+
+  - id: fuel_dep_coal
+    name_ko: 석탄 해외의존도
+    unit: pct_share
+    category: energy
+    native_freq: Y
+    store_freqs: [Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "19/20 — EU 없음(OWID에 유로존 행이 없고 OWID_EU27만 있다). Observation.source는 owid,
+                    flags=[estimated, derived]."
+    sources:
+      - { name: derived, via: owid,
+          series: "owid: aggregate.fuel_dependency(coal_production, coal_consumption)",
+          priority: 1,
+          note: "max(0, 1 - 생산/소비) × 100 (석탄 생산·소비 열, 단위 TWh). Observation.source=owid이고
+                 flags에 estimated+derived. 소비가 있는데 생산 열이 결측이면 생산을 0으로 간주해 100%로
+                 본다(owid.ASSUME_MISSING_PRODUCTION_ZERO) — 재수출·재고 변동 미반영 추정치" }
+
+  # ---------- 정치 ----------
+  - id: party_support
+    name_ko: 집권당 지지율
+    unit: "%"
+    category: politics
+    native_freq: W
+    store_freqs: [W, M, Q]
+    agg: mean
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "LLM 소스(llm/polls_wiki.py) 담당 — 실측 커버리지 미확정. CN·SA는 경쟁 정당이 없고
+                    EU는 정부 지지율 대상이 아니라 not_applicable 문서로 표기한다(17개국 수집)."
+    sources:
+      - { name: wiki_polls, series: "Opinion polling for the next {name_en} election", priority: 1,
+          note: "value=집권당 지지율(poll_of_polls.ruling_pct), payload.results에 전 정당. 중국·사우디·유로존은 not_applicable 문서" }
+
+  - id: gov_approval
+    name_ko: 정부 지지율
+    unit: "%"
+    category: politics
+    native_freq: W
+    store_freqs: [W, M, Q]
+    agg: mean
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "LLM 소스(llm/polls_wiki.py) 담당 — 실측 커버리지 미확정. CN·SA·EU는 not_applicable."
+    sources:
+      - { name: wiki_polls, series: "국가별 정부/지도자 지지율 조사", priority: 1 }
+
+  - id: cb_stance
+    name_ko: 중앙은행 기조
+    unit: score
+    category: monetary
+    native_freq: E
+    store_freqs: [E, M, Q]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: false
+    coverage_note: "LLM 소스(llm/cb_statements.py) 담당 — 실측 커버리지 미확정. 유로 회원국은 ECB(=EU) 참조."
+    sources:
+      - { name: cb_statements, series: "중앙은행 결정문/성명 (LLM 판정)", priority: 1,
+          note: "value=stance_score(-2..2, 0.5 단위). 근거는 DOC#cb_stance#<iso>" }
+
+  # ---------- 시장 ----------
+  - id: top_companies
+    name_ko: 시총 상위 기업
+    unit: usd_bn
+    category: market
+    native_freq: Q
+    store_freqs: [Q, Y]
+    agg: none
+    yoy_from: null
+    derived_from: null
+    decimals: 1
+    higher_is: neutral
+    composite: true
+    coverage_note: "18/20 — RU 없음(Yahoo가 MOEX 시세 미제공), EU 없음(단일 거래소가 없어 DE/FR/IT가 대표).
+                    카탈로그 4개국(KR JP US CN) + yahoo 14개국. 소스 이름(모듈·INGEST 식별자)은 companies,
+                    Observation.source는 경로에 따라 catalog 또는 yahoo."
+    sources:
+      - { name: companies, series: "catalog/{iso}.json.gz", only: [KR, JP, US, CN], priority: 1,
+          note: "기존 종목 카탈로그(S3 catalog/{iso}.json.gz)의 시총 상위 10개. Observation.source=catalog.
+                 USD 환산은 ctx.extra['fx_rates'](현지통화/USD)를 쓰고, 환율이 없으면 현지통화만 채운다" }
+      - { name: companies, series: "대표지수 구성종목 (yfinance fast_info marketCap)", priority: 2,
+          note: "카탈로그가 없는 14개국. Observation.source=yahoo. 런던(GBp)·요하네스버그(ZAc)는 보조통화
+                 표기라 100으로 나눈다(companies.MINOR_UNIT_CURRENCIES). RU는 티커 목록 없음, EU는 건너뜀.
+                 payload.items=[{label, value(시총 USD 10억), name, ticker, sector, market_cap_usd_bn,
+                 market_cap_local, currency}] + asof·source_detail" }
+
+  - id: dxy
+    name_ko: 달러지수
+    unit: index
+    category: fx
+    native_freq: D
+    store_freqs: [D, M, Q, Y]
+    agg: last
+    yoy_from: null
+    derived_from: null
+    decimals: 2
+    higher_is: neutral
+    composite: false
+    coverage_note: "국가 단위 지표가 아니라 iso=US 1건으로 저장한다. FRED 키가 없으면 yahoo DX-Y.NYB만."
+    sources:
+      - { name: fred, series: "DTWEXBGS", only: [US], freq: D, unit: index, priority: 1,
+          note: "광범위 달러지수(무역가중). iso=US로 저장. FRED_API_KEY가 없으면 수집 생략" }
+      - { name: yahoo, series: "DX-Y.NYB", only: [US], freq: D, unit: index, priority: 2,
+          note: "ICE 달러지수(비공식 소스). 2026-09-20 심볼 200 확인" }

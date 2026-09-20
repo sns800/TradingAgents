@@ -1,0 +1,39 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "KRW",
+     "symbol": "KRW=X",
+     "gmtoffset": 3600,
+     "exchangeTimezoneName": "Europe/London",
+     "dataGranularity": "1d",
+     "regularMarketTime": 1789875049
+    },
+    "timestamp": [
+     1789340400,
+     1789426800,
+     1789513200,
+     1789599600,
+     1789686000,
+     1789875049
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "close": [
+        1344.6400146484375,
+        1345.6099853515625,
+        1363.5699462890625,
+        1376.5999755859375,
+        1379.530029296875,
+        1385.0
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}
