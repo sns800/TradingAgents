@@ -30,7 +30,8 @@ def _load_parsers():
 parsers = _load_parsers()
 
 ITEM_KEYS = {
-    "ticker", "name", "market", "sector", "industry", "price", "currency", "market_cap",
+    "ticker", "name", "name_ko", "market", "sector", "industry", "price", "currency",
+    "market_cap",
 }
 
 
@@ -59,7 +60,7 @@ class TestParseUS(unittest.TestCase):
         self.assertEqual(apple["name"], "Apple Inc. - Common Stock")
         self.assertEqual(apple["market"], "NASDAQ")
         self.assertEqual(apple["currency"], "USD")
-        # US 소스에는 업종 정보가 없고 시세 보강도 하지 않으므로 sector는 None
+        # 상장 파일에는 업종 정보가 없어 sector_map 미제공 시 sector는 None
         self.assertIsNone(apple["sector"])
         self.assertIsNone(apple["price"])
         self.assertIsNone(apple["market_cap"])
@@ -96,6 +97,83 @@ class TestParseUS(unittest.TestCase):
         self.assertFalse(any(t.startswith("FILE") for t in self.index))
         # 픽스처 기대 종목 수: nasdaq(AAPL, MSFT) + other(A, BRK.A, BRK.B, IBM)
         self.assertEqual(len(self.items), 6)
+
+
+@pytest.mark.unit
+class TestParseUSSectors(unittest.TestCase):
+    """NASDAQ 스크리너 sector 매핑과 parse_us의 '한글(원문)' 표기 검증.
+
+    픽스처는 실제 스크리너 응답 구조의 축약본이며, 실데이터에서 sector가 비는
+    클래스 주식(BRK/A)과 달리 HEI/A·ABR^D에는 슬래시 정규화·우선주 제외
+    분기를 확인하기 위해 sector 값을 인위적으로 채워 두었다.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sector_map = parsers.parse_us_sectors(
+            (FIXTURES / "nasdaq_screener_sample.json").read_bytes()
+        )
+
+    def test_sector_map_symbols_normalized(self):
+        """스크리너 심볼이 야후 형식으로 정규화되는지 검증하는 테스트 (HEI/A -> HEI-A)."""
+        self.assertEqual(self.sector_map["AAPL"], "Technology")
+        self.assertEqual(self.sector_map["HEI-A"], "Industrials")
+
+    def test_preferred_and_empty_sector_dropped(self):
+        """우선주(^)와 sector가 빈 종목이 매핑에서 빠지는지 검증하는 테스트."""
+        self.assertFalse(any("^" in t for t in self.sector_map))
+        self.assertNotIn("BRK-A", self.sector_map)  # sector가 빈 문자열
+        self.assertEqual(len(self.sector_map), 5)  # AAPL, MSFT, A, IBM, HEI-A
+
+    def test_parse_us_localizes_sector(self):
+        """sector_map을 넘기면 '한글번역(원문)' 표기로 채워지는지 검증하는 테스트."""
+        items = parsers.parse_us(
+            (FIXTURES / "nasdaqlisted_sample.txt").read_bytes(),
+            (FIXTURES / "otherlisted_sample.txt").read_bytes(),
+            self.sector_map,
+        )
+        index = _by_ticker(items)
+        self.assertEqual(index["AAPL"]["sector"], "기술(Technology)")
+        self.assertEqual(index["IBM"]["sector"], "기술(Technology)")  # otherlisted 경로
+        self.assertEqual(index["A"]["sector"], "산업재(Industrials)")
+        self.assertIsNone(index["BRK-A"]["sector"])  # 매핑에 없는 티커
+
+    def test_unknown_sector_passes_through(self):
+        """매핑에 없는 새 분류 값은 원문 그대로 통과하는지 검증하는 테스트 (fail-open)."""
+        items = parsers.parse_us(
+            (FIXTURES / "nasdaqlisted_sample.txt").read_bytes(),
+            (FIXTURES / "otherlisted_sample.txt").read_bytes(),
+            {"AAPL": "Quantum Computing"},
+        )
+        self.assertEqual(_by_ticker(items)["AAPL"]["sector"], "Quantum Computing")
+
+    def test_broken_screener_json_raises(self):
+        """rows 없는 응답이 ValueError를 내는지 검증하는 테스트 (수집기 fail-open 경로)."""
+        with self.assertRaises(ValueError):
+            parsers.parse_us_sectors(b'{"data": null}')
+
+
+@pytest.mark.unit
+class TestSectorLocalization(unittest.TestCase):
+    def test_jp_mapping_covers_all_33_sectors(self):
+        """JPX 33업종 매핑이 정확히 33종인지 검증하는 테스트."""
+        self.assertEqual(len(parsers.JP_SECTOR_KO), 33)
+
+    def test_us_mapping_covers_screener_taxonomy(self):
+        """NASDAQ 스크리너 sector 분류 12종이 모두 매핑돼 있는지 검증하는 테스트."""
+        self.assertEqual(len(parsers.US_SECTOR_KO), 12)
+
+    def test_localize_format(self):
+        """'한글번역(원문)' 표기 형식을 검증하는 테스트."""
+        self.assertEqual(
+            parsers._localize_sector(parsers.JP_SECTOR_KO, "銀行業"), "은행업(銀行業)"
+        )
+
+    def test_localize_fallback(self):
+        """매핑에 없는 값은 원문 유지, 빈 값은 None인지 검증하는 테스트."""
+        self.assertEqual(parsers._localize_sector(parsers.JP_SECTOR_KO, "新業種"), "新業種")
+        self.assertIsNone(parsers._localize_sector(parsers.JP_SECTOR_KO, None))
+        self.assertIsNone(parsers._localize_sector(parsers.JP_SECTOR_KO, ""))
 
 
 @pytest.mark.unit
@@ -173,11 +251,11 @@ class TestParseJP(unittest.TestCase):
             self.assertEqual(set(item), ITEM_KEYS)
 
     def test_tokyo_suffix_and_sector(self):
-        """4자리 코드에 .T가 붙고 33업종 구분이 sector로 들어오는지 검증하는 테스트."""
+        """4자리 코드에 .T가 붙고 33업종 구분이 '한글(원문)'으로 들어오는지 검증하는 테스트."""
         toyota = self.index["7203.T"]
         self.assertEqual(toyota["name"], "トヨタ自動車")
         self.assertEqual(toyota["market"], "Prime")
-        self.assertEqual(toyota["sector"], "輸送用機器")
+        self.assertEqual(toyota["sector"], "수송용기기(輸送用機器)")
         self.assertEqual(toyota["currency"], "JPY")
 
     def test_market_segment_names(self):
@@ -217,11 +295,11 @@ class TestParseCN(unittest.TestCase):
             self.assertEqual(set(item), ITEM_KEYS)
 
     def test_shanghai_suffix_and_sector(self):
-        """상하이 메인보드 종목에 .SS가 붙고 CSRC 업종이 sector로 들어오는지 검증하는 테스트."""
+        """상하이 메인보드 종목에 .SS가 붙고 CSRC 업종이 '한글(원문)'으로 들어오는지 검증하는 테스트."""
         spdb = self.index["600000.SS"]
         self.assertEqual(spdb["name"], "浦发银行")
         self.assertEqual(spdb["market"], "Shanghai")
-        self.assertEqual(spdb["sector"], "金融业")
+        self.assertEqual(spdb["sector"], "금융업(金融业)")
         self.assertEqual(spdb["currency"], "CNY")
 
     def test_star_market_mapped(self):
@@ -237,9 +315,9 @@ class TestParseCN(unittest.TestCase):
         self.assertEqual(self.index["300750.SZ"]["market"], "ChiNext")
 
     def test_szse_sector_prefix_stripped(self):
-        """SZSE '所属行业'의 CSRC 분류 문자 접두('J ')가 제거되는지 검증하는 테스트."""
-        self.assertEqual(self.index["000001.SZ"]["sector"], "金融业")
-        self.assertEqual(self.index["300750.SZ"]["sector"], "制造业")
+        """SZSE '所属行业'의 CSRC 분류 문자 접두('J ')가 제거되고 한글 표기되는지 검증하는 테스트."""
+        self.assertEqual(self.index["000001.SZ"]["sector"], "금융업(金融业)")
+        self.assertEqual(self.index["300750.SZ"]["sector"], "제조업(制造业)")
 
     def test_delisted_and_bshare_excluded(self):
         """상장폐지 종목과 A주 코드 없는 B주 전용 행이 제외되는지 검증하는 테스트."""

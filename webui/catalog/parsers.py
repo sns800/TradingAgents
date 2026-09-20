@@ -11,6 +11,12 @@
 #    "currency": "KRW", "market_cap": 420000000000000.0}
 # - 값이 없으면 null(None). ticker는 야후 파이낸스 형식.
 # - price/market_cap은 파서 단계에서는 항상 None이며 시세 보강 단계에서 채웁니다.
+# - 해외(일본·중국·미국) sector는 "한글번역(원문)" 표기입니다 (예: "은행업(銀行業)").
+#   매핑에 없는 새 분류 값은 원문 그대로 통과시킵니다 (fail-open).
+# - name_ko: 한국어 종목명 (일본·중국 종목 대상, 계약에 추가된 확장 필드).
+#   원본 name은 절대 바꾸지 않고 별도 컬럼으로 둔다. 파서 단계에서는 항상
+#   None이며 배치의 한글명 보강 단계(네이버 증권)에서 채운다. UI는
+#   name_ko가 있으면 "한글명(원문)"으로 표시하고 없으면 원문만 표시한다.
 # ============================================================
 from __future__ import annotations
 
@@ -74,11 +80,118 @@ CN_CODE_PREFIX_MAP = {
 }
 
 
+# ---------- 업종 한글 표기 ----------
+# 해외 시장 업종을 "한글번역(원문)" 형태로 표기하기 위한 시장별 매핑.
+# 값은 각 소스의 공식 분류 체계 전체를 담는다. 분류 개편으로 새 값이 오면
+# _localize_sector가 원문을 그대로 반환하므로 배치는 깨지지 않는다.
+
+# JPX 33업종 구분 (東証 33業種, data_j.xls의 "33業種区分" 전체 33종)
+JP_SECTOR_KO = {
+    "水産・農林業": "수산·농림업",
+    "鉱業": "광업",
+    "建設業": "건설업",
+    "食料品": "식료품",
+    "繊維製品": "섬유제품",
+    "パルプ・紙": "펄프·종이",
+    "化学": "화학",
+    "医薬品": "의약품",
+    "石油・石炭製品": "석유·석탄제품",
+    "ゴム製品": "고무제품",
+    "ガラス・土石製品": "유리·토석제품",
+    "鉄鋼": "철강",
+    "非鉄金属": "비철금속",
+    "金属製品": "금속제품",
+    "機械": "기계",
+    "電気機器": "전기기기",
+    "輸送用機器": "수송용기기",
+    "精密機器": "정밀기기",
+    "その他製品": "기타제품",
+    "電気・ガス業": "전기·가스업",
+    "陸運業": "육상운송업",
+    "海運業": "해운업",
+    "空運業": "항공운송업",
+    "倉庫・運輸関連業": "창고·운수관련업",
+    "情報・通信業": "정보·통신업",
+    "卸売業": "도매업",
+    "小売業": "소매업",
+    "銀行業": "은행업",
+    "証券、商品先物取引業": "증권·상품선물거래업",
+    "保険業": "보험업",
+    "その他金融業": "기타금융업",
+    "不動産業": "부동산업",
+    "サービス業": "서비스업",
+}
+
+# CSRC 산업분류. SSE는 门类 정식 명칭, SZSE는 자체 축약형을 쓴다
+# (두 계열 모두 2026-08 실데이터에서 관측된 값 전체 + SSE 정식 门类 잔여분).
+CN_SECTOR_KO = {
+    # SSE 정식 门类 명칭
+    "农、林、牧、渔业": "농림축산어업",
+    "采矿业": "광업",
+    "制造业": "제조업",
+    "电力、热力、燃气及水生产和供应业": "전기·열·가스·수도공급업",
+    "建筑业": "건설업",
+    "批发和零售业": "도소매업",
+    "交通运输、仓储和邮政业": "운수·창고·우편업",
+    "住宿和餐饮业": "숙박·요식업",
+    "信息传输、软件和信息技术服务业": "정보통신·소프트웨어·IT서비스업",
+    "金融业": "금융업",
+    "房地产业": "부동산업",
+    "租赁和商务服务业": "임대·비즈니스서비스업",
+    "科学研究和技术服务业": "과학연구·기술서비스업",
+    "水利、环境和公共设施管理业": "수자원·환경·공공시설관리업",
+    "居民服务、修理和其他服务业": "주민서비스·수리·기타서비스업",
+    "教育": "교육",
+    "卫生和社会工作": "보건·사회복지업",
+    "文化、体育和娱乐业": "문화·체육·엔터테인먼트업",
+    "综合": "종합",
+    # SZSE 축약형
+    "农林牧渔": "농림축산어업",
+    "住宿餐饮": "숙박·요식업",
+    "信息技术": "정보기술",
+    "公共环保": "공공·환경보호",
+    "卫生": "보건",
+    "商务服务": "비즈니스서비스",
+    "居民服务": "주민서비스",
+    "房地产": "부동산",
+    "批发零售": "도소매업",
+    "文化传播": "문화·미디어",
+    "水电煤气": "수도·전기·가스",
+    "科研服务": "과학연구서비스",
+    "运输仓储": "운수·창고",
+}
+
+# NASDAQ 스크리너(screener/stocks)의 sector 분류 전체 12종
+US_SECTOR_KO = {
+    "Technology": "기술",
+    "Telecommunications": "통신",
+    "Health Care": "헬스케어",
+    "Finance": "금융",
+    "Real Estate": "부동산",
+    "Consumer Discretionary": "임의소비재",
+    "Consumer Staples": "필수소비재",
+    "Industrials": "산업재",
+    "Basic Materials": "소재",
+    "Energy": "에너지",
+    "Utilities": "유틸리티",
+    "Miscellaneous": "기타",
+}
+
+
+def _localize_sector(mapping: dict[str, str], sector: str | None) -> str | None:
+    """업종 원문을 "한글번역(원문)" 표기로 바꾼다. 매핑에 없으면 원문 유지."""
+    if not sector:
+        return None
+    ko = mapping.get(sector)
+    return f"{ko}({sector})" if ko else sector
+
+
 def _make_item(ticker: str, name: str, market: str, sector: str | None, currency: str) -> Item:
-    """카탈로그 계약 스키마의 item을 생성한다 (price/market_cap은 보강 전이라 None)."""
+    """카탈로그 계약 스키마의 item을 생성한다 (price/market_cap/name_ko는 보강 전이라 None)."""
     return {
         "ticker": ticker,
         "name": name,
+        "name_ko": None,
         "market": market,
         "sector": sector,
         "industry": None,
@@ -128,13 +241,48 @@ def _us_yahoo_ticker(symbol: str) -> str | None:
     return symbol.replace(".", "-")
 
 
-def parse_us(nasdaq_raw: bytes | str, other_raw: bytes | str) -> list[Item]:
+def parse_us_sectors(raw: bytes | str) -> dict[str, str]:
+    """NASDAQ 스크리너 JSON -> {야후 티커: 업종 원문(영어)} 매핑.
+
+    스크리너의 심볼 표기를 야후 형식으로 정규화한다: 클래스 주식은 슬래시
+    (BRK/A -> BRK-A), 우선주는 캐럿(ABR^D)인데 우선주는 카탈로그 대상이
+    아니므로 버린다. sector가 빈 종목(권리·유닛·워런트 등)은 매핑에서 제외.
+    """
+    payload = json.loads(_ensure_text(raw))
+    rows = (payload.get("data") or {}).get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("NASDAQ screener JSON has no data.rows list")
+    sectors: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "")
+        if "^" in symbol:
+            continue  # 우선주 (카탈로그 제외 대상)
+        ticker = _us_yahoo_ticker(symbol.replace("/", "."))
+        sector = _clean(row.get("sector"))
+        if ticker and sector:
+            sectors[ticker] = sector
+    return sectors
+
+
+def parse_us(
+    nasdaq_raw: bytes | str,
+    other_raw: bytes | str,
+    sector_map: dict[str, str] | None = None,
+) -> list[Item]:
     """nasdaqlisted.txt + otherlisted.txt -> US 카탈로그 item 리스트.
 
-    Test Issue=Y(테스트 종목)와 ETF=Y는 제외합니다. 두 파일 모두 sector 정보가
-    없으므로 sector는 None으로 두며, 시세 보강 단계에서도 채우지 않습니다
-    (종목당 개별 조회가 필요해 비용이 과다).
+    Test Issue=Y(테스트 종목)와 ETF=Y는 제외합니다. 두 상장 파일에는 sector
+    정보가 없어 parse_us_sectors(NASDAQ 스크리너)의 {티커: 업종} 매핑을 받아
+    "한글번역(원문)"으로 채웁니다. 매핑이 없거나(스크리너 실패 시 fail-open)
+    티커가 매핑에 없으면 sector는 None입니다.
     """
+    sector_map = sector_map or {}
+
+    def _sector(ticker: str) -> str | None:
+        return _localize_sector(US_SECTOR_KO, sector_map.get(ticker))
+
     items: list[Item] = []
     seen: set[str] = set()
 
@@ -150,7 +298,7 @@ def parse_us(nasdaq_raw: bytes | str, other_raw: bytes | str) -> list[Item]:
         if not ticker or ticker in seen:
             continue
         seen.add(ticker)
-        items.append(_make_item(ticker, name, "NASDAQ", None, "USD"))
+        items.append(_make_item(ticker, name, "NASDAQ", _sector(ticker), "USD"))
 
     # otherlisted.txt (NYSE 등 비-나스닥 상장, ACT Symbol 기준):
     # ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
@@ -165,7 +313,7 @@ def parse_us(nasdaq_raw: bytes | str, other_raw: bytes | str) -> list[Item]:
             continue
         seen.add(ticker)
         market = US_EXCHANGE_NAMES.get(exchange, exchange or None) or "US"
-        items.append(_make_item(ticker, name, market, None, "USD"))
+        items.append(_make_item(ticker, name, market, _sector(ticker), "USD"))
 
     return items
 
@@ -250,7 +398,7 @@ def parse_jp(raw: bytes) -> list[Item]:
         sector = _clean(row.get("33業種区分"))
         if sector == "-":
             sector = None
-        items.append(_make_item(ticker, name, market, sector, "JPY"))
+        items.append(_make_item(ticker, name, market, _localize_sector(JP_SECTOR_KO, sector), "JPY"))
 
     return items
 
@@ -280,7 +428,7 @@ def _append_cn_item(
     seen.add(ticker)
     if sector == "-":
         sector = None
-    items.append(_make_item(ticker, name, market, sector, "CNY"))
+    items.append(_make_item(ticker, name, market, _localize_sector(CN_SECTOR_KO, sector), "CNY"))
 
 
 def _parse_sse(raw: bytes, items: list[Item], seen: set[str]) -> None:

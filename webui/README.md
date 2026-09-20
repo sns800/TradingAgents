@@ -35,12 +35,12 @@ aws lambda list-tags --region ap-northeast-2 \
 | 서비스 | 리소스 | 역할 |
 |---|---|---|
 | **CloudFront** | 배포판 1개 (+OAC 2, CF 함수) | 유일한 진입점, 정적 사이트·API 라우팅 |
-| **S3** | 사이트 버킷 + 데이터 버킷 | SPA 정적 파일 / 분석 보고서·종목 카탈로그·빌드 소스 |
-| **Lambda** | 함수 1개 (+Function URL) | REST API (실행 생성·조회, 카탈로그, 티커 검증) |
-| **DynamoDB** | 테이블 1개 (온디맨드) | 분석 실행 상태·메타데이터 |
-| **ECS Fargate** | 클러스터 1 + 태스크 정의 1 (1 vCPU / 4 GB) | 분석 워커(실행당 1태스크) + 일일 카탈로그 배치(한·일·미·중 4개 시장) |
+| **S3** | 사이트 버킷 + 데이터 버킷 | SPA 정적 파일 / 분석 보고서·종목 카탈로그·매크로 원본·문서·빌드 소스 |
+| **Lambda** | 함수 1개 (+Function URL) | REST API (실행 생성·조회, 카탈로그, 티커 검증, G20 매크로 조회) |
+| **DynamoDB** | **테이블 2개**(`runs`, `macro`, 모두 온디맨드) | 분석 실행 상태·메타데이터 / G20 매크로 관측치·정성 문서(PITR 활성) |
+| **ECS Fargate** | 클러스터 1 + 태스크 정의 1 (1 vCPU / 4 GB) | 분석 워커(실행당 1태스크) + 일일 카탈로그 배치(한·일·미·중 4개 시장) + 일일 G20 매크로 수집 배치 (이미지 공용, 명령만 교체) |
 | **ECR** | 리포지토리 1개 (이미지 ~181 MB) | 워커 컨테이너 이미지 |
-| **EventBridge** | 규칙 1개 | 평일 22:00 KST 카탈로그 배치 트리거 |
+| **EventBridge** | **규칙 2개** | 평일 22:00 KST 카탈로그 배치 · 매일 06:00 KST 매크로 수집 트리거 (실행 역할 공유) |
 | **CodeBuild** | 프로젝트 1개 | 워커 이미지 빌드 (로컬 Docker 대체) |
 | **CloudWatch Logs** | 로그 그룹 (30일 보존) | 워커·Lambda 로그 |
 | **IAM** | 역할 5개 | 최소 권한 실행 역할 (과금 없음) |
@@ -49,7 +49,7 @@ aws lambda list-tags --region ap-northeast-2 \
 
 | 서비스 | 역할 | 비고 |
 |---|---|---|
-| **Bedrock** | Claude Sonnet 4.5(심층)·Haiku 4.5(빠름) 호출 | **변동비의 대부분** |
+| **Bedrock** | Claude Sonnet 4.5(심층)·Haiku 4.5(빠름) 호출 | **변동비의 대부분** (분석 + 매크로 정성 처리) |
 | **ACM** | CloudFront용 TLS 인증서 (stock.happymstn.com) | 무료 |
 
 ### 공유 리소스 (이 프로젝트 전용 아님 — 비용 대부분 기존 앱과 분담)
@@ -74,8 +74,11 @@ aws lambda list-tags --region ap-northeast-2 \
 | ECR 이미지 저장 | ~$0.02 | 181 MB × $0.10/GB |
 | S3 저장 | ~$0.01 미만 | 사이트+데이터 ~8 MB |
 | 일일 카탈로그 배치 (Fargate) | ~$0.20 | 평일 22회 × ~8분 × (1vCPU+4GB) |
+| 매크로 수집 배치 (Fargate) | ~$0.50 | 매일 30회 × ~12분 × (1vCPU+4GB) |
+| 매크로 DynamoDB (온디맨드) | ~$0.20 | 쓰기 월 10만 건 미만, 저장 < 1 GB |
+| **Bedrock Haiku (매크로 정성)** | **$3 – 6** | 중앙은행 성명·여론조사 표·에너지 정책 요약. 원문 변경 감지로 호출을 줄이고 `MacroLlmDailyTokenBudget`(기본 200만 토큰/일)이 상한 |
 | CloudFront / Lambda / DynamoDB / CloudWatch | ~$0 | 가족 사용량은 대부분 프리티어 내 |
-| **고정비 합계** | **약 $0.5 미만/월** | (공유 Route53 $0.50 별도) |
+| **고정비 합계** | **약 $4 – 7/월** | 매크로 LLM 제외 시 약 $1 미만 (공유 Route53 $0.50 별도) |
 
 ### 변동비 (분석 1건당)
 
@@ -94,9 +97,13 @@ Cost Explorer의 Bedrock(us-east-1) 실측으로 보정하세요.
 
 | 사용 패턴 | 월 예상 총액 |
 |---|---|
-| 유휴 (분석 0건) | **~$0.5** |
-| 가벼운 사용 (얕게 30건/월) | **~$20 – 45** |
-| 중간 사용 (깊게 30건/월) | **~$60 – 120** |
+| 유휴 (분석 0건, 매크로 수집만) | **~$4 – 7** |
+| 가벼운 사용 (얕게 30건/월) | **~$25 – 50** |
+| 중간 사용 (깊게 30건/월) | **~$65 – 125** |
+
+> 매크로 대시보드는 분석을 돌리지 않아도 매일 수집이 돌아 고정비가 생깁니다.
+> 잠시 멈추려면 `MACRO_SCHEDULE_ENABLED=DISABLED webui/infra/deploy.sh --skip-image`
+> (LLM만 줄이려면 `MACRO_LLM_DAILY_TOKEN_BUDGET`을 낮추세요).
 
 > 💡 **비용 상한 장치**: 동시 실행은 `MaxActiveRuns`(기본 10) 파라미터로 제한됩니다.
 > 무인 상태에서 비용이 폭주하지 않도록, 낮은 값으로 배포하거나
@@ -109,3 +116,8 @@ Cost Explorer의 Bedrock(us-east-1) 실측으로 보정하세요.
 
 전체 배포(인프라+이미지+API+프론트)와 운영 명령은 [아키텍처.md의 "배포/운영"](아키텍처.md) 절 참고.
 요약: `webui/infra/deploy.sh` (프론트/API만 갱신 시 `--skip-image`).
+
+G20 매크로 배치의 수동 실행·API 키 설정·장애 대응은 [macro/README.md](macro/README.md) 참고.
+배포 시 매크로 관련 환경변수(`FRED_API_KEY`, `EMBER_API_KEY`,
+`MACRO_LLM_DAILY_TOKEN_BUDGET`, `MACRO_SCHEDULE_ENABLED`)는 deploy.sh가 셸 환경 또는
+저장소 루트 `.env`에서 읽어 스택 파라미터로 넘깁니다(키는 NoEcho 파라미터).

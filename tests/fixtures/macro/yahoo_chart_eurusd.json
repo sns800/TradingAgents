@@ -1,0 +1,39 @@
+{
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "EURUSD=X",
+     "gmtoffset": 3600,
+     "exchangeTimezoneName": "Europe/London",
+     "dataGranularity": "1d",
+     "regularMarketTime": 1789766950
+    },
+    "timestamp": [
+     1789340400,
+     1789426800,
+     1789513200,
+     1789599600,
+     1789686000,
+     1789766950
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "close": [
+        1.1593934297561646,
+        1.154854416847229,
+        1.153761863708496,
+        1.1469862461090088,
+        1.1476049423217773,
+        1.1490291357040405
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}

@@ -107,16 +107,18 @@
     appNav: document.getElementById('app-nav'),
     navAnalysis: document.getElementById('nav-analysis'),
     navCatalog: document.getElementById('nav-catalog'),
+    navMacro: document.getElementById('nav-macro'),
     navAdmin: document.getElementById('nav-admin'),
     formSuggest: document.getElementById('form-suggest'),
     formSuggestList: document.getElementById('form-suggest-list'),
     viewCatalog: document.getElementById('view-catalog'),
     marketToggle: document.getElementById('market-toggle'),
     catalogSearch: document.getElementById('catalog-search'),
+    catalogSegment: document.getElementById('catalog-segment'),
     catalogSector: document.getElementById('catalog-sector'),
-    catalogSort: document.getElementById('catalog-sort'),
-    catalogOrder: document.getElementById('catalog-order'),
+    catalogHead: document.getElementById('catalog-head'),
     catalogStatus: document.getElementById('catalog-status'),
+    catalogEnriched: document.getElementById('catalog-enriched'),
     catalogTableWrap: document.getElementById('catalog-table-wrap'),
     catalogBody: document.getElementById('catalog-body'),
     catalogEmpty: document.getElementById('catalog-empty'),
@@ -126,6 +128,7 @@
     catalogPageInfo: document.getElementById('catalog-pageinfo'),
     catalogGenerated: document.getElementById('catalog-generated'),
     viewAdmin: document.getElementById('view-admin'),
+    viewMacro: document.getElementById('view-macro'),
     adminDenied: document.getElementById('admin-denied'),
     adminContent: document.getElementById('admin-content'),
     adminConfigForm: document.getElementById('admin-config-form'),
@@ -158,7 +161,8 @@
     pollTimer: null,
     tickTimer: null,
     currentReport: null,
-    reportsLoaded: false
+    reportsLoaded: false,
+    macroMounted: false
   };
 
   // 종목 탐색 화면 상태
@@ -166,6 +170,7 @@
     market: 'KR',
     q: '',
     sector: '',
+    segment: '',
     sort: 'name',
     order: 'asc',
     page: 1,
@@ -539,6 +544,7 @@
       row.tabIndex = 0;
 
       row.appendChild(elem('span', 'run-ticker', run.ticker || '-'));
+      if (run.name) row.appendChild(elem('span', 'run-name', run.name));
       row.appendChild(elem('span', 'run-date', run.analysis_date || '-'));
       row.appendChild(elem('span', 'run-depth',
         '깊이: ' + (DEPTH_LABEL[run.depth] || run.depth || '-')));
@@ -700,7 +706,7 @@
     box.textContent = '';
 
     var titleRow = elem('div', 'detail-title');
-    var h2 = elem('h2', null, run.ticker || '-');
+    var h2 = elem('h2', null, run.name ? (run.ticker || '-') + ' · ' + run.name : (run.ticker || '-'));
     titleRow.appendChild(h2);
     titleRow.appendChild(statusBadge(run.status));
     var dec = decisionBadge(run.decision);
@@ -1024,25 +1030,25 @@
     }
   }
 
-  // 응답의 sectors로 업종 드롭다운 채움 (현재 선택 유지)
-  function fillSectors(sectors) {
-    if (!Array.isArray(sectors)) return;
-    var current = el.catalogSector.value;
-    el.catalogSector.textContent = '';
-    var optAll = elem('option', null, '전체 업종');
+  // 응답의 sectors/segments로 필터 드롭다운 채움 (현재 선택 유지)
+  function fillFilterSelect(selectEl, values, allLabel, stateKey) {
+    if (!Array.isArray(values)) return;
+    var current = selectEl.value;
+    selectEl.textContent = '';
+    var optAll = elem('option', null, allLabel);
     optAll.value = '';
-    el.catalogSector.appendChild(optAll);
-    sectors.forEach(function (s) {
-      if (!s) return;
-      var opt = elem('option', null, String(s));
-      opt.value = String(s);
-      el.catalogSector.appendChild(opt);
+    selectEl.appendChild(optAll);
+    values.forEach(function (v) {
+      if (!v) return;
+      var opt = elem('option', null, String(v));
+      opt.value = String(v);
+      selectEl.appendChild(opt);
     });
-    el.catalogSector.value = current;
-    if (el.catalogSector.value !== current) {
-      // 목록에 없는 업종이면 전체로 되돌림
-      el.catalogSector.value = '';
-      catalog.sector = '';
+    selectEl.value = current;
+    if (selectEl.value !== current) {
+      // 목록에 없는 값이면 전체로 되돌림
+      selectEl.value = '';
+      catalog[stateKey] = '';
     }
   }
 
@@ -1066,7 +1072,17 @@
 
   function renderCatalog(data) {
     var items = Array.isArray(data.items) ? data.items : [];
-    fillSectors(data.sectors);
+    fillFilterSelect(el.catalogSector, data.sectors, '전체 업종', 'sector');
+    fillFilterSelect(el.catalogSegment, data.segments, '전체 시장', 'segment');
+
+    // 시세·시가총액 조회 시점을 테이블 상단에 표기
+    if (data.enriched_at) {
+      el.catalogEnriched.textContent = '종가·시가총액 기준: ' + formatKST(data.enriched_at) + ' KST';
+      el.catalogEnriched.hidden = false;
+    } else {
+      el.catalogEnriched.textContent = '';
+      el.catalogEnriched.hidden = true;
+    }
 
     el.catalogBody.textContent = '';
     if (items.length === 0) {
@@ -1078,7 +1094,9 @@
         tr.setAttribute('role', 'button');
         tr.tabIndex = 0;
 
-        tr.appendChild(elem('td', 'cat-name', item.name || '-'));
+        // 일본·중국 종목은 한국어 이름이 있으면 "한국어이름(원문)"으로 표시 (원본 name은 유지)
+        tr.appendChild(elem('td', 'cat-name',
+          item.name_ko ? item.name_ko + '(' + (item.name || '') + ')' : (item.name || '-')));
         tr.appendChild(elem('td', 'cat-ticker', item.ticker || '-'));
         tr.appendChild(elem('td', 'cat-market', MARKET_LABEL[item.market] || item.market || '-'));
         tr.appendChild(elem('td', 'cat-sector', item.sector || '-'));
@@ -1127,6 +1145,7 @@
     ];
     if (catalog.q) params.push('q=' + encodeURIComponent(catalog.q));
     if (catalog.sector) params.push('sector=' + encodeURIComponent(catalog.sector));
+    if (catalog.segment) params.push('segment=' + encodeURIComponent(catalog.segment));
 
     apiFetch('/catalog?' + params.join('&')).then(function (data) {
       if (state.route.view !== 'catalog' || reqId !== catalog.reqId) return;
@@ -1157,6 +1176,8 @@
     catalog.market = market;
     catalog.sector = '';
     el.catalogSector.value = '';
+    catalog.segment = '';
+    el.catalogSegment.value = '';
     Array.prototype.forEach.call(
       el.marketToggle.querySelectorAll('button[data-market]'),
       function (b) { b.classList.toggle('active', b.dataset.market === market); }
@@ -1180,15 +1201,58 @@
     catalogReload(true);
   });
 
-  el.catalogSort.addEventListener('change', function () {
-    catalog.sort = el.catalogSort.value;
+  el.catalogSegment.addEventListener('change', function () {
+    catalog.segment = el.catalogSegment.value;
     catalogReload(true);
   });
 
-  el.catalogOrder.addEventListener('change', function () {
-    catalog.order = el.catalogOrder.value;
+  // 컬럼 헤더 클릭 정렬: 같은 컬럼 재클릭 시 방향 전환
+  var CATALOG_NUMERIC_SORTS = { price: true, market_cap: true };
+
+  function updateSortIndicators() {
+    Array.prototype.forEach.call(
+      el.catalogHead.querySelectorAll('th.sortable'),
+      function (th) {
+        var active = th.dataset.sort === catalog.sort;
+        th.classList.toggle('sorted', active);
+        if (active) {
+          th.setAttribute('aria-sort', catalog.order === 'asc' ? 'ascending' : 'descending');
+        } else {
+          th.removeAttribute('aria-sort');
+        }
+        th.querySelector('.sort-ind').textContent =
+          active ? (catalog.order === 'asc' ? '▲' : '▼') : '';
+      }
+    );
+  }
+
+  function sortByColumn(th) {
+    var key = th.dataset.sort;
+    if (catalog.sort === key) {
+      catalog.order = catalog.order === 'asc' ? 'desc' : 'asc';
+    } else {
+      catalog.sort = key;
+      // 숫자 컬럼은 큰 값부터 보는 게 일반적이라 첫 클릭은 내림차순
+      catalog.order = CATALOG_NUMERIC_SORTS[key] ? 'desc' : 'asc';
+    }
+    updateSortIndicators();
     catalogReload(true);
+  }
+
+  el.catalogHead.addEventListener('click', function (e) {
+    var th = e.target.closest('th.sortable');
+    if (th) sortByColumn(th);
   });
+
+  el.catalogHead.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var th = e.target.closest('th.sortable');
+    if (!th) return;
+    e.preventDefault();
+    sortByColumn(th);
+  });
+
+  updateSortIndicators();
 
   el.catalogPrev.addEventListener('click', function () {
     if (catalog.page <= 1) return;
@@ -1408,6 +1472,10 @@
     if (/^#\/admin(?:[\/?#]|$)/.test(hash)) {
       return { view: 'admin', runId: null };
     }
+    // G20 매크로: 하위 경로(#/macro/country/KR 등)와 드로어 쿼리는 macro.js가 해석
+    if (/^#\/macro(?:[\/?#]|$)/.test(hash)) {
+      return { view: 'macro', runId: null };
+    }
     return { view: 'list', runId: null };
   }
 
@@ -1416,6 +1484,7 @@
       state.route.view === 'list' || state.route.view === 'detail');
     el.navCatalog.classList.toggle('active', state.route.view === 'catalog');
     el.navAdmin.classList.toggle('active', state.route.view === 'admin');
+    if (el.navMacro) el.navMacro.classList.toggle('active', state.route.view === 'macro');
   }
 
   function applyRoute() {
@@ -1428,6 +1497,7 @@
       el.viewList.hidden = true;
       el.viewCatalog.hidden = true;
       el.viewAdmin.hidden = true;
+      if (el.viewMacro) el.viewMacro.hidden = true;
       el.viewDetail.hidden = false;
       state.currentReport = null;
       state.reportsLoaded = false;
@@ -1441,12 +1511,33 @@
       el.viewList.hidden = true;
       el.viewDetail.hidden = true;
       el.viewAdmin.hidden = true;
+      if (el.viewMacro) el.viewMacro.hidden = true;
       el.viewCatalog.hidden = false;
       loadCatalog();
+    } else if (state.route.view === 'macro') {
+      // G20 매크로: 뷰 내부 렌더·라우팅은 macro.js(window.MacroView)에 위임
+      el.viewList.hidden = true;
+      el.viewDetail.hidden = true;
+      el.viewCatalog.hidden = true;
+      el.viewAdmin.hidden = true;
+      if (el.viewMacro) {
+        el.viewMacro.hidden = false;
+        if (window.MacroView) {
+          if (!state.macroMounted) {
+            window.MacroView.mount(el.viewMacro, { apiFetch: apiFetch, elem: elem, isAdmin: isAdmin });
+            state.macroMounted = true;
+          }
+          window.MacroView.route(location.hash);
+        } else {
+          el.viewMacro.textContent = '';
+          el.viewMacro.appendChild(elem('p', 'card empty-msg', 'G20 매크로 모듈(macro.js)을 불러오지 못했습니다.'));
+        }
+      }
     } else if (state.route.view === 'admin') {
       el.viewList.hidden = true;
       el.viewDetail.hidden = true;
       el.viewCatalog.hidden = true;
+      if (el.viewMacro) el.viewMacro.hidden = true;
       el.viewAdmin.hidden = false;
       if (isAdmin()) {
         el.adminDenied.hidden = true;
@@ -1461,6 +1552,7 @@
       el.viewDetail.hidden = true;
       el.viewCatalog.hidden = true;
       el.viewAdmin.hidden = true;
+      if (el.viewMacro) el.viewMacro.hidden = true;
       el.viewList.hidden = false;
       el.runsList.textContent = '';
       el.runsList.appendChild(elem('p', 'empty-msg', '불러오는 중…'));
@@ -1490,6 +1582,7 @@
     el.viewDetail.hidden = true;
     el.viewCatalog.hidden = true;
     el.viewAdmin.hidden = true;
+    if (el.viewMacro) el.viewMacro.hidden = true;
     el.appNav.hidden = true;
     el.navAdmin.hidden = true;
     el.headerUser.hidden = true;

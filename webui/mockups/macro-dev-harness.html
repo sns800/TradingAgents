@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G20 매크로 — 프론트 검수 하네스 (가짜 API)</title>
+<link rel="stylesheet" href="../frontend/style.css">
+<!--
+  헤드리스 Chrome 스크린샷 (검수용):
+  CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; name=stale; prof="/tmp/fx-prof-$name"; \
+  rm -rf "$prof" "/tmp/fx-$name.png"; "$CHROME" --headless=new --disable-gpu --hide-scrollbars --no-first-run \
+  --user-data-dir="$prof" --window-size=1280,1600 --screenshot="/tmp/fx-$name.png" \
+  "file:///Users/nss/Documents/Claude/TradingAgents/webui/mockups/macro-dev-harness.html#/macro" >/dev/null 2>&1 & \
+  pid=$!; for i in $(seq 1 60); do sleep 1; [ -s "/tmp/fx-$name.png" ] && break; done; sleep 1; kill $pid 2>/dev/null
+-->
+<style>
+  /* 하네스 전용: 오류 표시 영역 */
+  #harness-errors { margin: 20px auto 0; max-width: 1100px; padding: 0 20px; font-family: var(--mono); font-size: 12px; color: var(--red); white-space: pre-wrap; }
+  #harness-errors:empty { display: none; }
+  .harness-note { max-width: 1100px; margin: 0 auto; padding: 8px 20px 0; color: var(--text-muted); font-size: 12px; }
+</style>
+</head>
+<body data-harness="macro">
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-title-row">
+        <h1>📈 TradingAgents 분석 대시보드</h1>
+        <span class="badge badge-warning">⚠️ 연구용 도구로 투자 조언이 아님</span>
+        <span class="badge badge-red">검수 하네스 · 가짜 API(합성 데이터)</span>
+      </div>
+    </div>
+  </header>
+  <p class="harness-note">webui/frontend/charts.js + macro.js를 로드하고 CONTRACT 9장 형태의 응답을 반환하는 가짜 apiFetch(지연 100ms)를 주입합니다. 해시로 화면 전환: #/macro · #/macro/country/KR · #/macro/indicator/policy_rate · #/macro/fx · #/macro/politics/KR · ?obs=policy_rate,KR,M,2026-08</p>
+  <main id="app" class="container">
+    <nav id="app-nav" class="app-nav">
+      <a href="#/" class="nav-tab">분석</a>
+      <a href="#/catalog" class="nav-tab">종목 탐색</a>
+      <a href="#/macro" id="nav-macro" class="nav-tab active">G20 매크로</a>
+    </nav>
+    <section id="view-macro" hidden></section>
+  </main>
+  <pre id="harness-errors"></pre>
+
+  <script src="../frontend/charts.js"></script>
+  <script src="../frontend/macro.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    // ---------- 오류 수집 (스크린샷 검수용: --dump-dom에서 #harness-errors 내용과 body[data-errors]를 확인) ----------
+    var errBox = document.getElementById('harness-errors'), errCount = 0;
+    function logErr(msg) { errCount++; document.body.setAttribute('data-errors', String(errCount)); errBox.textContent += '[' + errCount + '] ' + msg + '\n'; }
+    window.onerror = function (msg, src, line, col) { logErr(msg + ' @' + (src || '').split('/').pop() + ':' + line + ':' + col); };
+    window.addEventListener('unhandledrejection', function (ev) { logErr('unhandledrejection: ' + (ev.reason && ev.reason.message ? ev.reason.message : ev.reason)); });
+
+    // ---------- 결정론적 난수 ----------
+    function rng(seed) { var a = seed >>> 0; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+    function hash(s) { var h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+
+    // ---------- 국가 (CONTRACT 1장) ----------
+    var COUNTRIES = [
+      { iso: 'KR', iso3: 'KOR', name_ko: '한국', ccy: 'KRW', groups: ['G20', 'ASIA'], euro: false, base: { policy_rate: 2.5, cpi_yoy: 2.1, ppi_yoy: 1.5, house_price_yoy: 3.2, m2_yoy: 6.0, gdp_growth: 1.9, mil_expenditure_share: 9.2, party_support: 44, fx_usd: 1380, gdp_usd: 1.87e12, gni_usd: 1.92e12, gov_expense_gdp: 26, mil_gdp: 2.6 }, ruling: '더불어민주당', lean: '중도좌파', second: '국민의힘', third: '조국혁신당', gov: 45, next: '2028-04-12', etype: '총선', pollsters: ['한국갤럽', 'NBS', '리얼미터'] },
+      { iso: 'US', iso3: 'USA', name_ko: '미국', ccy: 'USD', groups: ['G20', 'G7'], euro: false, base: { policy_rate: 3.75, cpi_yoy: 2.8, ppi_yoy: 2.2, house_price_yoy: 2.5, m2_yoy: 4.0, gdp_growth: 2.1, mil_expenditure_share: 13.0, party_support: 41, fx_usd: 1, gdp_usd: 29.2e12, gni_usd: 29.6e12, gov_expense_gdp: 37, mil_gdp: 3.4 }, ruling: '공화당', lean: '우파', second: '민주당', third: null, gov: 42, next: '2026-11-03', etype: '중간선거', pollsters: ['Gallup', 'YouGov', 'Quinnipiac'] },
+      { iso: 'JP', iso3: 'JPN', name_ko: '일본', ccy: 'JPY', groups: ['G20', 'G7', 'ASIA'], euro: false, base: { policy_rate: 0.75, cpi_yoy: 2.3, ppi_yoy: 2.9, house_price_yoy: 4.1, m2_yoy: 1.5, gdp_growth: 0.8, mil_expenditure_share: 5.6, party_support: 30, fx_usd: 150, gdp_usd: 4.1e12, gni_usd: 4.3e12, gov_expense_gdp: 40, mil_gdp: 1.4 }, ruling: '자유민주당', lean: '보수', second: '국민민주당', third: '입헌민주당', gov: 38, next: '2028-10-30', etype: '총선', pollsters: ['NHK', '아사히', '요미우리'] },
+      { iso: 'CN', iso3: 'CHN', name_ko: '중국', ccy: 'CNY', groups: ['G20', 'BRICS', 'ASIA'], euro: false, base: { policy_rate: 3.0, cpi_yoy: 0.4, ppi_yoy: -1.8, house_price_yoy: -4.5, m2_yoy: 7.5, gdp_growth: 4.8, mil_expenditure_share: 5.3, party_support: null, fx_usd: 7.2, gdp_usd: 18.7e12, gni_usd: 18.5e12, gov_expense_gdp: 33, mil_gdp: 1.7 }, ruling: null, noParty: true },
+      { iso: 'EU', iso3: 'EA20', name_ko: '유로존', ccy: 'EUR', groups: ['G20', 'EU'], euro: false, base: { policy_rate: 2.0, cpi_yoy: 2.0, ppi_yoy: 0.6, house_price_yoy: 1.8, m2_yoy: 3.0, gdp_growth: 1.0, mil_expenditure_share: 4.0, party_support: null, fx_usd: 0.92, gdp_usd: 15.8e12, gni_usd: 15.9e12, gov_expense_gdp: 50, mil_gdp: 1.9 }, ruling: null, noGov: true },
+      { iso: 'DE', iso3: 'DEU', name_ko: '독일', ccy: 'EUR', groups: ['G20', 'G7', 'EU'], euro: true, base: { policy_rate: 2.0, cpi_yoy: 2.2, ppi_yoy: 0.8, house_price_yoy: 1.5, m2_yoy: 3.0, gdp_growth: 0.6, mil_expenditure_share: 6.1, party_support: 27, fx_usd: 0.92, gdp_usd: 4.6e12, gni_usd: 4.8e12, gov_expense_gdp: 48, mil_gdp: 2.1 }, ruling: 'CDU/CSU', lean: '중도우파', second: 'AfD', third: 'SPD', gov: 30, next: '2029-03-25', etype: '총선', pollsters: ['Forsa', 'INSA', 'Infratest'] },
+      { iso: 'FR', iso3: 'FRA', name_ko: '프랑스', ccy: 'EUR', groups: ['G20', 'G7', 'EU'], euro: true, base: { policy_rate: 2.0, cpi_yoy: 1.2, ppi_yoy: 0.5, house_price_yoy: 0.5, m2_yoy: 3.0, gdp_growth: 0.7, mil_expenditure_share: 3.6, party_support: 33, fx_usd: 0.92, gdp_usd: 3.2e12, gni_usd: 3.3e12, gov_expense_gdp: 57, mil_gdp: 2.1 }, ruling: '르네상스', lean: '중도', second: 'RN', third: 'LFI', gov: 24, next: '2027-04-11', etype: '대선', pollsters: ['Ifop', 'Elabe', 'Odoxa'] },
+      { iso: 'IT', iso3: 'ITA', name_ko: '이탈리아', ccy: 'EUR', groups: ['G20', 'G7', 'EU'], euro: true, base: { policy_rate: 2.0, cpi_yoy: 1.6, ppi_yoy: 1.0, house_price_yoy: 3.0, m2_yoy: 3.0, gdp_growth: 0.5, mil_expenditure_share: 3.0, party_support: 30, fx_usd: 0.92, gdp_usd: 2.4e12, gni_usd: 2.4e12, gov_expense_gdp: 51, mil_gdp: 1.6 }, ruling: 'FdI', lean: '우파', second: 'PD', third: 'M5S', gov: 41, next: '2027-10-01', etype: '총선', pollsters: ['SWG', 'Tecnè', 'YouTrend'] },
+      { iso: 'GB', iso3: 'GBR', name_ko: '영국', ccy: 'GBP', groups: ['G20', 'G7'], euro: false, base: { policy_rate: 3.75, cpi_yoy: 3.1, ppi_yoy: 2.4, house_price_yoy: 2.8, m2_yoy: 2.5, gdp_growth: 1.1, mil_expenditure_share: 5.2, party_support: 22, fx_usd: 0.77, gdp_usd: 3.6e12, gni_usd: 3.6e12, gov_expense_gdp: 44, mil_gdp: 2.3 }, ruling: '노동당', lean: '중도좌파', second: '개혁UK', third: '보수당', gov: 27, next: '2029-08-15', etype: '총선', pollsters: ['YouGov', 'Opinium', 'More in Common'] },
+      { iso: 'CA', iso3: 'CAN', name_ko: '캐나다', ccy: 'CAD', groups: ['G20', 'G7'], euro: false, base: { policy_rate: 2.5, cpi_yoy: 2.0, ppi_yoy: 1.5, house_price_yoy: -1.0, m2_yoy: 5.0, gdp_growth: 1.2, mil_expenditure_share: 3.5, party_support: 43, fx_usd: 1.37, gdp_usd: 2.2e12, gni_usd: 2.2e12, gov_expense_gdp: 42, mil_gdp: 1.4 }, ruling: '자유당', lean: '중도', second: '보수당', third: 'NDP', gov: 50, next: '2029-10-20', etype: '총선', pollsters: ['Angus Reid', 'Léger', 'Abacus'] },
+      { iso: 'AU', iso3: 'AUS', name_ko: '호주', ccy: 'AUD', groups: ['G20', 'ASIA'], euro: false, base: { policy_rate: 3.35, cpi_yoy: 2.7, ppi_yoy: 3.2, house_price_yoy: 6.5, m2_yoy: 6.0, gdp_growth: 1.8, mil_expenditure_share: 5.0, party_support: 35, fx_usd: 1.5, gdp_usd: 1.8e12, gni_usd: 1.7e12, gov_expense_gdp: 38, mil_gdp: 2.0 }, ruling: '노동당', lean: '중도좌파', second: '자유·국민연합', third: '녹색당', gov: 48, next: '2028-05-13', etype: '총선', pollsters: ['Newspoll', 'Resolve', 'Essential'] },
+      { iso: 'IN', iso3: 'IND', name_ko: '인도', ccy: 'INR', groups: ['G20', 'BRICS', 'ASIA'], euro: false, base: { policy_rate: 5.5, cpi_yoy: 3.5, ppi_yoy: 2.0, house_price_yoy: 5.0, m2_yoy: 10.0, gdp_growth: 6.5, mil_expenditure_share: 8.5, party_support: 38, fx_usd: 86, gdp_usd: 4.2e12, gni_usd: 4.1e12, gov_expense_gdp: 28, mil_gdp: 2.4 }, ruling: 'BJP', lean: '우파', second: 'INC', third: null, gov: 60, next: '2029-05-01', etype: '총선', pollsters: ['C-Voter', 'India Today'] },
+      { iso: 'ID', iso3: 'IDN', name_ko: '인도네시아', ccy: 'IDR', groups: ['G20', 'ASIA'], euro: false, base: { policy_rate: 5.0, cpi_yoy: 2.2, ppi_yoy: 1.8, house_price_yoy: 1.5, m2_yoy: 6.5, gdp_growth: 5.0, mil_expenditure_share: 4.5, party_support: 20, fx_usd: 16300, gdp_usd: 1.4e12, gni_usd: 1.4e12, gov_expense_gdp: 17, mil_gdp: 0.8 }, ruling: '게린드라', lean: '민족주의', second: 'PDI-P', third: '골카르', gov: 75, next: '2029-02-14', etype: '총선·대선', pollsters: ['Indikator', 'LSI'] },
+      { iso: 'BR', iso3: 'BRA', name_ko: '브라질', ccy: 'BRL', groups: ['G20', 'BRICS'], euro: false, base: { policy_rate: 14.5, cpi_yoy: 4.8, ppi_yoy: 3.0, house_price_yoy: 6.0, m2_yoy: 9.0, gdp_growth: 2.2, mil_expenditure_share: 3.1, party_support: 35, fx_usd: 5.6, gdp_usd: 2.2e12, gni_usd: 2.1e12, gov_expense_gdp: 45, mil_gdp: 1.1 }, ruling: 'PT', lean: '좌파', second: 'PL', third: null, gov: 40, next: '2026-10-04', etype: '대선·총선', pollsters: ['Datafolha', 'Quaest', 'Genial/Quaest'] },
+      { iso: 'MX', iso3: 'MEX', name_ko: '멕시코', ccy: 'MXN', groups: ['G20'], euro: false, base: { policy_rate: 7.0, cpi_yoy: 3.8, ppi_yoy: 3.5, house_price_yoy: 7.0, m2_yoy: 8.0, gdp_growth: 0.6, mil_expenditure_share: 2.0, party_support: 55, fx_usd: 18.5, gdp_usd: 1.9e12, gni_usd: 1.85e12, gov_expense_gdp: 27, mil_gdp: 0.6 }, ruling: 'MORENA', lean: '좌파', second: 'PAN', third: 'PRI', gov: 70, next: '2027-06-06', etype: '중간선거', pollsters: ['El Financiero', 'Enkoll'] },
+      { iso: 'AR', iso3: 'ARG', name_ko: '아르헨티나', ccy: 'ARS', groups: ['G20'], euro: false, base: { policy_rate: 29.0, cpi_yoy: 30.0, ppi_yoy: 25.0, house_price_yoy: null, m2_yoy: 40.0, gdp_growth: 4.0, mil_expenditure_share: 2.0, party_support: 40, fx_usd: 1350, gdp_usd: 0.63e12, gni_usd: 0.6e12, gov_expense_gdp: 35, mil_gdp: 0.5 }, ruling: 'LLA', lean: '자유주의 우파', second: 'UP', third: null, gov: 45, next: '2027-10-24', etype: '대선', pollsters: ['Atlas', 'Zuban Córdoba'] },
+      { iso: 'TR', iso3: 'TUR', name_ko: '튀르키예', ccy: 'TRY', groups: ['G20'], euro: false, base: { policy_rate: 40.0, cpi_yoy: 30.0, ppi_yoy: 25.0, house_price_yoy: 30.0, m2_yoy: 35.0, gdp_growth: 3.0, mil_expenditure_share: 6.0, party_support: 32, fx_usd: 41, gdp_usd: 1.3e12, gni_usd: 1.28e12, gov_expense_gdp: 30, mil_gdp: 1.5 }, ruling: 'AKP', lean: '보수', second: 'CHP', third: 'DEM', gov: 40, next: '2028-05-14', etype: '대선·총선', pollsters: ['MetroPOLL', 'ORC'] },
+      { iso: 'SA', iso3: 'SAU', name_ko: '사우디아라비아', ccy: 'SAR', groups: ['G20'], euro: false, base: { policy_rate: 4.75, cpi_yoy: 2.0, ppi_yoy: 1.0, house_price_yoy: 3.0, m2_yoy: 8.0, gdp_growth: 3.5, mil_expenditure_share: 21.0, party_support: null, fx_usd: 3.75, gdp_usd: 1.1e12, gni_usd: 1.1e12, gov_expense_gdp: 32, mil_gdp: 7.1 }, ruling: null, noParty: true },
+      { iso: 'ZA', iso3: 'ZAF', name_ko: '남아프리카공화국', ccy: 'ZAR', groups: ['G20', 'BRICS'], euro: false, base: { policy_rate: 7.0, cpi_yoy: 3.5, ppi_yoy: 2.5, house_price_yoy: 2.0, m2_yoy: 6.0, gdp_growth: 1.0, mil_expenditure_share: 2.5, party_support: 40, fx_usd: 17.5, gdp_usd: 0.4e12, gni_usd: 0.39e12, gov_expense_gdp: 33, mil_gdp: 0.7 }, ruling: 'ANC', lean: '중도좌파', second: 'DA', third: 'MK', gov: 38, next: '2029-05-29', etype: '총선', pollsters: ['Ipsos', 'SRF'] },
+      { iso: 'RU', iso3: 'RUS', name_ko: '러시아', ccy: 'RUB', groups: ['G20', 'BRICS'], euro: false, base: { policy_rate: 17.0, cpi_yoy: 8.0, ppi_yoy: 5.0, house_price_yoy: 8.0, m2_yoy: 15.0, gdp_growth: 1.0, mil_expenditure_share: 32.0, party_support: 40, fx_usd: 82, gdp_usd: 2.1e12, gni_usd: 2.0e12, gov_expense_gdp: 36, mil_gdp: 7.0 }, ruling: '통합러시아', lean: '권위주의 보수', second: 'KPRF', third: 'LDPR', gov: 75, next: '2026-09-20', etype: '총선', pollsters: ['VCIOM', 'Levada'] }
+    ];
+    var BY = {}; COUNTRIES.forEach(function (c) { BY[c.iso] = c; });
+
+    // ---------- 지표 레지스트리 (CONTRACT 2장) ----------
+    function ind(id, name, unit, cat, nf, sf, agg, dec) { return { id: id, name_ko: name, unit: unit, category: cat, native_freq: nf, store_freqs: sf, agg: agg, decimals: dec }; }
+    var INDICATORS = [
+      ind('policy_rate', '정책금리', '%', 'monetary', 'D', ['D', 'M', 'Q', 'Y'], 'last', 2),
+      ind('fx_usd', '환율(현지통화/USD)', 'lcu_per_usd', 'fx', 'D', ['D', 'M', 'Q', 'Y'], 'last', 2),
+      ind('fx_value_index', '통화가치 지수', 'index', 'fx', 'D', ['D', 'M', 'Q', 'Y'], 'last', 1),
+      ind('m2_level', 'M2 잔액', 'usd_bn', 'monetary', 'M', ['M', 'Q', 'Y'], 'last', 0),
+      ind('m2_yoy', 'M2 전년비', '%', 'monetary', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('cpi_index', 'CPI 지수', 'index', 'market', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('cpi_yoy', 'CPI 전년비', '%', 'market', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('core_cpi_yoy', '근원 CPI 전년비', '%', 'market', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('ppi_index', 'PPI 지수', 'index', 'market', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('ppi_yoy', 'PPI 전년비', '%', 'market', 'M', ['M', 'Q', 'Y'], 'last', 1),
+      ind('house_price_index', '주택가격 지수', 'index', 'market', 'Q', ['Q', 'Y'], 'last', 1),
+      ind('house_price_yoy', '주택가격 전년비', '%', 'market', 'Q', ['Q', 'Y'], 'last', 1),
+      ind('gdp_usd', '명목 GDP', 'usd', 'fiscal', 'Y', ['Y'], 'none', 0),
+      ind('gdp_growth', 'GDP 성장률', '%', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('gni_usd', 'GNI', 'usd', 'fiscal', 'Y', ['Y'], 'none', 0),
+      ind('gni_pc', '1인당 GNI', 'usd', 'fiscal', 'Y', ['Y'], 'none', 0),
+      ind('gov_expense_gdp', '정부지출/GDP', 'pct_gdp', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('gov_revenue_gdp', '정부세입/GDP', 'pct_gdp', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('gov_debt_gdp', '정부부채/GDP', 'pct_gdp', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('mil_gdp', '국방비/GDP', 'pct_gdp', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('mil_expenditure_share', '국방비/정부지출', 'pct_share', 'fiscal', 'Y', ['Y'], 'none', 1),
+      ind('mil_usd', '국방비', 'usd', 'fiscal', 'Y', ['Y'], 'none', 0),
+      ind('va_agri', '농림어업 부가가치', 'pct_gdp', 'structure', 'Y', ['Y'], 'none', 1),
+      ind('va_industry', '산업 부가가치', 'pct_gdp', 'structure', 'Y', ['Y'], 'none', 1),
+      ind('va_manuf', '제조업 부가가치', 'pct_gdp', 'structure', 'Y', ['Y'], 'none', 1),
+      ind('va_services', '서비스 부가가치', 'pct_gdp', 'structure', 'Y', ['Y'], 'none', 1),
+      ind('exports_gdp', '수출/GDP', 'pct_gdp', 'structure', 'Y', ['Y'], 'none', 1),
+      ind('exports_top_hs2', '상위 수출 품목', 'pct_share', 'composite', 'Y', ['Y'], 'none', 1),
+      ind('elec_mix', '발전 믹스', 'pct_share', 'composite', 'Y', ['Y'], 'none', 1),
+      ind('energy_import_dep', '에너지 해외의존도', 'pct_share', 'energy', 'Y', ['Y'], 'none', 0),
+      ind('fuel_dep_oil', '원유 해외의존도', 'pct_share', 'energy', 'Y', ['Y'], 'none', 0),
+      ind('fuel_dep_gas', '천연가스 해외의존도', 'pct_share', 'energy', 'Y', ['Y'], 'none', 0),
+      ind('fuel_dep_coal', '석탄 해외의존도', 'pct_share', 'energy', 'Y', ['Y'], 'none', 0),
+      ind('party_support', '집권당 지지율', '%', 'politics', 'W', ['M'], 'mean', 0),
+      ind('gov_approval', '정부 지지율', '%', 'politics', 'W', ['M'], 'mean', 0),
+      ind('cb_stance', '중앙은행 기조', 'score', 'monetary', 'E', ['E'], 'none', 1),
+      ind('top_companies', '시총 상위 기업', 'usd_bn', 'composite', 'Q', ['Q'], 'none', 0),
+      ind('dxy', '달러지수', 'index', 'fx', 'D', ['D', 'M', 'Q', 'Y'], 'last', 1)
+    ];
+    var IND = {}; INDICATORS.forEach(function (i) { IND[i.id] = i; });
+    var Y_INDS = {}; INDICATORS.forEach(function (i) { if (i.native_freq === 'Y') Y_INDS[i.id] = true; });
+    var EURO_SHARED = { policy_rate: true, m2_yoy: true, m2_level: true, fx_usd: true, fx_value_index: true };
+
+    var MONTHS = []; (function () { for (var y = 2010; y <= 2026; y++) for (var m = 1; m <= 12; m++) { if (y === 2026 && m > 8) break; MONTHS.push(y + '-' + (m < 10 ? '0' : '') + m); } })();
+    var YEARS = []; for (var yy = 2010; yy <= 2025; yy++) YEARS.push(String(yy));
+    var SRC = { policy_rate: ['bis', 'WS_CBPOL/1.0/D.{iso}', 'https://data.bis.org/topics/CBPOL/data', '월말 기준값 (원천: 일별)'], cpi_yoy: ['oecd', 'DSD_PRICES@DF_PRICES_ALL/{iso}.M.N.CPI', 'https://data-explorer.oecd.org', '월 지수 전년비 (서버 계산)'], ppi_yoy: ['oecd', 'PPI/{iso}', 'https://data-explorer.oecd.org', '월 지수 전년비 (서버 계산)'], house_price_yoy: ['bis', 'WS_SPP/1.0/Q.{iso}.N.628', 'https://data.bis.org/topics/SPP', '분기 지수 전년비'], m2_yoy: ['imf', 'MFS/{iso}/M2', 'https://data.imf.org', '월말 잔액 전년비 (서버 계산)'], fx_usd: ['bis', 'WS_XRU/1.0/M.{iso}.USD.A', 'https://data.bis.org', '월말값'], fx_value_index: ['derived', 'fx_base/fx*100', '', '기준일 환율 ÷ 현재 환율 × 100'], party_support: ['wiki_polls', 'DOC#poll → poll_of_polls', 'https://en.wikipedia.org', '최근 30일 표본가중 평균 (서버 계산)'], gov_approval: ['wiki_polls', 'DOC#poll', 'https://en.wikipedia.org', '최근 30일 평균'], dxy: ['fred', 'DTWEXBGS', 'https://fred.stlouisfed.org/series/DTWEXBGS', '월말값'] };
+    function srcOf(id, iso) { var s = SRC[id] || ['worldbank', id.toUpperCase() + '.' + iso, 'https://api.worldbank.org/v2/', '연간 · 최신 연도']; return { source: s[0], series_id: s[1].replace('{iso}', iso), source_url: s[2], method: s[3] }; }
+
+    // ---------- 시계열 생성 ----------
+    var CACHE = {};
+    function seriesM(iso, id) {
+      var ck = iso + '|' + id; if (CACHE[ck]) return CACHE[ck];
+      var c = BY[iso], base = c.base[id]; var out = [], i;
+      if (base === null || base === undefined) { CACHE[ck] = []; return out; }
+      var r = rng(hash(iso + id));
+      if (id === 'policy_rate') {
+        var lvl = Math.max(0, base - 1.5 + r() * 1.5), step = base > 10 ? 1 : 0.25;
+        for (i = 0; i < MONTHS.length; i++) { var target = i < 120 ? base * 0.35 : i < 150 ? base * 1.25 : base; if (r() < 0.22) lvl += (lvl < target ? step : -step) * (r() < 0.8 ? 1 : 2); lvl = Math.max(0, lvl); out.push({ period: MONTHS[i], value: Math.round(lvl / step) * step }); }
+        out[out.length - 1].value = base;
+      } else if (id === 'fx_usd') {
+        var lv = base * (0.82 + r() * 0.1);
+        for (i = 0; i < MONTHS.length; i++) { lv *= 1 + (r() - 0.48) * 0.018 + (iso === 'TR' || iso === 'AR' ? 0.02 : 0); out.push({ period: MONTHS[i], value: lv }); }
+        var scale = base / out[out.length - 1].value; out.forEach(function (p) { p.value *= scale; });
+        if (iso === 'US') out.forEach(function (p) { p.value = 1; });
+      } else {
+        var v = base, vol = (Math.abs(base) > 10 ? 4 : 1) * ({ cpi_yoy: 0.25, ppi_yoy: 0.5, house_price_yoy: 0.5, m2_yoy: 0.35 }[id] || 0.3), phi = 0.9;
+        for (i = 0; i < MONTHS.length; i++) { var mean = base + (i > 130 && i < 155 && (id === 'cpi_yoy' || id === 'ppi_yoy') ? (Math.abs(base) > 10 ? 15 : 3.5) : 0); v = mean + phi * (v - mean) + (r() - 0.5) * vol * 2; out.push({ period: MONTHS[i], value: v }); }
+        var d = base - out[out.length - 1].value; out.forEach(function (p, j) { p.value += d * j / (out.length - 1); });
+      }
+      // 결함 케이스: 일본 PPI 2020-03~2020-08 결측(null) → 선 끊김 확인용
+      if (iso === 'JP' && id === 'ppi_yoy') out.forEach(function (p) { if (p.period >= '2020-03' && p.period <= '2020-08') p.value = null; });
+      // 결함 케이스: 인도 주택가격은 2021-06 이후만 존재 (시리즈 길이 상이)
+      if (iso === 'IN' && id === 'house_price_yoy') out = out.filter(function (p) { return p.period >= '2021-06'; });
+      CACHE[ck] = out; return out;
+    }
+    function seriesY(iso, id) {
+      var ck = iso + '|Y|' + id; if (CACHE[ck]) return CACHE[ck];
+      var c = BY[iso], base = c.base[id], r = rng(hash(iso + 'Y' + id)), out = [];
+      if (base === undefined || base === null) { var defaults = { gni_pc: c.base.gni_usd / (5e7 + r() * 2e8), gov_revenue_gdp: c.base.gov_expense_gdp - 3 - r() * 4, gov_debt_gdp: 40 + r() * 100, mil_usd: c.base.gdp_usd * c.base.mil_gdp / 100, va_agri: 1 + r() * 12, va_industry: 20 + r() * 20, va_manuf: 10 + r() * 15, va_services: 50 + r() * 20, exports_gdp: 15 + r() * 40, energy_import_dep: Math.round(r() * 100), fuel_dep_oil: Math.round(r() * 100), fuel_dep_gas: Math.round(r() * 100), fuel_dep_coal: Math.round(r() * 100) }; base = defaults[id]; }
+      if (base === undefined || base === null) { CACHE[ck] = []; return out; }
+      for (var i = 0; i < YEARS.length; i++) { var v = base * (1 + (r() - 0.5) * (id === 'gdp_usd' || id === 'gni_usd' || id === 'mil_usd' ? 0.3 : 0)) + (id === 'gdp_usd' || id === 'gni_usd' || id === 'mil_usd' || id === 'gni_pc' ? 0 : (r() - 0.5) * (id === 'gdp_growth' ? 3 : 1.6)); if (id === 'gdp_growth' && YEARS[i] === '2020') v = -4 + r() * 3; out.push({ period: YEARS[i], value: v }); }
+      out[out.length - 1].value = base; CACHE[ck] = out; return out;
+    }
+    function aggregate(series, freq) {
+      if (freq === 'M') return series;
+      var out = [], bucket = null, last = null;
+      series.forEach(function (p) { var y = p.period.slice(0, 4), m = +p.period.slice(5, 7); var key = freq === 'Q' ? y + '-Q' + Math.ceil(m / 3) : y; if (key !== bucket) { if (last) out.push(last); bucket = key; } last = { period: key, value: p.value }; });
+      if (last) out.push(last); return out;
+    }
+    function resolveIso(iso, id) { return BY[iso] && BY[iso].euro && EURO_SHARED[id] ? 'EU' : iso; }
+    function getSeries(iso, id, freq, from, to) {
+      var src = resolveIso(iso, id), pts;
+      if (Y_INDS[id]) pts = seriesY(src, id);
+      else if (id === 'dxy') pts = seriesM('IN', 'cpi_yoy').map(function (p) { return { period: p.period, value: 100 + (p.value - 3.5) * 2.5 }; });
+      else if (id === 'fx_value_index') { var fx = seriesM(src, 'fx_usd'); var b = fx.length ? fx[0].value : 1; pts = fx.map(function (p) { return { period: p.period, value: b / p.value * 100 }; }); }
+      else if (id === 'party_support' || id === 'gov_approval') pts = partySeries(src, 0, id === 'gov_approval' ? BY[src].gov : BY[src].base.party_support);
+      else if (/_index$/.test(id)) { // 지수 = 전년비 시리즈로부터 누적 (검수용 근사)
+        var yoy = seriesM(src, id.replace(/_index$/, '_yoy')), lvl = 100; pts = yoy.map(function (p) { if (p.value != null) lvl *= Math.pow(1 + p.value / 100, 1 / 12); return { period: p.period, value: p.value == null ? null : lvl }; });
+      }
+      else pts = seriesM(src, id);
+      if (!Y_INDS[id]) pts = aggregate(pts, freq === 'D' ? 'M' : freq);
+      if (from) pts = pts.filter(function (p) { return p.period >= from; });
+      if (to) pts = pts.filter(function (p) { return p.period <= to; });
+      var shared = src !== iso;
+      return pts.map(function (p) { var o = { period: p.period, value: p.value }; if (shared) o.flags = ['euro_area_shared']; return o; });
+    }
+    function partySeries(iso, idx, base) {
+      if (base === null || base === undefined) return [];
+      var r = rng(hash(iso + 'party' + idx)), out = [], v = base + (r() - 0.5) * 8, ms = MONTHS.slice(MONTHS.length - 60);
+      for (var i = 0; i < ms.length; i++) { v = base + 0.88 * (v - base) + (r() - 0.5) * 3; out.push({ period: ms[i], value: v }); }
+      out[out.length - 1].value = base; return out;
+    }
+    function latestOf(iso, id) {
+      var freq = Y_INDS[id] ? 'Y' : (id === 'house_price_yoy' ? 'Q' : 'M');
+      var pts = getSeries(iso, id, freq);
+      if (!pts.length) return null;
+      var l = pts[pts.length - 1], p = pts[pts.length - 2];
+      var flags = l.flags ? l.flags.slice() : [];
+      if (id === 'party_support' || id === 'gov_approval') flags.push('ai_generated');
+      if (id === 'fx_value_index') flags.push('derived');
+      if (/^fuel_dep|energy_import/.test(id)) flags.push('estimated');
+      var o = { freq: freq, period: l.period, value: l.value, unit: IND[id].unit, prev_value: p ? p.value : null, prev_period: p ? p.period : null, change: p && l.value != null && p.value != null ? l.value - p.value : null, change_pct: null, rank: null, n: 20, updated_at: '2026-09-20T06:03:00+09:00', flags: flags, source: srcOf(id, iso).source };
+      return o;
+    }
+    function payloadLatest(iso, id) {
+      var r = rng(hash(iso + id)), items;
+      if (id === 'elec_mix') items = [['원자력', iso === 'KR' ? 31 : r() * 20], ['석탄', iso === 'KR' ? 29 : 10 + r() * 30], ['가스', iso === 'KR' ? 27 : 20 + r() * 20], ['재생에너지', iso === 'KR' ? 10 : 15 + r() * 25], ['수력', r() * 10], ['기타', 3]];
+      else if (id === 'exports_top_hs2') items = iso === 'KR' ? [['반도체(HS85)', 20.8], ['자동차(HS87)', 10.6], ['석유제품(HS27)', 7.1], ['기계(HS84)', 6.9], ['선박(HS89)', 3.9], ['철강(HS72)', 3.7], ['광학기기(HS90)', 2.8]] : [1, 2, 3, 4, 5, 6, 7].map(function (i) { return ['HS' + (20 + Math.round(r() * 70)) + ' 품목', 18 / i + r() * 2]; });
+      else items = (iso === 'KR' ? [['삼성전자', '반도체', 520], ['SK하이닉스', '반도체', 210], ['LG에너지솔루션', '2차전지', 68], ['삼성바이오로직스', '바이오', 55], ['현대차', '자동차', 50], ['기아', '자동차', 40], ['셀트리온', '바이오', 32], ['KB금융', '금융', 30], ['NAVER', '인터넷', 28], ['현대모비스', '자동차부품', 22]] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(function (i) { return [BY[iso].name_ko + ' 기업 ' + i, '업종 ' + (i % 4), Math.round(BY[iso].base.gdp_usd / 1e9 / 4 / i)]; }));
+      var total = id === 'elec_mix' ? items.reduce(function (a, b) { return a + b[1]; }, 0) : null;
+      var list = items.map(function (it) { return id === 'top_companies' ? { name: it[0], sector: it[1], market_cap_usd_bn: it[2] } : { label: it[0], value: total ? it[1] / total * 100 : it[1] }; });
+      return { freq: id === 'top_companies' ? 'Q' : 'Y', period: id === 'top_companies' ? '2026-Q2' : '2025', value: null, payload: { items: list }, unit: IND[id].unit, flags: [], source: id === 'top_companies' ? 'catalog' : id === 'elec_mix' ? 'ember' : 'wits', updated_at: '2026-09-20T06:03:00+09:00' };
+    }
+    function median(a) { var b = a.slice().sort(function (x, y) { return x - y; }); if (!b.length) return null; var m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; }
+
+    // ---------- 문서 ----------
+    function doc(type, iso, date, title, summary, payload, ai, quotes, status) {
+      var id = hash(type + iso + date).toString(16).slice(0, 12);
+      return { pk: 'DOC#' + type + '#' + iso, sk: date + '#' + id, type: type, iso: iso, date: date, id: id, title_ko: title, summary_ko: summary, source_url: 'https://example.org/' + type + '/' + iso + '/' + date, source_name: type === 'cb_stance' ? iso + ' 중앙은행' : type === 'poll' ? payload.pollster : '위키피디아', retrieved_at: '2026-09-20T06:03:00+09:00', ai_generated: !!ai, model_id: ai ? 'us.anthropic.claude-haiku-4-5-20251001-v1:0' : null, confidence: ai ? 0.86 : null, quotes: quotes || [], review_status: status || (ai ? 'pending' : 'approved'), reviewed_by: null, reviewed_at: null, s3_key: 'macro/docs/' + type + '/' + iso + '/' + date + '.md', payload: payload };
+    }
+    function docsOf(iso) {
+      var c = BY[iso], r = rng(hash(iso + 'docs')), out = {};
+      var score = iso === 'KR' ? -0.5 : Math.round((r() * 3 - 1.5) * 2) / 2;
+      out.cb_stance = doc('cb_stance', iso, '2026-08-28', c.name_ko + ' 중앙은행 통화정책 결정문 요약', '(합성) 기준금리 동결. 성장 하방 위험과 가계부채 증가를 함께 언급, 추가 인하 여지는 열어둠 → 기조 지수 ' + score + '.', { stance_score: score, direction: 'hold', forward_guidance: score < 0 ? 'easing' : score > 0 ? 'tightening' : 'neutral', rate_after: c.base.policy_rate, statement_date: '2026-08-28', meeting_type: 'scheduled' }, true, ['…향후 통화정책은 성장세 회복과 금융안정 리스크를 함께 점검하면서…', '…물가상승률은 목표 수준에서 안정될 것으로 예상…'], iso === 'KR' ? 'approved' : 'pending');
+      out.energy_policy = doc('energy_policy', iso, '2026-07-15', c.name_ko + ' 에너지 정책 요약', '(합성) 2038년 원전·재생에너지 비중 확대, 석탄 단계적 폐지 목표.', { targets: ['2038년 원전 35%·재생 29%', '석탄 단계적 폐지'], recent_changes: ['신규 원전 2기 부지 선정 절차 착수'], sources: ['https://example.org/energy/' + iso] }, true, ['…2038년까지 무탄소 전원 비중을 70%로…']);
+      if (c.noParty) { out.not_applicable = doc('not_applicable', iso, '2026-01-01', '경쟁 정당 없음', '경쟁 정당이 없는 체제로 정당 지지율을 제공하지 않습니다.', { reason: '경쟁 정당이 없는 체제(단일 정당/절대군주제) — 정부 신뢰 지표로 대체 예정' }, false); return out; }
+      if (c.noGov) { out.not_applicable = doc('not_applicable', iso, '2026-01-01', '정부 지지율 해당 없음', '유로존은 단일 정부가 없어 정부 지지율을 제공하지 않습니다.', { reason: '유로존 — 정부 지지율 해당 없음 (유럽의회 정당 그룹만 제공)' }, false); }
+      out.election = doc('election', iso, '2026-01-01', c.name_ko + ' 선거 정보', '', { next_election_date: c.next, election_type: c.etype, ruling_party: c.ruling, ruling_lean: c.lean, second_party: c.second, system_note: null }, false);
+      out.poll_of_polls = doc('poll_of_polls', iso, '2026-09-15', '여론조사 평균', '', { asof: '2026-09-15', window_days: 30, results: partyResults(iso), n_polls: (c.pollsters || []).length * 2, ruling_party: c.ruling, ruling_pct: c.base.party_support, leader_party: c.ruling, leader_pct: c.base.party_support, gov_approval: c.gov }, false);
+      return out;
+    }
+    function partyNames(c) { return [c.ruling, c.second, c.third, c.iso === 'KR' ? '개혁신당' : null, c.iso === 'KR' ? '진보당' : null].filter(Boolean); }
+    function partyResults(iso) { var c = BY[iso], names = partyNames(c), r = rng(hash(iso + 'res')), out = {}, base = c.base.party_support || 30; names.forEach(function (n, i) { out[n] = i === 0 ? base : Math.max(3, base - 8 * i - r() * 6); }); return out; }
+    function polls(iso) {
+      var c = BY[iso], out = [];
+      if (!c.pollsters) return out;
+      var r = rng(hash(iso + 'polls')), names = partyNames(c);
+      for (var i = 0; i < 8; i++) { var pol = c.pollsters[i % c.pollsters.length]; var dt = new Date(2026, 8, 18 - i * 3); var date = dt.getFullYear() + '-' + (dt.getMonth() < 9 ? '0' : '') + (dt.getMonth() + 1) + '-' + (dt.getDate() < 10 ? '0' : '') + dt.getDate(); var res = {}; names.forEach(function (n, k) { res[n] = Math.max(2, (partyResults(iso)[n] || 20) + (r() - 0.5) * 4); }); out.push(doc('poll', iso, date, pol + ' 여론조사', '', { pollster: pol, fieldwork_start: date, fieldwork_end: date, sample_size: 1000 + Math.round(r() * 1000), results: res, gov_approval: c.gov + (r() - 0.5) * 4, method: '전화' }, true, ['표 행 원문…'], i % 3 === 0 ? 'approved' : 'pending')); }
+      return out;
+    }
+
+    // ---------- 엔드포인트 ----------
+    function parseQuery(path) { var i = path.indexOf('?'); var q = {}; if (i < 0) return { p: path, q: q }; path.slice(i + 1).split('&').forEach(function (kv) { var a = kv.split('='); q[decodeURIComponent(a[0])] = decodeURIComponent((a[1] || '').replace(/\+/g, ' ')); }); return { p: path.slice(0, i), q: q }; }
+    var INGEST = { bis: { status: 'ok', finished_at: '2026-09-19T21:04:00Z', n_obs: 1820, next_due: '2026-09-20T21:00:00Z' }, oecd: { status: 'ok', finished_at: '2026-09-15T21:10:00Z', n_obs: 960, next_due: '2026-09-22T21:00:00Z' }, worldbank: { status: 'partial', finished_at: '2026-09-01T21:30:00Z', n_obs: 400, next_due: '2026-10-01T21:00:00Z' }, imf: { status: 'ok', finished_at: '2026-09-15T21:12:00Z', n_obs: 240, next_due: '2026-09-22T21:00:00Z' }, yahoo: { status: 'ok', finished_at: '2026-09-19T21:01:00Z', n_obs: 20, next_due: '2026-09-20T21:00:00Z' }, ember: { status: 'failed', finished_at: '2026-08-31T21:20:00Z', n_obs: 0, next_due: '2026-09-15T21:00:00Z' }, wiki_polls: { status: 'ok', finished_at: '2026-09-15T21:40:00Z', n_obs: 180, next_due: '2026-09-22T21:00:00Z' }, cb_statements: { status: 'ok', finished_at: '2026-09-19T21:05:00Z', n_obs: 0, next_due: '2026-09-20T21:00:00Z' } };
+    function groupOf(g) { return COUNTRIES.filter(function (c) { return !g || g === 'G20' || c.groups.indexOf(g) >= 0; }); }
+    // 결함 케이스: 기준 기간이 오래된(지연) 셀 — 프론트가 우상단 회색 점 + 툴팁 '(지연)'을 붙이는지 확인
+    // asof = {M:'2026-08', Q:'2026-Q2', Y:'2025'} 기준으로 M 3개월·Y 2년 이상 오래된 값
+    var STALE_CELLS = { RU: { ppi_yoy: '2026-02' }, AR: { gdp_growth: '2022' } };
+    function overview(q) {
+      var inds = (q.indicators || 'policy_rate,cpi_yoy,ppi_yoy,house_price_yoy,fx_value_index,m2_yoy,gdp_growth,mil_expenditure_share,party_support').split(',');
+      var rows = groupOf(q.group).map(function (c) { var cells = {}; inds.forEach(function (id) { var l = latestOf(c.iso, id); if (!l) return; cells[id] = { value: l.value, period: l.period, freq: l.freq, change: l.change, rank: null, flags: l.flags }; if (id === 'party_support' && c.ruling) cells[id].payload = { leader_party: c.ruling, ruling_party: c.ruling, pollster_count: (c.pollsters || []).length }; }); var ov = STALE_CELLS[c.iso]; if (ov) Object.keys(ov).forEach(function (id) { if (cells[id]) cells[id].period = ov[id]; }); return { iso: c.iso, cells: cells }; });
+      var med = {}; inds.forEach(function (id) { var a = []; rows.forEach(function (r) { var cl = r.cells[id]; if (cl && cl.value != null) a.push(cl.value); }); a.sort(function (x, y) { return x - y; }); rows.forEach(function (r) { var cl = r.cells[id]; if (cl && cl.value != null) cl.rank = a.length - a.indexOf(cl.value); }); med[id] = median(a); });
+      return { ok: true, asof: { M: '2026-08', Q: '2026-Q2', Y: '2025' }, indicators: inds.map(function (id) { return IND[id] || { id: id, name_ko: id }; }), rows: rows, median: med };
+    }
+    function country(iso) {
+      var c = BY[iso]; if (!c) return { error: '알 수 없는 국가 코드: ' + iso };
+      var latest = {}; INDICATORS.forEach(function (i) { if (i.category === 'composite') { latest[i.id] = payloadLatest(iso, i.id); return; } if (i.id === 'cb_stance' || i.id === 'dxy') return; var l = latestOf(iso, i.id); if (l) latest[i.id] = l; });
+      var out = { ok: true, country: { iso: c.iso, iso3: c.iso3, name_ko: c.name_ko, ccy: c.ccy, groups: c.groups, euro: c.euro }, latest: latest, docs: docsOf(iso) };
+      if (c.euro) out.euro_ref = 'EU';
+      return out;
+    }
+    function series(q) {
+      var id = q.indicator; if (!IND[id]) return { error: '알 수 없는 지표: ' + id };
+      if (id === 'core_cpi_yoy') return { error: '지표 core_cpi_yoy의 데이터가 아직 수집되지 않았습니다.' };
+      var isos = (q.countries || 'KR').split(',').slice(0, 20); var freq = q.freq || IND[id].native_freq; var out = {}, shared = [];
+      isos.forEach(function (iso) { if (!BY[iso]) return; var pts = getSeries(iso, id, freq, q.from, q.to); if (q.transform === 'index100' && pts.length) { var bp = pts.filter(function (p) { return p.value != null && (!q.base || p.period >= q.base); })[0]; var b = bp ? bp.value : null; pts = pts.map(function (p) { return { period: p.period, value: b && p.value != null ? p.value / b * 100 : null, flags: p.flags }; }); } out[iso] = pts; if (resolveIso(iso, id) !== iso) shared.push(iso); });
+      return { ok: true, indicator: IND[id], freq: freq, series: out, euro_shared: shared };
+    }
+    function observations(q) {
+      var id = q.indicator, iso = q.iso, freq = q.freq, period = q.period; if (!IND[id] || !BY[iso]) return { error: '관측치를 찾을 수 없습니다: ' + id + '/' + iso };
+      var pts = getSeries(iso, id, freq); var p = pts.filter(function (x) { return x.period === period; })[0];
+      var comp = IND[id].category === 'composite' ? payloadLatest(iso, id) : null;
+      if (!p && !comp) return { error: '해당 기간(' + period + ')의 관측치가 없습니다.' };
+      var s = srcOf(id, iso), l = latestOf(iso, id) || {};
+      var obs = { indicator: id, iso: iso, freq: freq, period: period, value: comp ? null : p.value, payload: comp ? comp.payload : null, unit: IND[id].unit, source: s.source, series_id: s.series_id, source_url: s.source_url, retrieved_at: '2026-09-19T21:03:12Z', vintage: '2026-09-19', method: s.method, flags: (p && p.flags) || l.flags || [], revisions: comp || p.value == null ? [] : [{ value: p.value + (id === 'policy_rate' ? 0 : 0.1), vintage: '2026-09-05', retrieved_at: '2026-09-05T21:03:00Z' }, { value: p.value, vintage: '2026-09-12', retrieved_at: '2026-09-12T21:03:00Z' }] };
+      var related = []; var d = docsOf(iso); if (id === 'policy_rate' || id === 'm2_yoy') related.push(d.cb_stance); if (id === 'party_support' || id === 'gov_approval') related = polls(iso).slice(0, 2); if (/elec|fuel|energy/.test(id)) related.push(d.energy_policy);
+      return { ok: true, observation: obs, related_docs: related };
+    }
+    function docsEndpoint(q) {
+      if (q.type === 'weekly_brief') return { ok: true, docs: [doc('weekly_brief', 'G20', '2026-09-14', '주간 G20 브리프 (9/14 주)', '(합성) 이번 주 G20 중앙은행 3곳이 회의를 열어 1곳 인하·2곳 동결. 신흥국 통화는 달러 약세 속 브라질·멕시코 강세. 유럽 정치는 독일 지방선거에서 집권 연합 약세.', { week_start: '2026-09-14', bullets: ['FOMC 25bp 인하 (3.75%) — 성명 "추가 인하 데이터 의존"', 'BoE 동결 (3.75%) · 7:2 표결', 'BCB 동결 (14.50%) · 매파 유지', '독일 NRW 지방선거: 집권 연합 약세'], evidence: [{ doc_key: 'DOC#cb_stance#US/2026-09-18', url: 'https://example.org/cb/US' }, { doc_key: 'DOC#cb_stance#GB/2026-09-17', url: 'https://example.org/cb/GB' }] }, true, ['…the Committee decided to lower the target range…'], 'approved')] };
+      if (q.type === 'cb_stance' && BY[q.iso]) return { ok: true, docs: [docsOf(q.iso).cb_stance] };
+      return { ok: true, docs: [] };
+    }
+    function politics(iso, q) {
+      var c = BY[iso]; if (!c) return { error: '알 수 없는 국가 코드: ' + iso };
+      var d = docsOf(iso);
+      if (c.noParty) return { ok: true, election: null, poll_of_polls: null, polls: [], series: {}, not_applicable: d.not_applicable };
+      var names = partyNames(c), res = partyResults(iso), S = {};
+      names.forEach(function (n, i) { var pts = partySeries(iso, i, res[n]); if (q.from) pts = pts.filter(function (p) { return p.period >= q.from; }); S[n] = pts; });
+      return { ok: true, election: d.election, poll_of_polls: d.poll_of_polls, polls: polls(iso), series: S };
+    }
+    function fx(q) {
+      var base = q.base || '2021-09-01', freq = q.freq || 'M', out = {}, change = {};
+      groupOf(q.group).forEach(function (c) { if (c.euro) return; var s = seriesM(c.iso, 'fx_usd').filter(function (p) { return p.period >= base.slice(0, 7); }); if (!s.length) return; var b = s[0].value; var idx = aggregate(s.map(function (p) { return { period: p.period, value: b / p.value * 100 }; }), freq); out[c.iso] = idx; change[c.iso] = idx[idx.length - 1].value - 100; });
+      var dxy = aggregate(getSeries('US', 'dxy', 'M').filter(function (p) { return p.period >= base.slice(0, 7); }), freq);
+      return { ok: true, base: base, series: out, change: change, dxy: dxy };
+    }
+
+    // 관리자 검토 API 흉내: pk/sk 검증 후 review_status만 바꿔 돌려준다
+    function review(body) {
+      if (!body || !/^DOC#/.test(String(body.pk || '')) || !body.sk) return { error: 'pk는 DOC#으로 시작해야 하며 sk가 필요합니다.' };
+      if (body.action !== 'approve' && body.action !== 'reject') return { error: 'action은 approve 또는 reject여야 합니다.' };
+      return { ok: true, doc: { pk: body.pk, sk: body.sk, review_status: body.action === 'approve' ? 'approved' : 'rejected', reviewed_by: 'harness-admin', reviewed_at: '2026-09-20T06:10:00+00:00' } };
+    }
+
+    var LOG = [];
+    function fakeApiFetch(path, options) {
+      LOG.push(path);
+      return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          var pq = parseQuery(path), p = pq.p, q = pq.q, m, data;
+          try {
+            if (p === '/macro/meta') data = { ok: true, countries: COUNTRIES.map(function (c) { return { iso: c.iso, iso3: c.iso3, name_ko: c.name_ko, ccy: c.ccy, groups: c.groups, euro: c.euro }; }), indicators: INDICATORS, ingest: INGEST };
+            else if (p === '/macro/overview') data = overview(q);
+            else if ((m = p.match(/^\/macro\/countries\/([A-Z]{2})$/))) data = country(m[1]);
+            else if (p === '/macro/series') data = series(q);
+            else if (p === '/macro/observations') data = observations(q);
+            else if (p === '/macro/docs') data = docsEndpoint(q);
+            else if ((m = p.match(/^\/macro\/politics\/([A-Z]{2})$/))) data = politics(m[1], q);
+            else if (p === '/macro/fx') data = fx(q);
+            else if (p === '/admin/macro/review' && options && options.method === 'POST') data = review(JSON.parse(options.body || '{}'));
+            else data = { error: '알 수 없는 경로: ' + p };
+          } catch (e) { logErr('fake api ' + path + ': ' + e.message); reject(new Error('가짜 API 내부 오류: ' + e.message)); return; }
+          if (data.error) { var err = new Error(data.error); err.status = 400; reject(err); } else resolve(data);
+        }, 100);
+      });
+    }
+    window.__harness = { log: LOG, countries: COUNTRIES, indicators: INDICATORS };
+
+    function elem(tag, className, text) { var node = document.createElement(tag); if (className) node.className = className; if (text !== undefined && text !== null) node.textContent = text; return node; }
+
+    var view = document.getElementById('view-macro');
+    view.hidden = false;
+    if (!location.hash || !/^#\/macro/.test(location.hash)) location.hash = '#/macro';
+    // 검수용: 관리자로 취급해 검토 대기 문서 카드의 [승인]/[반려] 버튼을 렌더한다
+    window.MacroView.mount(view, { apiFetch: fakeApiFetch, elem: elem, isAdmin: function () { return true; } });
+    window.MacroView.route(location.hash);
+    window.addEventListener('hashchange', function () { if (/^#\/macro/.test(location.hash)) window.MacroView.route(location.hash); });
+
+    // 검수용 쿼리 훅 (해시 앞 ?query): sm=1 → 국가 칩 전부 선택(소형 다중), freq=Q|Y, range=1y.., group=G7.., transform=index, emph=none,
+    //   review=approve|reject → 첫 검토 대기 문서 카드의 [승인]/[반려] 클릭 (가짜 POST /admin/macro/review → 배지 갱신 확인)
+    (function () {
+      var q = {}; location.search.replace(/^\?/, '').split('&').forEach(function (kv) { var a = kv.split('='); if (a[0]) q[a[0]] = decodeURIComponent(a[1] || ''); });
+      if (!Object.keys(q).length) return;
+      function clickSeg(name, v) { var b = document.querySelector('#view-macro .seg[data-filter="' + name + '"] button[data-v="' + v + '"]'); if (b) b.click(); }
+      setTimeout(function () {
+        if (q.freq) clickSeg('freq', q.freq);
+        if (q.range) clickSeg('range', q.range);
+        if (q.group) clickSeg('group', q.group);
+        if (q.transform) clickSeg('transform', q.transform);
+        if (q.sm === '1') Array.prototype.forEach.call(document.querySelectorAll('#view-macro .chip:not(.on)'), function (b) { b.click(); });
+        if (q.emph) { var s = document.querySelectorAll('#view-macro .indicator-bar select')[1]; if (s) { s.value = q.emph; s.dispatchEvent(new Event('change')); } }
+        if (q.review === 'approve' || q.review === 'reject') {
+          var btns = document.querySelectorAll('#view-macro .doc-review .doc-review-btn');
+          var want = q.review === 'approve' ? '승인' : '반려';
+          for (var i = 0; i < btns.length; i++) { if (btns[i].textContent === want) { btns[i].click(); break; } }
+        }
+      }, 1200);
+    })();
+  })();
+  </script>
+</body>
+</html>

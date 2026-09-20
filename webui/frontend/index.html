@@ -26,6 +26,7 @@
     <nav id="app-nav" class="app-nav" hidden>
       <a href="#/" id="nav-analysis" class="nav-tab active">분석</a>
       <a href="#/catalog" id="nav-catalog" class="nav-tab">종목 탐색</a>
+      <a href="#/macro" id="nav-macro" class="nav-tab">G20 매크로</a>
       <a href="#/admin" id="nav-admin" class="nav-tab" hidden>관리자</a>
     </nav>
 
@@ -119,30 +120,25 @@
             <button type="button" data-market="CN">중국</button>
           </div>
           <input type="text" id="catalog-search" class="catalog-search" placeholder="종목명 또는 티커 검색" autocomplete="off" aria-label="종목 검색">
+          <select id="catalog-segment" aria-label="세부시장 필터">
+            <option value="">전체 시장</option>
+          </select>
           <select id="catalog-sector" aria-label="업종 필터">
             <option value="">전체 업종</option>
           </select>
-          <select id="catalog-sort" aria-label="정렬 기준">
-            <option value="name">이름순</option>
-            <option value="price">종가순</option>
-            <option value="market_cap">시총순</option>
-          </select>
-          <select id="catalog-order" aria-label="정렬 방향">
-            <option value="asc">오름차순</option>
-            <option value="desc">내림차순</option>
-          </select>
         </div>
         <div id="catalog-status" class="catalog-status" hidden></div>
+        <p id="catalog-enriched" class="catalog-enriched" hidden></p>
         <div id="catalog-table-wrap" class="catalog-table-wrap">
           <table class="catalog-table">
-            <thead>
+            <thead id="catalog-head">
               <tr>
-                <th>종목명</th>
-                <th>티커</th>
-                <th>시장</th>
-                <th>업종</th>
-                <th class="num">종가</th>
-                <th class="num">시총</th>
+                <th class="sortable" tabindex="0" data-sort="name" aria-sort="ascending">종목명<span class="sort-ind" aria-hidden="true"></span></th>
+                <th class="sortable" tabindex="0" data-sort="ticker">티커<span class="sort-ind" aria-hidden="true"></span></th>
+                <th class="sortable" tabindex="0" data-sort="market">시장<span class="sort-ind" aria-hidden="true"></span></th>
+                <th class="sortable" tabindex="0" data-sort="sector">업종<span class="sort-ind" aria-hidden="true"></span></th>
+                <th class="sortable num" tabindex="0" data-sort="price">종가<span class="sort-ind" aria-hidden="true"></span></th>
+                <th class="sortable num" tabindex="0" data-sort="market_cap">시총<span class="sort-ind" aria-hidden="true"></span></th>
               </tr>
             </thead>
             <tbody id="catalog-body"></tbody>
@@ -159,6 +155,9 @@
         </div>
       </section>
     </section>
+
+    <!-- G20 매크로 화면 (내용은 macro.js가 mount 시 렌더) -->
+    <section id="view-macro" hidden></section>
 
     <!-- 관리자 화면 -->
     <section id="view-admin" hidden>
@@ -229,6 +228,8 @@
 
   <script src="vendor/marked.min.js"></script>
   <script src="config.js"></script>
+  <script src="charts.js"></script>
+  <script src="macro.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

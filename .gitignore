@@ -222,3 +222,9 @@ __marimo__/
 .env.enterprise
 reports/
 webui/infra/.auth
+
+# G20 매크로 수집기 dry-run 원본 캐시 (webui/macro/collect.py --dry-run)
+.macro_raw/
+
+# macOS Finder 메타데이터
+.DS_Store

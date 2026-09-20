@@ -1,0 +1,97 @@
+{
+ "stats": {
+  "rows": 9
+ },
+ "data": [
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Solar",
+   "is_aggregate_series": false,
+   "generation_twh": 37.798,
+   "share_of_generation_pct": 6.051
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Wind",
+   "is_aggregate_series": false,
+   "generation_twh": 3.654,
+   "share_of_generation_pct": 0.585
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Hydro",
+   "is_aggregate_series": false,
+   "generation_twh": 3.804,
+   "share_of_generation_pct": 0.609
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Bioenergy",
+   "is_aggregate_series": false,
+   "generation_twh": 19.681,
+   "share_of_generation_pct": 3.151
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Nuclear",
+   "is_aggregate_series": false,
+   "generation_twh": 184.67,
+   "share_of_generation_pct": 29.563
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Coal",
+   "is_aggregate_series": false,
+   "generation_twh": 194.517,
+   "share_of_generation_pct": 31.139
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Gas",
+   "is_aggregate_series": false,
+   "generation_twh": 174.584,
+   "share_of_generation_pct": 27.948
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Other fossil",
+   "is_aggregate_series": false,
+   "generation_twh": 5.964,
+   "share_of_generation_pct": 0.955
+  },
+  {
+   "entity": "South Korea",
+   "entity_code": "KOR",
+   "is_aggregate_entity": false,
+   "date": "2025",
+   "series": "Net imports",
+   "is_aggregate_series": false,
+   "generation_twh": 0.0,
+   "share_of_generation_pct": 0.0
+  }
+ ]
+}
