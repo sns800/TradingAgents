@@ -30,7 +30,7 @@
 # TradingAgents: 멀티 에이전트 LLM 금융 트레이딩 프레임워크
 
 ## 소식 (News)
-- [2026-09] 웹 UI에 **G20 매크로·정치 대시보드** 탭 추가 — G20 20개국(19개국 + 유로존)의 정치·통화·경제구조·재정·시장 데이터를 매일 수집·누적하고 히트맵·시계열·국가 프로필로 조회합니다. 구조·작업내역: [webui/macro/구조와-작업내역.md](webui/macro/구조와-작업내역.md) (이 포크 전용 기능)
+- [2026-09] 웹 UI에 **G20 매크로·정치 대시보드** 탭 추가 — G20 20개국(19개국 + 유로존)의 정치·통화·경제구조·재정·시장 데이터를 매일 수집·누적하고 히트맵·시계열·국가 프로필로 조회합니다. 구조·작업내역: [webui/macro/구조와-작업내역.md](webui/macro/구조와-작업내역.md) (이 포크 전용 기능) · [이력](HISTORY.md)
 - [2026-07] **TradingAgents v0.3.1** 출시 — 정확성 및 안정성 수정 버전입니다: Alpha Vantage 미래 참조(look-ahead, 백테스트 시점에는 알 수 없었던 미래 데이터가 섞여 들어가는 문제) 필터링, 그래프 라우터 크래시 방지, 그래프 구조를 인식하는 체크포인트(checkpoint, 중간 저장 지점) 재개, 정상 동작하는 암호화폐 감성 데이터 소스, 설정 가능한 LLM 재시도 횟수(retry budget), Bedrock API 키 인증, Claude Sonnet 5 / Fable 5 지원. 전체 목록은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
 - [2026-06] **TradingAgents v0.3.0** 출시 — 검증된 데이터 접근 계약(data-access contract), 확장된 프로바이더 레지스트리(NVIDIA, Kimi, Groq, Mistral, Bedrock 및 모든 OpenAI 호환 엔드포인트), FRED·Polymarket 데이터 벤더, 최신 세대 모델 카탈로그, CI 게이트(자동 테스트 검증 절차)가 추가되었습니다.
 - [2026-05] **TradingAgents v0.2.5** 출시 — 실제 데이터에 근거하는(grounded) 감성 분석가(Sentiment Analyst), GPT-5.5 등 모델 커버리지, Qwen/GLM/MiniMax 이중 리전 지원, API 키 자동 감지를 포함한 `TRADINGAGENTS_*` 환경변수 설정, 원격 Ollama 지원, 미국 외 시장용 알파 벤치마크, 티커 경로 탐색(path-traversal) 보안 강화가 포함되었습니다.
