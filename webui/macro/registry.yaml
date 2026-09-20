@@ -17,7 +17,9 @@
 #                    CONTRACT의 fx_usd(현지통화/USD)가 된다. US는 null(환율 1).
 #     codes.fred_fx  FRB H.10 일별 환율 시리즈. `DEXUS*` 로 시작하면 USD/현지통화이므로
 #                    yahoo_fx.invert 와 같은 규칙으로 역수를 취한다. 없으면 null.
-#     codes.ember    Ember API/CSV 국가명 + iso3 (공개 CSV의 유로존 Area는 'EU', ISO3 빈 값)
+#     codes.ember    Ember 국가명(name) + iso3. API는 ISO3를 `entity_code`로 받고, 유로존은
+#                    entity_code 옵션에 없어 **집계 엔티티 `entity=EU`**로만 받는다(iso3 없음).
+#                    공개 CSV도 유로존은 Area='EU'(ISO 3 code 빈 값) — 같은 'EU' 문자열을 쓴다
 #     codes.owid     OWID 에너지 CSV 국가명 + iso_code
 #   indicators: CONTRACT 2장 "지표 id 고정 목록" 38개 전부. id·순서를 registry.py의
 #     INDICATOR_IDS 와 정확히 일치시킨다(validate()가 차이를 ValueError로 보고).
@@ -128,7 +130,7 @@ countries:
       imf: U2
       yahoo_fx: { symbol: "EURUSD=X", invert: true }
       fred_fx: DEXUSEU
-      ember: { name: EU, iso3: EA20 }
+      ember: { name: EU }   # API 집계 엔티티·CSV Area 모두 'EU' (entity_code 없음)
       owid: { name: European Union (27), iso3: OWID_EU27 }
 
   - iso: DE
@@ -943,15 +945,22 @@ indicators:
     decimals: 1
     higher_is: neutral
     composite: true
-    coverage_note: "20/20 (2026-09-20 Ember 실측). 유로존은 공개 CSV의 Area='EU'(ISO3 빈 값) 행으로만 덮인다."
+    coverage_note: "20/20 (2026-09-20 EMBER_API_KEY 재실측). 유로존은 API의 집계 엔티티 entity=EU로 받고
+                    (entity_code 옵션 209개는 3자 ISO뿐이라 유로존이 없다), 그 요청이 막히면 공개 CSV의
+                    Area='EU'(ISO3 빈 값) 행으로 그 국가만 보충한다(flags=fallback_source)."
     sources:
       - { name: ember, series: "electricity-generation/{monthly|yearly}", priority: 1,
-          note: "두 경로를 ember.py가 내부에서 처리하므로 레지스트리 항목은 하나다.
-                 (1) API https://api.ember-energy.org/v1/electricity-generation/{yearly|monthly} — EMBER_API_KEY 필요,
-                 (2) 무키 공개 CSV(기본 경로): files.ember-energy.org 의
+          note: "네 경로를 ember.py가 내부에서 처리하므로 레지스트리 항목은 하나다.
+                 (1) API https://api.ember-energy.org/v1/electricity-generation/{yearly|monthly} — EMBER_API_KEY 필요.
+                 인증은 쿼리 파라미터 api_key(헤더 X-API-Key는 키가 유효해도 403 — 실측).
+                 ISO3 19개국은 entity_code로, 유로존은 집계 엔티티 entity=EU로 **요청을 나눠** 보낸다
+                 (한 요청에 같이 넣으면 AND로 걸려 0행),
+                 (2) API 응답에 없는 국가만 공개 CSV로 보충(flags=fallback_source).
+                 다른 해상도를 API가 준 국가는 보충하지 않는다(ID·SA는 Ember에 월간 시계열이 없다 — 실측),
+                 (3) 키가 없거나 API 요청이 실패하면 무키 공개 CSV 전체: files.ember-energy.org 의
                  /public-downloads/generation/outputs/release_generation_{yearly|monthly}_global.csv
-                 — 유로존이 Area='EU'로 있는 유일한 경로이고
-                 이 경로 관측치에는 flags=fallback_source. CSV까지 실패하면 owid 연간 폴백.
+                 — 유로존은 Area='EU'(ISO3 빈 값). 이 경로 관측치에는 flags=fallback_source.
+                 (4) CSV까지 실패하면 owid 연간 폴백.
                  'Net imports'는 발전이 아니라 제외하고 비중을 재계산한다.
                  payload.items=[{label(석탄/가스/원자력/수력/풍력/태양광/바이오/기타), value(%), twh}] + total_twh" }
 

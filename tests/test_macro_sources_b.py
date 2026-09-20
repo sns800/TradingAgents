@@ -9,13 +9,15 @@
 #   oecd_kei_ppi.csv       DSD_KEI@DF_KEI MEASURE=PP (USA/DEU/GBR, 2022-11~2023-02)
 #   imf_mfs_ma.csv         MFS_MA BM_MAI.XDC.M (KOR/JPN, `YYYY-Mnn` 기간 형식)
 #   ember_api_generation.json  Ember API GenerationResponse 형태
-#   ember_yearly.csv       무키 공개 CSV (KOR/USA/EU, 2024~2025)
+#   ember_yearly.csv       무키 공개 CSV (KOR + 유로존 Area='EU', 2024~2025)
 #   owid_energy_small.csv  OWID 에너지 CSV 5개국 × 3년
 #   wits_exports_kor.xml   WITS tradestats-trade 구조특화 XML (KOR 2023)
 #   catalog_items.json     종목 카탈로그 항목 계약 샘플
 #
 # 검증 포인트: 복합값 payload 구조, 연료 의존도 계산, 라벨 매핑, Ember 키 없음
-# 처리, 국가별 실패 격리, OECD의 "가장 최신 데이터플로 선택" 규칙.
+# 처리, Ember API의 유로존 집계 엔티티(`entity=EU`) 분리 요청·미제공 국가만 공개
+# CSV 보충·인증 방식(쿼리 우선) 기억, 국가별 실패 격리, OECD의 "가장 최신
+# 데이터플로 선택" 규칙.
 # ============================================================
 from __future__ import annotations
 
@@ -84,12 +86,12 @@ class StubContext:
 
     def __init__(
         self,
-        routes: dict[str, FakeResponse] | None = None,
+        routes: dict[str, Any] | None = None,
         since: date | None = None,
         dry_run: bool = True,
         extra: dict[str, Any] | None = None,
     ) -> None:
-        self.routes = routes or {}
+        self.routes: dict[str, Any] = routes or {}
         self.since = since
         self.dry_run = dry_run
         self.no_llm = True
@@ -110,7 +112,8 @@ class StubContext:
         self.requests.append((url, params, headers))
         for token, resp in self.routes.items():
             if token in url:
-                return resp
+                # 라우트 값이 호출 가능하면 요청 내용(파라미터·헤더)에 따라 분기한다.
+                return resp(url, params, headers) if callable(resp) else resp
         return FakeResponse(status_code=404, text="NoRecordsFound")
 
     def save_raw(self, source: str, name: str, data: Any) -> str | None:
@@ -180,7 +183,7 @@ EU = FakeCountry(
         "oecd": "EA20",
         "imf": "U2",
         "wb": "EMU",
-        "ember": {"name": "EU", "iso3": "EA20"},
+        "ember": {"name": "EU"},
         "owid": {"name": "European Union (27)", "iso3": "OWID_EU27"},
     },
 )
@@ -416,6 +419,20 @@ def test_ember_matches_euro_area_by_area_name() -> None:
     assert eu[0].payload["items"][0]["label"] in ember.FUEL_LABELS.values()
 
 
+def ember_api_doc(entities: list[tuple[str, str | None]]) -> str:
+    """`ember_api_generation.json`(KOR 1개국)의 행을 엔티티별로 복제한 API 응답.
+
+    유로존 집계 엔티티는 실제 응답처럼 `entity_code`가 null이다(실측).
+    """
+    base = json.loads(fixture("ember_api_generation.json"))
+    rows = [
+        {**row, "entity": name, "entity_code": code}
+        for name, code in entities
+        for row in base["data"]
+    ]
+    return json.dumps({"stats": {"rows": len(rows)}, "data": rows}, ensure_ascii=False)
+
+
 def test_ember_api_path_parses_generation_response(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
     routes = {
@@ -430,13 +447,164 @@ def test_ember_api_path_parses_generation_response(monkeypatch: pytest.MonkeyPat
     api_calls = [(u, p, h) for u, p, h in ctx.requests if "api.ember-energy.org" in u]
     assert api_calls
     _, params, headers = api_calls[0]
-    assert headers == {"X-API-Key": "test-key"}
+    # OpenAPI가 공식으로 선언한 쿼리 파라미터를 첫 요청부터 쓴다(헤더는 403 실측).
+    assert headers is None
+    assert params["api_key"] == "test-key"
     assert params["entity_code"] == "KOR,USA"
     assert params["is_aggregate_series"] == "false"
+    assert ctx.extra[ember.AUTH_EXTRA_KEY] == ember.AUTH_QUERY
 
     kr = next(o for o in obs if o.iso == "KR" and o.freq == "Y" and not o.flags)
     assert kr.period == "2025"
     assert kr.payload["items"][0]["label"] == "석탄"
+
+
+def test_ember_api_requests_euro_area_by_entity_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """유로존은 entity_code 옵션에 없고 집계 엔티티 `entity=EU`로만 온다(실측).
+
+    entity와 entity_code를 한 요청에 같이 넣으면 AND로 걸려 0행이므로 요청이
+    나뉘어야 한다.
+    """
+    monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
+
+    def api_route(url: str, params: dict[str, Any] | None, headers: Any) -> FakeResponse:
+        params = params or {}
+        assert not (params.get("entity") and params.get("entity_code")), (
+            "entity와 entity_code를 같은 요청에 넣으면 API가 0행을 준다"
+        )
+        if params.get("entity"):
+            return FakeResponse(text=ember_api_doc([("EU", None)]))
+        return FakeResponse(text=ember_api_doc([("South Korea", "KOR")]))
+
+    ctx = StubContext(
+        {"electricity-generation/yearly": api_route, **EMBER_CSV_ROUTES},
+        since=date(2025, 1, 1),
+    )
+    obs = ember.collect([KR, EU], ELEC_MIX, ctx)
+
+    api_params = [
+        p for u, p, _ in ctx.requests if u.endswith("electricity-generation/yearly")
+    ]
+    assert [p.get("entity_code") for p in api_params if p.get("entity_code")] == ["KOR"]
+    assert [p.get("entity") for p in api_params if p.get("entity")] == ["EU"]
+    # API가 유로존을 주면 보충은 필요 없다 → flags 없음.
+    eu = next(o for o in obs if o.iso == "EU" and o.freq == "Y")
+    assert eu.flags == [] and eu.method == ember.METHOD_API
+    assert "API 미제공" not in ctx.log_text()
+    assert not any("release_generation_yearly" in u for u, _, _ in ctx.requests)
+
+
+def test_ember_supplements_api_missing_country_from_public_csv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API가 주지 않은 국가(유로존)만 공개 CSV로 보충한다 — 나머지는 flags 없음."""
+    monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
+    api_doc = ember_api_doc([("South Korea", "KOR"), ("United States", "USA")])
+
+    def api_route(url: str, params: dict[str, Any] | None, headers: Any) -> FakeResponse:
+        if (params or {}).get("entity"):  # 집계 엔티티를 못 주는 상황
+            return FakeResponse(status_code=500, text="no aggregate entity")
+        return FakeResponse(text=api_doc)
+
+    ctx = StubContext(
+        {"electricity-generation/yearly": api_route, **EMBER_CSV_ROUTES},
+        since=date(2025, 1, 1),
+    )
+    obs = ember.collect([KR, US, EU], ELEC_MIX, ctx)
+
+    assert {o.iso for o in obs} == {"KR", "US", "EU"}
+    assert "API 미제공 1개국 → 공개 CSV 보충: EU" in ctx.log_text()
+
+    eu = [o for o in obs if o.iso == "EU"]
+    assert eu and all(o.flags == ["fallback_source"] for o in eu)
+    assert all("API 미제공 국가 보충" in o.method for o in eu)
+    assert eu[0].source == "ember" and eu[0].payload["items"]
+    # 보충 대상이 아닌 국가는 API 관측치 그대로(플래그 없음)
+    assert all(o.flags == [] for o in obs if o.iso in {"KR", "US"})
+    # 공개 CSV는 해상도당 1회만 내려받는다(ctx.extra 캐시)
+    csv_calls = [u for u, _, _ in ctx.requests if "release_generation_yearly" in u]
+    assert len(csv_calls) == 1
+
+
+def test_ember_skips_csv_supplement_when_api_serves_other_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ember에 그 해상도 시계열이 없는 국가(ID·SA 월간 — 실측)는 보충하지 않는다.
+
+    API가 연간을 줬다면 월간이 비는 건 원천이 없기 때문이라 CSV에도 없다 →
+    28MB 월간 CSV를 매 실행 헛되게 내려받지 않는다.
+    """
+    monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
+    empty = json.dumps({"stats": {"rows": 0}, "data": []})
+    ctx = StubContext(
+        {
+            "electricity-generation/yearly": FakeResponse(
+                text=ember_api_doc([("South Korea", "KOR")])
+            ),
+            "electricity-generation/monthly": FakeResponse(text=empty),
+            **EMBER_CSV_ROUTES,
+        },
+        since=date(2025, 1, 1),
+    )
+    obs = ember.collect([KR], ELEC_MIX, ctx)
+
+    assert {o.freq for o in obs} == {"Y"}
+    assert "CSV 보충 생략: KR" in ctx.log_text()
+    assert "API 미제공" not in ctx.log_text()
+    assert not any("release_generation" in u for u, _, _ in ctx.requests)
+
+
+def test_ember_api_switches_auth_mode_once_and_remembers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """헤더 거부(403)를 겪으면 쿼리로 전환하고 그 방식을 기억해 재시도를 없앤다."""
+    monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
+    doc = ember_api_doc([("South Korea", "KOR")])
+
+    def api_route(url: str, params: dict[str, Any] | None, headers: Any) -> FakeResponse:
+        if headers and headers.get("X-API-Key"):
+            return FakeResponse(status_code=403, text='{"detail":"No API key set"}')
+        return FakeResponse(text=doc)
+
+    ctx = StubContext(
+        {
+            "electricity-generation/yearly": api_route,
+            "electricity-generation/monthly": api_route,
+            **EMBER_CSV_ROUTES,
+        },
+        since=date(2025, 1, 1),
+        extra={ember.AUTH_EXTRA_KEY: ember.AUTH_HEADER},  # 지난 요청이 헤더였다고 가정
+    )
+    ember.collect([KR], ELEC_MIX, ctx)
+
+    api_calls = [(p, h) for u, p, h in ctx.requests if "api.ember-energy.org" in u]
+    assert api_calls[0][1] == {"X-API-Key": "test-key"}  # 기억된 방식 → 403
+    assert api_calls[1][0]["api_key"] == "test-key"  # 1회 전환
+    assert ctx.extra[ember.AUTH_EXTRA_KEY] == ember.AUTH_QUERY
+    # 기억 이후(월간) 요청은 헤더를 다시 시도하지 않는다 → 해상도당 1회
+    assert [h for _, h in api_calls[2:]] == [None]
+    assert len(api_calls) == 3
+
+
+def test_ember_full_csv_fallback_when_api_request_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """API 요청 자체가 실패하면 예전처럼 전 국가를 공개 CSV에서 받는다."""
+    monkeypatch.setenv(ember.API_KEY_ENV, "test-key")
+    routes = {
+        "electricity-generation": FakeResponse(status_code=500, text="boom"),
+        **EMBER_CSV_ROUTES,
+    }
+    ctx = StubContext(routes, since=date(2025, 1, 1))
+    obs = ember.collect([KR, EU], ELEC_MIX, ctx)
+
+    assert "공개 CSV로 폴백" in ctx.log_text()
+    assert {o.iso for o in obs} == {"KR", "EU"}
+    assert all(o.flags == ["fallback_source"] for o in obs)
+    assert all(o.method == ember.METHOD_CSV for o in obs)
+    assert "API 미제공" not in ctx.log_text()
+    # 5xx는 인증 문제가 아니므로 인증 방식 재시도를 하지 않는다(해상도당 1회).
+    assert len([u for u, _, _ in ctx.requests if "api.ember-energy.org" in u]) == 2
 
 
 def test_ember_label_mapping_and_exclusions() -> None:

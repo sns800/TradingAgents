@@ -5,7 +5,7 @@
 # (`value=None`, `payload={"items":[...], "total_twh":...}`)으로 저장합니다.
 # CC BY 4.0. 연간(Y)과 월간(M)을 모두 수집합니다.
 #
-# [3단 경로 — 모두 실측] (2026-09-20)
+# [4단 경로 — 모두 실측] (2026-09-20, EMBER_API_KEY 발급 후 재실측)
 #  1) API (EMBER_API_KEY 있을 때)
 #     GET https://api.ember-energy.org/v1/electricity-generation/{yearly|monthly}
 #     파라미터(문서 https://api.ember-energy.org/v1/openapi.json 로 확정):
@@ -16,12 +16,23 @@
 #        "data": [{"entity","entity_code","is_aggregate_entity","date",
 #                  "series","is_aggregate_series","generation_twh",
 #                  "share_of_generation_pct"}, ...]}
-#     ※ 인증: OpenAPI의 securitySchemes는 비어 있고 `api_key`가 **쿼리
-#       파라미터**로 선언돼 있습니다. 제안서가 가리킨 헤더 `X-API-Key`를 먼저
-#       쓰고, 401/403이면 쿼리 `api_key`로 1회 재시도합니다(키가 없어 실제
-#       인증 성공은 확인하지 못함 — 보고서의 "미확정" 항목).
-#     키 없이 호출하면 `403 {"detail":"No API key set"}` (실측).
-#  2) 키가 없을 때의 **무키 공개 CSV** (실측 확인 — 이 경로가 기본)
+#     ※ 인증(실측): OpenAPI가 `api_key`를 **쿼리 파라미터**로 선언하고, 헤더
+#       `X-API-Key`만 보내면 키가 유효해도 403 `{"detail":"No API key set"}`이다
+#       → 쿼리를 **먼저** 쓰고, 거부(401/403)를 만나면 다른 방식으로 1회만 넘어간
+#       뒤 통한 방식을 `ctx.extra["ember_api_auth"]`에 기억해 이후 요청에서 재시도
+#       낭비를 없앤다. 키 없이 호출하면 `403 {"detail":"No API key set"}`.
+#     ※ 유로존(실측): `/v1/options/electricity-generation/yearly/entity_code`가
+#       주는 209개 코드는 3자 ISO뿐이라 유로존 코드가 없고, 같은 경로의
+#       `.../entity` 224개 옵션에 집계 엔티티 **`EU`**(entity_code=null,
+#       is_aggregate_entity=true)가 있다. 그런데 `entity`와 `entity_code`를 한
+#       요청에 같이 넣으면 AND로 걸려 0행이 온다 → ISO3 19개국은 `entity_code`
+#       요청, 유로존은 `entity=EU` 요청으로 **나눠서** 보낸다.
+#  2) API 응답에 없는 국가만 **공개 CSV로 보충** (flags: fallback_source)
+#     집계 엔티티 요청이 실패하거나 어떤 국가가 응답에 없으면 그 국가만 아래 공개
+#     CSV에서 채운다. 로그: `[ember] API 미제공 N개국 → 공개 CSV 보충: EU`.
+#     단 **다른 해상도를 API가 준 국가는 제외**한다 — Ember에 ID·SA 월간 시계열이
+#     아예 없어(실측) CSV에도 없고, 28MB 월간 CSV를 매 실행 헛되게 받게 된다.
+#  3) 키가 없거나 API 요청이 실패하면 **무키 공개 CSV** 전체 경로 (실측 확인)
 #     연간 https://files.ember-energy.org/public-downloads/generation/outputs/
 #           release_generation_yearly_global.csv   (HTTP 200, 16,079,748 bytes)
 #     월간 .../release_generation_monthly_global.csv                (HTTP 200)
@@ -30,9 +41,9 @@
 #         Share of generation (%), ...
 #     전원 코드 10종 실측: Bioenergy, Coal, Gas, Hydro, Net imports, Nuclear,
 #         Other fossil, Other renewables, Solar, Wind
-#     G20 19개국 전부 + **유로존은 Area="EU"**(ISO 3 code 비어 있음)로 존재 →
-#     유로존까지 덮는 유일한 경로입니다. flags에 `fallback_source`를 붙입니다.
-#  3) CSV까지 실패하면 owid.elec_mix_from_owid(연간만, flags fallback_source)
+#     G20 19개국 전부 + **유로존은 Area="EU"**(ISO 3 code 비어 있음)로 존재.
+#     이 경로(2·3) 관측치에는 flags에 `fallback_source`를 붙입니다.
+#  4) CSV까지 실패하면 owid.elec_mix_from_owid(연간만, flags fallback_source)
 #
 # [Net imports 제외] Ember의 "Net imports"는 발전이 아니라 수입(음수도 가능)
 # 이므로 발전 믹스 items에서 뺍니다. 남은 전원 비중 합은 KOR 2025에서 100.0%.
@@ -66,6 +77,12 @@ CADENCE = "monthly"
 
 API_KEY_ENV = "EMBER_API_KEY"
 API_BASE = "https://api.ember-energy.org/v1/electricity-generation"
+
+# 인증 방식. OpenAPI가 `api_key` 쿼리를 공식으로 선언하고 헤더 `X-API-Key`는
+# 403으로 거부되므로(실측) 쿼리가 먼저다. 통한 방식은 ctx.extra에 기억한다.
+AUTH_QUERY = "query"
+AUTH_HEADER = "header"
+AUTH_EXTRA_KEY = "ember_api_auth"
 PUBLIC_CSV = {
     "yearly": (
         "https://files.ember-energy.org/public-downloads/generation/outputs/"
@@ -107,6 +124,11 @@ METHOD_CSV = (
 METHOD_OWID = (
     "Ember 접근 실패로 OWID 에너지 CSV의 *_share_elec 열에서 발전 믹스를 대체 구성 "
     "(biofuel_share_elec는 other_renewables_share_elec에 포함되어 제외)"
+)
+
+METHOD_CSV_SUPPLEMENT = (
+    "Ember 공개 CSV(API 미제공 국가 보충) — API가 유로존 같은 집계 엔티티를 응답에 "
+    "담지 않아 해당 국가만 무키 공개 연간/월간 CSV에서 채움. Net imports(순수입)는 제외"
 )
 
 SUPPORTED: tuple[str, ...] = ("elec_mix",)
@@ -162,8 +184,9 @@ def collect(
 ) -> list[Observation]:
     """Ember 발전 믹스를 수집한다 (CONTRACT 7장).
 
-    EMBER_API_KEY가 있으면 API를, 없으면 무키 공개 CSV를 쓰고, 둘 다 실패하면
-    OWID로 폴백한다. 연간(Y)과 월간(M)을 모두 만든다.
+    EMBER_API_KEY가 있으면 API를 쓰고 API가 응답에 담지 않은 국가(유로존 등)만
+    공개 CSV로 보충하며, 키가 없거나 API 요청이 실패하면 무키 공개 CSV 전체
+    경로를, 그마저 실패하면 OWID로 폴백한다. 연간(Y)과 월간(M)을 모두 만든다.
     """
     if not _is_wanted(indicators, "elec_mix"):
         return []
@@ -181,9 +204,12 @@ def collect(
         )
 
     obs: list[Observation] = []
+    # API가 한 해상도라도 준 국가는 다른 해상도가 비어도 원천 자체가 없는 것이므로
+    # (예: Ember는 ID·SA 월간 시계열이 없다 — 실측) CSV 보충 대상에서 뺀다.
+    api_served: set[str] = set()
     for resolution in ("yearly", "monthly"):
         try:
-            got = _collect_resolution(ctx, targets, resolution, key)
+            got = _collect_resolution(ctx, targets, resolution, key, api_served)
         except Exception as exc:  # noqa: BLE001 - 해상도 단위 실패 격리
             ctx.log(f"[{SOURCE_NAME}] {resolution} 수집 실패: {exc}")
             got = []
@@ -221,13 +247,22 @@ def _collect_resolution(
     targets: dict[str, str],
     resolution: str,
     key: str,
+    api_served: set[str],
 ) -> list[Observation]:
-    """연간/월간 한 해상도를 수집한다 (API 우선, 실패 시 공개 CSV)."""
+    """연간/월간 한 해상도를 수집한다.
+
+    키가 있으면 API를 쓰고, API가 응답에 담지 않은 국가(유로존 등)만 공개 CSV로
+    보충한다. API 요청 자체가 실패하면 기존처럼 공개 CSV 전체 경로로 내려간다.
+    """
     if key:
         try:
-            return _collect_api(ctx, targets, resolution, key)
+            obs = _collect_api(ctx, targets, resolution, key)
         except Exception as exc:  # noqa: BLE001 - API 실패는 CSV로 내려간다
             ctx.log(f"[{SOURCE_NAME}] API {resolution} 실패({exc}) — 공개 CSV로 폴백")
+        else:
+            supplement = _csv_supplement(ctx, targets, resolution, obs, api_served)
+            api_served.update(ob.iso for ob in obs)
+            return obs + supplement
     return _collect_public_csv(ctx, targets, resolution)
 
 
@@ -237,24 +272,116 @@ def _collect_api(
     resolution: str,
     key: str,
 ) -> list[Observation]:
-    """Ember API 1회 호출 → Observation 목록."""
-    iso3s = sorted({c for c in targets if len(c) == 3 and c.isupper()})
-    params: dict[str, Any] = {
-        "entity_code": ",".join(iso3s),
+    """Ember API → Observation 목록.
+
+    `entity`와 `entity_code`를 한 요청에 같이 넣으면 AND로 걸려 0행이 오므로
+    (2026-09-20 실측) ISO3 국가는 `entity_code`로 한 번, 유로존처럼 ISO3 코드가
+    없는 집계 엔티티는 `entity`로 한 번 더 요청해 합친다. 집계 엔티티 요청이
+    실패해도 ISO3 결과는 살리고, 빠진 국가는 호출자가 공개 CSV로 보충한다.
+    """
+    iso3s, names = _api_entities(targets)
+    url = f"{API_BASE}/{resolution}"
+    base: dict[str, Any] = {
         "is_aggregate_series": "false",
         "start_date": _api_start(ctx, resolution),
     }
-    url = f"{API_BASE}/{resolution}"
-    resp = ctx.get(url, params=params, headers={"X-API-Key": key})
-    if resp.status_code in (401, 403):
-        # OpenAPI는 api_key를 쿼리 파라미터로 선언한다 → 헤더가 안 먹으면 1회 재시도.
-        ctx.log(f"[{SOURCE_NAME}] X-API-Key 헤더 거부({resp.status_code}) — api_key 쿼리로 재시도")
-        resp = ctx.get(url, params={**params, "api_key": key})
+    rows: list[dict[str, Any]] = []
+    served = False
+    if iso3s:
+        # 이 요청이 실패하면 예외를 올려 공개 CSV 전체 폴백으로 내려간다.
+        params = {**base, "entity_code": ",".join(iso3s)}
+        doc = _api_fetch(ctx, url, params, key, resolution, "code")
+        rows.extend(doc.get("data") or [])
+        served = True
+    if names:
+        try:
+            params = {**base, "entity": ",".join(names)}
+            doc = _api_fetch(ctx, url, params, key, resolution, "entity")
+        except Exception as exc:  # noqa: BLE001 - 집계 엔티티 실패는 CSV 보충에 맡긴다
+            ctx.log(
+                f"[{SOURCE_NAME}] API {resolution} 집계 엔티티({','.join(names)}) 실패({exc})"
+            )
+        else:
+            rows.extend(doc.get("data") or [])
+            served = True
+    if not served:
+        raise RuntimeError("API 요청이 모두 실패")
+    return _obs_from_api({"data": rows}, targets, resolution, url)
+
+
+def _api_entities(targets: dict[str, str]) -> tuple[list[str], list[str]]:
+    """대상 코드를 API 파라미터로 나눈다 → (`entity_code`용 ISO3, `entity`용 이름).
+
+    국가마다 registry `codes.ember`가 이름·iso3를 함께 주므로, 3자 ISO 코드가
+    있으면 그쪽을 쓰고(중복 요청 방지) 없으면 이름으로 요청한다. 유로존은
+    entity_code 옵션에 없고 집계 엔티티 이름 `EU`만 있다(실측).
+    """
+    by_iso: dict[str, list[str]] = {}
+    for code, iso in targets.items():
+        by_iso.setdefault(iso, []).append(code)
+    iso3s: set[str] = set()
+    names: set[str] = set()
+    for codes in by_iso.values():
+        got = sorted(c for c in codes if _is_api_iso3(c))
+        if got:
+            iso3s.add(got[0])
+            continue
+        names.update(c for c in codes if c)
+    return sorted(iso3s), sorted(names)
+
+
+def _is_api_iso3(code: str) -> bool:
+    """API `entity_code`로 쓸 수 있는 3자 ISO 코드인지 (EA20 같은 값은 제외)."""
+    return len(code) == 3 and code.isalpha() and code.isupper()
+
+
+def _api_fetch(
+    ctx: CollectContext,
+    url: str,
+    params: dict[str, Any],
+    key: str,
+    resolution: str,
+    tag: str,
+) -> dict[str, Any]:
+    """API GET 1회 + 원본 보존. HTTP 4xx/5xx는 예외로 올린다."""
+    resp = _api_get(ctx, url, params, key)
     if resp.status_code >= 400:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:120]}")
-    doc = resp.json()
-    ctx.save_raw(SOURCE_NAME, f"api_generation_{resolution}", resp.text)
-    return _obs_from_api(doc, targets, resolution, url)
+    ctx.save_raw(SOURCE_NAME, f"api_generation_{resolution}_{tag}", resp.text)
+    return resp.json() or {}
+
+
+def _api_get(
+    ctx: CollectContext,
+    url: str,
+    params: dict[str, Any],
+    key: str,
+) -> Any:
+    """인증 방식을 기억하며 API를 호출한다 (쿼리 `api_key` 우선).
+
+    OpenAPI가 쿼리 파라미터를 공식으로 선언하고 헤더 `X-API-Key`는 403으로
+    거부되므로(실측) 쿼리를 먼저 보낸다. 거부(401/403)를 만나면 다른 방식으로
+    1회 넘어가고, 통한 방식을 `ctx.extra`에 기억해 같은 실행의 다음 요청부터는
+    한 번만 보낸다(재시도 낭비 제거).
+    """
+    remembered = ctx.extra.get(AUTH_EXTRA_KEY)
+    modes = [remembered] if remembered in (AUTH_QUERY, AUTH_HEADER) else []
+    modes += [m for m in (AUTH_QUERY, AUTH_HEADER) if m not in modes]
+    resp = None
+    for idx, mode in enumerate(modes):
+        if mode == AUTH_QUERY:
+            resp = ctx.get(url, params={**params, "api_key": key})
+        else:
+            resp = ctx.get(url, params=dict(params), headers={"X-API-Key": key})
+        if resp.status_code not in (401, 403):
+            ctx.extra[AUTH_EXTRA_KEY] = mode
+            return resp
+        if idx + 1 < len(modes):
+            ctx.log(
+                f"[{SOURCE_NAME}] {mode} 인증 거부({resp.status_code}) — "
+                f"{modes[idx + 1]} 방식으로 1회 재시도"
+            )
+    return resp
 
 
 def _obs_from_api(
@@ -284,12 +411,59 @@ def _obs_from_api(
     return _build_obs(grouped, resolution, METHOD_API, url, flags=[])
 
 
+def _csv_supplement(
+    ctx: CollectContext,
+    targets: dict[str, str],
+    resolution: str,
+    obs: list[Observation],
+    api_served: set[str],
+) -> list[Observation]:
+    """API 응답에 없는 국가만 공개 CSV에서 보충한다 (flags: fallback_source).
+
+    API는 유로존 집계 엔티티를 `entity_code`로 주지 않으므로, 집계 엔티티 요청이
+    막히면 유로존 발전 믹스가 영구히 멈춘다. 그 안전망이다.
+
+    `api_served`(앞선 해상도에서 API가 값을 준 국가)는 제외한다 — Ember에 그
+    해상도의 시계열이 아예 없는 경우(ID·SA 월간)라 CSV에도 없고, 28MB 월간 CSV를
+    매번 헛되게 내려받게 된다(실측).
+    """
+    absent = set(targets.values()) - {ob.iso for ob in obs}
+    skipped = sorted(absent & api_served)
+    if skipped:
+        ctx.log(
+            f"[{SOURCE_NAME}] {resolution} 원천 없음(다른 해상도는 API가 제공) — "
+            f"CSV 보충 생략: {','.join(skipped)}"
+        )
+    missing = sorted(absent - api_served)
+    if not missing:
+        return []
+    ctx.log(
+        f"[{SOURCE_NAME}] API 미제공 {len(missing)}개국 → 공개 CSV 보충: "
+        f"{','.join(missing)} ({resolution})"
+    )
+    wanted = set(missing)
+    subset = {code: iso for code, iso in targets.items() if iso in wanted}
+    try:
+        return _collect_public_csv(
+            ctx, subset, resolution, method=METHOD_CSV_SUPPLEMENT, raw_tag="supplement"
+        )
+    except Exception as exc:  # noqa: BLE001 - 보충 실패로 API 결과를 버리지 않는다
+        ctx.log(f"[{SOURCE_NAME}] 공개 CSV 보충 실패({resolution}): {exc}")
+        return []
+
+
 def _collect_public_csv(
     ctx: CollectContext,
     targets: dict[str, str],
     resolution: str,
+    method: str = METHOD_CSV,
+    raw_tag: str = "g20",
 ) -> list[Observation]:
-    """무키 공개 CSV 1회 다운로드 → Observation 목록 (flags: fallback_source)."""
+    """무키 공개 CSV 1회 다운로드 → Observation 목록 (flags: fallback_source).
+
+    CSV는 해상도당 한 번만 내려받아 `ctx.extra`에 캐시한다 → 전체 폴백과 국가별
+    보충이 같은 실행에서 겹쳐도 다운로드는 해상도당 1회다.
+    """
     url = PUBLIC_CSV[resolution]
     cache_key = f"ember_csv_{resolution}"
     df = ctx.extra.get(cache_key)
@@ -323,8 +497,8 @@ def _collect_public_csv(
                 safe_float(row.get("Generation (TWh)")),
             )
         )
-    ctx.save_raw(SOURCE_NAME, f"public_csv_{resolution}_g20", sub.to_csv(index=False))
-    return _build_obs(grouped, resolution, METHOD_CSV, url, flags=["fallback_source"])
+    ctx.save_raw(SOURCE_NAME, f"public_csv_{resolution}_{raw_tag}", sub.to_csv(index=False))
+    return _build_obs(grouped, resolution, method, url, flags=["fallback_source"])
 
 
 def _build_obs(

@@ -20,7 +20,7 @@
 | US | USA | 미국 | USD | G20,G7 | no | 환율 = 1 (기준통화) |
 | JP | JPN | 일본 | JPY | G20,G7,ASIA | no | |
 | CN | CHN | 중국 | CNY | G20,BRICS,ASIA | no | 정당 경쟁 없음 |
-| EU | EA20 | 유로존 | EUR | G20,EU | — | BIS `XM`, WB `EMU`(응답 매칭은 `countryiso3code=EMU`), IMF `U2`(MFS_MA 미수록), OECD `EA20` — 단 `DSD_G20_PRICES@DF_G20_PRICES`에서는 **`EA`**, Ember 공개 CSV는 Area `EU`, OWID는 유로존 행 없음 |
+| EU | EA20 | 유로존 | EUR | G20,EU | — | BIS `XM`, WB `EMU`(응답 매칭은 `countryiso3code=EMU`), IMF `U2`(MFS_MA 미수록), OECD `EA20` — 단 `DSD_G20_PRICES@DF_G20_PRICES`에서는 **`EA`**, Ember는 API 집계 엔티티 `entity=EU`(`entity_code` 옵션엔 없음)·공개 CSV Area `EU`, OWID는 유로존 행 없음 |
 | DE | DEU | 독일 | EUR | G20,G7,EU | yes | 금리·통화량·환율은 EU 참조 |
 | FR | FRA | 프랑스 | EUR | G20,G7,EU | yes | 〃 |
 | IT | ITA | 이탈리아 | EUR | G20,G7,EU | yes | 〃 |
@@ -258,7 +258,9 @@ macro/export/                                      (Phase 3, 비워둠)
 - `cpi_index`/`cpi_yoy`: OECD(`DF_G20_PRICES` → `DF_PRICES_C2018_ALL` → `DF_PRICES_ALL`, **국가별로 하나 고정**) →
   World Bank `FP.CPI.TOTL.ZG` 연간. RU는 연간만(월별 원천이 2022-03에서 정지).
 - `ppi_index`/`ppi_yoy`: FRED(US, 최신) → OECD KEI(**2023-02까지만**). KR·JP·CN·IN은 어느 쪽에도 없다.
-- `elec_mix`: Ember API(키 필요) → Ember 공개 CSV(무키, `fallback_source`, 유로존 Area `EU`) → OWID 연간.
+- `elec_mix`: Ember API(키 필요 · ISO3 19개국은 `entity_code`, 유로존은 집계 엔티티 `entity=EU`로 **요청 분리**
+  — 한 요청에 섞으면 0행) → **API 응답에 없는 국가만** Ember 공개 CSV로 보충(`fallback_source`)
+  → 키가 없거나 API 요청 실패면 공개 CSV 전체(무키, `fallback_source`, 유로존 Area `EU`) → OWID 연간.
 - `top_companies`: 카탈로그(KR/JP/US/CN) → yahoo(14개국). RU·EU는 없음.
 - 어떤 소스도 값을 주지 못하는 (지표, 국가) — 예: `policy_rate` **AR** — 은 `LATEST#<indicator>`에 항목을 만들지
   않는다. 프론트는 그 셀을 '—'로 표시한다.
